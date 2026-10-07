@@ -58,7 +58,7 @@ async function locate(lat, lng, label) {
   state.lastCoords = { lat, lng };
   const r = await api('/locate', { method: 'POST', body: { lat, lng, fulfilment: 'delivery' } });
   if (r.outlet) {
-    setLocation({ fulfilment: 'delivery', lat, lng, label, outlet: r.outlet, distanceKm: r.distanceKm, etaMinutes: r.etaMinutes });
+    setLocation({ fulfilment: 'delivery', lat, lng, label, outlet: r.outlet, distanceKm: r.distanceKm, etaMinutes: r.etaMinutes, deliveryCharge: r.deliveryCharge });
     closeModal('locModal');
     return;
   }
@@ -134,22 +134,33 @@ async function setLocation(loc) {
   }
 }
 
+// Delivery rate card from the server, for showing charges before a location is set.
+let siteConfig = null;
+function rateCardText() {
+  const d = siteConfig?.delivery;
+  if (!d) return '';
+  return `Delivery by ${d.partner}: ${rupees(d.baseFee)} for the first ${d.baseKm} km, then ${rupees(d.perKmFee)} per km.`;
+}
+
 function renderHeader() {
   const l = state.location;
   if (!l) {
     $('locTitle').textContent = 'Set location';
     $('locSub').textContent = 'or add dishes first';
     $('banner').classList.remove('hidden', 'warn');
-    $('banner').textContent = "👋 Add what you'd like. We'll ask where to deliver at checkout and send it from your nearest Raju Chinese.";
+    $('banner').textContent = `👋 Add what you'd like. We'll ask where to deliver at checkout and send it from your nearest Raju Chinese. ${rateCardText()}`;
     return;
   }
   const short = l.outlet.name.replace('Raju Chinese - ', '');
   $('locTitle').textContent = l.fulfilment === 'delivery' ? `Deliver to: ${l.label}` : `Pickup: ${short}`;
-  $('locSub').textContent = l.fulfilment === 'delivery' ? `from ${short} · ${l.distanceKm} km` : 'tap to change';
+  $('locSub').textContent = l.fulfilment === 'delivery'
+    ? `from ${short} · ${l.distanceKm} km${l.deliveryCharge != null ? ` · delivery ${rupees(l.deliveryCharge)}` : ''}`
+    : 'tap to change';
   const b = $('banner');
   b.classList.remove('hidden', 'warn');
   b.innerHTML = l.fulfilment === 'delivery'
-    ? `🛵 Delivering from <b>${esc(l.outlet.name)}</b> in about <b>${l.etaMinutes} min</b>.`
+    ? `🛵 Delivering from <b>${esc(l.outlet.name)}</b> (${l.distanceKm} km) in about <b>${l.etaMinutes} min</b>.`
+      + (l.deliveryCharge != null ? ` Delivery by ${esc(siteConfig?.delivery?.partner || 'Shadowfax')}: <b>${rupees(l.deliveryCharge)}</b>.` : '')
     : `🏃 Pick up from <b>${esc(l.outlet.name)}</b>, ${esc(l.outlet.address)}. Ready in about <b>20 min</b>.`;
 }
 
@@ -260,9 +271,9 @@ async function renderCart() {
       <div><span>Item total</span><span>${rupees(q.subtotal)}</span></div>
       <div><span>Packing</span><span>${rupees(q.packing)}</span></div>
       <div><span>GST (5%)</span><span>${rupees(q.gst)}</span></div>
-      ${l.fulfilment === 'delivery' ? `<div><span>Delivery fee</span><span>${q.deliveryFee ? rupees(q.deliveryFee) : 'FREE'}</span></div>` : ''}
+      ${l.fulfilment === 'delivery' ? `<div><span>Delivery by ${esc(q.deliveryPartner)} (${q.deliveryKm} km)</span><span>${q.deliveryFee ? rupees(q.deliveryFee) : `FREE <s class="muted">${rupees(q.deliveryCharge)}</s>`}</span></div>` : ''}
       <div class="total"><span>To pay</span><span>${rupees(q.total)}</span></div>
-      ${l.fulfilment === 'delivery' && q.deliveryFee && q.subtotal < q.freeDeliveryAbove ? `<p class="small muted">Add ${rupees(q.freeDeliveryAbove - q.subtotal)} more for free delivery.</p>` : ''}
+      ${l.fulfilment === 'delivery' && q.deliveryFee && q.freeDeliveryAbove > 0 && q.subtotal < q.freeDeliveryAbove ? `<p class="small muted">Add ${rupees(q.freeDeliveryAbove - q.subtotal)} more for free delivery.</p>` : ''}
       ${short ? `<p class="error">Minimum order for delivery is ${rupees(q.minDeliveryOrder)}.</p>` : ''}`;
     $('placeBtn').disabled = short;
     showCheckoutError('');
@@ -338,13 +349,14 @@ $('checkout').addEventListener('submit', async (e) => {
 
 (async function init() {
   loadLocalities().catch(() => {});
+  try { siteConfig = await api('/config'); } catch { /* charges still show on the bill */ }
   if (state.location) {
     renderHeader();
     // Re-check assignment: outlet may have closed or been changed since last visit.
     if (state.location.fulfilment === 'delivery') {
       api('/locate', { method: 'POST', body: { lat: state.location.lat, lng: state.location.lng } })
         .then((r) => {
-          if (r.outlet) setLocation({ ...state.location, outlet: r.outlet, distanceKm: r.distanceKm, etaMinutes: r.etaMinutes });
+          if (r.outlet) setLocation({ ...state.location, outlet: r.outlet, distanceKm: r.distanceKm, etaMinutes: r.etaMinutes, deliveryCharge: r.deliveryCharge });
           else { $('banner').classList.add('warn'); $('banner').textContent = '⚠️ No outlet can deliver to your saved location right now. Tap the location above to change it or switch to pickup.'; }
         }).catch(() => {});
     }

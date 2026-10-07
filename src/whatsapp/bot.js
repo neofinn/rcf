@@ -19,7 +19,7 @@
 const config = require('../config');
 const { assignOutlet, isOpen, etaMinutes } = require('../geo');
 const { rupees } = require('../format');
-const { ValidationError } = require('../orders');
+const { ValidationError, deliveryFee, deliveryCharge } = require('../orders');
 const { parseOrderText } = require('./nlu');
 const { qrSvg } = require('../payments');
 
@@ -126,10 +126,21 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     return { lines, body: `${body}${notes}`, subtotal };
   }
 
+  // The delivery charge as the customer should see it with their cart.
+  function deliveryLine(s, subtotal) {
+    if (s.fulfilment === 'pickup') return '🏃 Pickup: no delivery charge';
+    const d = config.delivery;
+    if (!s.outletId || s.distanceKm == null) {
+      return `🛵 Delivery by ${d.partner}: ${rupees(d.baseFee)} for the first ${d.baseKm} km + ${rupees(d.perKmFee)}/km, worked out at checkout from your location`;
+    }
+    const fee = deliveryFee(subtotal, s.distanceKm);
+    return `🛵 Delivery by ${d.partner} (${s.distanceKm} km): ${fee ? rupees(fee) : 'FREE'}`;
+  }
+
   function cartView(s, heading = '🛒 *Your cart*') {
     const { lines, body, subtotal } = cartSummary(s);
     if (!lines.length) return [buttons('Your cart is empty 🛒 Type your order or open the menu.', [btn('act:more', '📋 Menu')])];
-    return longButtons(`${heading}\n${body}\n\nItem total: *${rupees(subtotal)}*`, [
+    return longButtons(`${heading}\n${body}\n\nItem total: *${rupees(subtotal)}*\n${deliveryLine(s, subtotal)}`, [
       btn('act:checkout', '✅ Checkout'),
       btn('act:more', '➕ Add more'),
       btn('act:clear', '🗑️ Clear cart'),
@@ -144,7 +155,7 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
       `Item total: ${rupees(qte.subtotal)}`,
       `Packing: ${rupees(qte.packing)}`,
       `GST (5%): ${rupees(qte.gst)}`,
-      ...(s.fulfilment === 'delivery' ? [`Delivery: ${qte.deliveryFee ? rupees(qte.deliveryFee) : 'FREE'}`] : []),
+      ...(s.fulfilment === 'delivery' ? [`Delivery by ${qte.deliveryPartner} (${qte.deliveryKm} km): ${qte.deliveryFee ? rupees(qte.deliveryFee) : `FREE (saves ${rupees(qte.deliveryCharge)})`}`] : []),
     ].join('\n');
     const notes = s.orderNotes.length ? `\n📝 Note for kitchen: ${s.orderNotes.join('; ')}\n` : '';
     const where = s.fulfilment === 'delivery'
@@ -222,7 +233,7 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
       s.distanceKm = a.distanceKm;
       s.state = 'browsing';
       const intro = fulfilment === 'delivery'
-        ? `📍 Great news! *${a.outlet.name}* (${a.distanceKm} km away) will deliver to you in about ${etaMinutes('delivery', a.distanceKm)} min.`
+        ? `📍 Great news! *${a.outlet.name}* (${a.distanceKm} km away) will deliver to you in about ${etaMinutes('delivery', a.distanceKm)} min.\n🛵 Delivery by ${config.delivery.partner}: *${rupees(deliveryCharge(a.distanceKm))}*`
         : `📍 Nearest outlet: *${a.outlet.name}* (${a.distanceKm} km). Your order will be ready in about ${etaMinutes('pickup')} min.`;
       if (!s.cart.length) return categoriesList(s, intro);
       return afterOutletKnown(s, intro);

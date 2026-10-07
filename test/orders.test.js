@@ -2,7 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { normalisePhone, ValidationError } = require('../src/orders');
+const config = require('../src/config');
+const { normalisePhone, ValidationError, deliveryCharge } = require('../src/orders');
 const { setup, LUNCH, PLACES } = require('./helpers');
 
 const itemId = (orders, name) => orders.menuFor(null).find((i) => i.name === name).id;
@@ -16,19 +17,35 @@ test('normalisePhone accepts common Indian formats', () => {
   assert.equal(normalisePhone('5876543210'), null);
 });
 
-test('quote prices from the server menu with packing, GST and delivery slab', () => {
+test('quote prices from the server menu with packing, GST and the Shadowfax delivery charge', () => {
   const { orders } = setup();
   const noodles = itemId(orders, 'Veg Hakka Noodles'); // ₹119
   const q = orders.quote({ outletId: 1, items: [{ id: noodles, qty: 2 }], fulfilment: 'delivery', distanceKm: 2 });
   assert.equal(q.subtotal, 23800);
   assert.equal(q.packing, 1000);
   assert.equal(q.gst, Math.round((23800 + 1000) * 0.05));
-  assert.equal(q.deliveryFee, 2000);
-  assert.equal(q.total, 23800 + 1000 + q.gst + 2000);
+  assert.equal(q.deliveryFee, 4000);
+  assert.equal(q.deliveryCharge, 4000);
+  assert.equal(q.deliveryPartner, 'Shadowfax');
+  assert.equal(q.deliveryKm, 2);
+  assert.equal(q.total, 23800 + 1000 + q.gst + 4000);
 });
 
-test('delivery is free above the threshold and pickup never pays delivery', () => {
+test('Shadowfax rate card: base fare for 3 km, then per extra km rounded up', () => {
+  assert.equal(deliveryCharge(0.5), 4000);
+  assert.equal(deliveryCharge(3), 4000);
+  assert.equal(deliveryCharge(3.1), 5000);
+  assert.equal(deliveryCharge(6.2), 8000);
+  assert.equal(deliveryCharge(17.7), 19000);
+});
+
+test('customers pay the delivery charge by default; optional free-delivery threshold; pickup never pays', (t) => {
   const { orders } = setup();
+  const prev = config.pricing.freeDeliveryAbove;
+  t.after(() => { config.pricing.freeDeliveryAbove = prev; });
+  const comboId = orders.menuFor(null).find((i) => i.name === 'Fried Rice + Chilli Chicken Combo').id;
+  assert.equal(orders.quote({ outletId: 1, items: [{ id: comboId, qty: 3 }], fulfilment: 'delivery', distanceKm: 7 }).deliveryFee, 8000);
+  config.pricing.freeDeliveryAbove = 49900;
   const combo = itemId(orders, 'Fried Rice + Chilli Chicken Combo'); // ₹239
   assert.equal(orders.quote({ outletId: 1, items: [{ id: combo, qty: 3 }], fulfilment: 'delivery', distanceKm: 7 }).deliveryFee, 0);
   assert.equal(orders.quote({ outletId: 1, items: [{ id: combo, qty: 1 }], fulfilment: 'pickup' }).deliveryFee, 0);

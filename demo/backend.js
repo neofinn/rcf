@@ -5,7 +5,8 @@
 
 const seed = require('../src/seed');
 const { createMemoryStore } = require('../src/store/memory');
-const { createOrderService, ValidationError } = require('../src/orders');
+const { createOrderService, ValidationError, deliveryCharge } = require('../src/orders');
+const config = require('./config');
 const { createHandoffService } = require('../src/handoff');
 const { createRoutes, recordOutbox, matchPath } = require('../src/routes/handlers');
 const { createBot, createSessionStore } = require('../src/whatsapp/bot');
@@ -55,7 +56,7 @@ function createDemoBackend() {
     return { status: 404, body: { error: 'Not found' } };
   }
 
-  return { request, orders, handoffs, store, dispatcher, assignOutlet, outlets: () => orders.listOutlets(), localities: () => store.localities() };
+  return { request, orders, handoffs, store, dispatcher, assignOutlet, deliveryCharge, delivery: config.delivery, outlets: () => orders.listOutlets(), localities: () => store.localities() };
 }
 
 module.exports = { createDemoBackend };

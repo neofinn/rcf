@@ -15,9 +15,9 @@ Online ordering for Raju Chinese's outlets across the Chandigarh tricity: a web 
 ## How orders reach the right outlet
 
 1. The customer shares a location: browser GPS, picking their area from a list (25 tricity localities), or a WhatsApp location pin.
-2. `assignOutlet` (`src/geo.js`) estimates the road distance to every outlet (straight-line distance × 1.3) and picks the **nearest outlet that is open, accepting orders, and has the customer inside its delivery radius** (5–6 km by default, set per outlet).
+2. `assignOutlet` (`src/geo.js`) estimates the road distance to every outlet (straight-line distance × 1.3) and picks the **nearest outlet that is open, accepting orders, and within delivery range**. The range is **20 km by road for every outlet** (`MAX_DELIVERY_KM`), so there is **no blind spot**. `test/coverage.test.js` checks a 500 m grid over the whole tricity and outskirts (New Chandigarh, Mullanpur, Pinjore, Dera Bassi, Kurali, Banur), including with outlets paused.
 3. If the nearest outlet is closed or paused, the next nearest one in range takes the order.
-4. If no outlet can deliver, the customer is offered **pickup** from the nearest open outlet.
+4. Only beyond 20 km, or when every outlet is closed, is the customer offered **pickup** instead.
 5. For delivery orders the server always works out the outlet itself from the coordinates. It never trusts an outlet ID sent by the client.
 
 Menu stock is per outlet: staff can mark an item out of stock at their outlet only.
@@ -75,7 +75,13 @@ Setup: get API access from Shadowfax (Dedicated Store model). Put each outlet's 
 
 - GST 5% on food + packing
 - Packing ₹10 per order
-- Delivery fee by distance: ₹20 up to 3 km, ₹35 up to 6 km, ₹50 beyond; **free above ₹499**
+- **Delivery charge = the Shadowfax rate card for the distance**, paid by the customer and shown before they order: ₹40 for the first 3 km, then ₹10 per extra km (rounded up). These are placeholder rates; set `DELIVERY_BASE_FEE_PAISE`, `DELIVERY_BASE_KM` and `DELIVERY_PER_KM_PAISE` to your Shadowfax contract. Customers see it:
+  - in the web app's welcome banner (rate card), and after the location as "Delivery by Shadowfax: ₹X"
+  - on the bill as "Delivery by Shadowfax (6.2 km) ₹X"
+  - on WhatsApp in the cart (rate card until the location is known), in the location reply, and in the order confirmation
+  - on the tracking page; staff see "incl. delivery ₹X" on order cards
+- Optional free delivery on big orders, where the outlet absorbs the Shadowfax charge: `FREE_DELIVERY_ABOVE_PAISE` (off by default). The bill then shows the waived charge.
+- Distance here is our road estimate; Shadowfax bills by its own route distance, so expect small differences
 - Minimum delivery order ₹149
 - Payment: cash/UPI on delivery or at pickup
 

@@ -11,12 +11,8 @@ module.exports = {
     gstPercent: 5,
     packingPerOrder: 1000,
     minDeliveryOrder: 14900,
-    freeDeliveryAbove: 49900,
-    deliverySlabs: [
-      { uptoKm: 3, fee: 2000 },
-      { uptoKm: 6, fee: 3500 },
-      { uptoKm: Infinity, fee: 5000 },
-    ],
+    freeDeliveryAbove: 0,
   },
+  delivery: { rangeKm: 20, partner: 'Shadowfax', baseKm: 3, baseFee: 4000, perKmFee: 1000 },
   whatsapp: {},
 };

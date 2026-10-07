@@ -61,7 +61,7 @@ function assignOutlet(outlets, location, { fulfilment = 'delivery', now = new Da
     .filter((o) => o.active)
     .map((o) => {
       const distanceKm = roadKm(location, o);
-      return { outlet: o, distanceKm, open: isOpen(o, now), inRange: distanceKm <= o.delivery_radius_km };
+      return { outlet: o, distanceKm, open: isOpen(o, now), inRange: distanceKm <= rangeKm(o) };
     })
     .sort((a, b) => a.distanceKm - b.distanceKm);
 
@@ -80,6 +80,9 @@ function assignOutlet(outlets, location, { fulfilment = 'delivery', now = new Da
   return { outlet: null, distanceKm: null, reason, ranked, pickupSuggestion };
 }
 
+/** Delivery range of an outlet (road km). The chain-wide maximum applies to every outlet. */
+const rangeKm = (o) => config.delivery?.rangeKm || o.delivery_radius_km;
+
 /** Rough ETA: prep time plus ~3 min per km of riding. */
 function etaMinutes(fulfilment, distanceKm) {
   const prep = 20;
@@ -87,4 +90,4 @@ function etaMinutes(fulfilment, distanceKm) {
   return Math.round((prep + 5 + distanceKm * 3) / 5) * 5;
 }
 
-module.exports = { haversineKm, roadKm, isOpen, assignOutlet, etaMinutes, minutesNow };
+module.exports = { haversineKm, roadKm, isOpen, assignOutlet, etaMinutes, minutesNow, rangeKm };

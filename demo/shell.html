@@ -82,6 +82,8 @@
   .routing .head p { max-width: 80ch; }
   .map { width: 100%; height: auto; display: block; background: var(--map-land); border-radius: 12px; cursor: crosshair; }
   .map text { font-family: var(--font-body); }
+  .map .zone { fill: var(--map-ring); }
+  .map .zone-edge { fill: none; stroke: var(--wok); stroke-opacity: 0.45; stroke-width: 1.2; stroke-dasharray: 3 3; }
   .map .ring { fill: var(--map-ring); stroke: var(--wok); stroke-opacity: 0.3; stroke-dasharray: 4 4; }
   .map .loc { fill: var(--muted); opacity: 0.6; }
   .map .city { fill: var(--muted); opacity: 0.55; font-size: 13px; font-weight: 700; letter-spacing: 1.5px; }
@@ -179,7 +181,7 @@
     <div class="head">
       <span class="eyebrow">How an order finds its outlet</span>
       <h2 id="routing-h">One menu, one WhatsApp number, seven kitchens</h2>
-      <p class="muted">The WhatsApp catalog and the web menu are shared by every outlet, and the customer's location decides which kitchen cooks. Click anywhere on the map to test a spot.</p>
+      <p class="muted">The WhatsApp catalog and the web menu are shared by every outlet, and the customer's location decides which kitchen cooks. Shaded areas show each outlet's zone; the whole map is deliverable. Pause an outlet on the dashboard and its neighbours take over its zone. Click anywhere on the map to see the outlet and delivery charge.</p>
     </div>
     <div>
       <svg class="map" id="map" viewBox="0 0 760 520" role="img" aria-label="Map of the Chandigarh tricity showing the seven outlets and their delivery areas"></svg>
@@ -188,9 +190,10 @@
     <div class="side">
       <ol class="rules">
         <li>Measure road distance (straight line × 1.3) from the customer to every outlet.</li>
-        <li>Keep outlets that are open, taking orders, and have the customer inside their delivery radius (5–6 km).</li>
+        <li>Keep outlets that are open and taking orders. Every outlet delivers up to <b>20 km by road</b>, so there is no blind spot anywhere in the tricity or its outskirts (New Chandigarh, Pinjore, Dera Bassi, Kurali, Banur).</li>
         <li>The nearest one cooks. If it is paused or closed, the next nearest takes over.</li>
-        <li>Nobody in range? The customer is offered pickup from the nearest open outlet.</li>
+        <li>The customer sees the <b>Shadowfax delivery charge</b> for their distance before ordering: ₹40 for the first 3 km, then ₹10 per km (placeholder rate card).</li>
+        <li>Further than 20 km, or every outlet closed? The customer is offered pickup.</li>
         <li>A catalog cart sent on WhatsApp is held until the customer shares a location, then routed the same way.</li>
         <li>When the outlet accepts a delivery order, a Shadowfax rider is booked from that outlet. Rider updates move the order along and reach the customer on WhatsApp. (Simulated here.)</li>
       </ol>
@@ -296,6 +299,8 @@ function observe(from, req, res) {
     else log('Web app', 'web', `Customer at ${esc(where)}: no outlet delivers there, pickup offered`);
     preview(p, `Web app customer at ${where}`);
   }
+  // Pausing an outlet hands its zone to the neighbours.
+  if (req.method === 'PATCH' && path.startsWith('/api/admin/outlets/')) drawZones();
   if (path === '/api/dev/whatsapp' && req.body.type === 'location') {
     const p = req.body.location;
     const a = be.assignOutlet(be.outlets(), p, { fulfilment: 'delivery' });
@@ -370,11 +375,39 @@ function nearestLocalityName(p) {
   return best.d < 0.012 ? best.l.name : `near ${best.l.name}`;
 }
 
+// Service zones: which outlet serves each spot (nearest open outlet), on a
+// 10-unit grid. Shaded = deliverable; lines = where the serving outlet changes.
+function zonesSvg() {
+  const out = be.outlets();
+  const C = 10;
+  const cols = 760 / C;
+  const rows = 520 / C;
+  const owner = [];
+  for (let r = 0; r < rows; r++) {
+    owner.push([]);
+    for (let c = 0; c < cols; c++) {
+      const p = fromXY(c * C + C / 2, r * C + C / 2);
+      owner[r].push(be.assignOutlet(out, p, { fulfilment: 'delivery' }).outlet?.id ?? 0);
+    }
+  }
+  let fill = '';
+  let edges = '';
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (owner[r][c]) fill += `M${c * C} ${r * C}h${C}v${C}h-${C}z`;
+      if (c + 1 < cols && owner[r][c] !== owner[r][c + 1]) edges += `M${(c + 1) * C} ${r * C}v${C}`;
+      if (r + 1 < rows && owner[r][c] !== owner[r + 1][c]) edges += `M${c * C} ${(r + 1) * C}h${C}`;
+    }
+  }
+  return `<path d="${fill}" class="zone"/><path d="${edges}" class="zone-edge"/>`;
+}
+function drawZones() { const g = $('zones'); if (g) g.innerHTML = zonesSvg(); }
+
 function drawMap() {
   const svg = $('map');
   const out = be.outlets();
   svg.innerHTML = `
-    <g id="rings">${out.map((o) => `<circle cx="${X(o.lng)}" cy="${Y(o.lat)}" r="${(o.delivery_radius_km / 1.3) * SCALE}" class="ring"/>`).join('')}</g>
+    <g id="zones">${zonesSvg()}</g>
     <g id="locs">${be.localities().map((l) => `<circle cx="${X(l.lng)}" cy="${Y(l.lat)}" r="2.5" class="loc"><title>${esc(l.name)}, ${esc(l.city)}</title></circle>`).join('')}</g>
     <g id="cities">
       <text x="${X(76.765)}" y="${Y(30.762)}" text-anchor="middle" class="city">CHANDIGARH</text>
@@ -412,7 +445,7 @@ function preview(p, label) {
   const hit = a.outlet && document.querySelector(`[data-outlet="${a.outlet.id}"] circle`);
   if (hit) hit.setAttribute('r', '11');
   $('caption').innerHTML = a.outlet
-    ? `${esc(label)} → <b>${esc(a.outlet.name)}</b> delivers, ${a.distanceKm} km by road (radius ${a.outlet.delivery_radius_km} km).`
+    ? `${esc(label)} → <b>${esc(a.outlet.name)}</b> delivers, ${a.distanceKm} km by road. Shadowfax delivery charge: <b>${rupees(be.deliveryCharge(a.distanceKm))}</b>.`
       + (a.ranked[0].outlet.id !== a.outlet.id ? ` The nearest outlet, ${esc(short(a.ranked[0].outlet.name))}, is not taking orders.` : '')
     : `${esc(label)}: no outlet delivers here. ${a.pickupSuggestion ? `The customer is offered pickup from <b>${esc(a.pickupSuggestion.outlet.name)}</b>, ${a.pickupSuggestion.distanceKm} km away.` : ''}`;
 }

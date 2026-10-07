@@ -16,6 +16,7 @@ if (fs.existsSync(envFile)) {
 
 const env = process.env;
 const int = (v, d) => (v === undefined || v === '' ? d : parseInt(v, 10));
+const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 
 module.exports = {
   port: int(env.PORT, 3000),
@@ -30,13 +31,24 @@ module.exports = {
     gstPercent: 5, // GST on restaurant food in India
     packingPerOrder: int(env.PACKING_CHARGE_PAISE, 1000),
     minDeliveryOrder: int(env.MIN_DELIVERY_ORDER_PAISE, 14900),
-    freeDeliveryAbove: int(env.FREE_DELIVERY_ABOVE_PAISE, 49900),
-    // Delivery fee slabs by distance from the assigned outlet.
-    deliverySlabs: [
-      { uptoKm: 3, fee: 2000 },
-      { uptoKm: 6, fee: 3500 },
-      { uptoKm: Infinity, fee: 5000 },
-    ],
+    // 0 = customers always pay the delivery charge. Set e.g. 49900 to make
+    // delivery free (outlet pays Shadowfax) on bigger orders.
+    freeDeliveryAbove: int(env.FREE_DELIVERY_ABOVE_PAISE, 0),
+  },
+
+  delivery: {
+    // Every outlet delivers up to this road distance; the nearest open outlet
+    // cooks. 20 km leaves no blind spot across Chandigarh, Mohali, Panchkula,
+    // Zirakpur, Kharar and the outskirts (New Chandigarh, Pinjore, Dera Bassi,
+    // Kurali, Banur). See test/coverage.test.js.
+    rangeKm: num(env.MAX_DELIVERY_KM, 20),
+    partner: 'Shadowfax',
+    // Delivery charge shown to and paid by the customer: the Shadowfax rate
+    // card. Base fare covers the first baseKm, then perKmFee per extra km
+    // (rounded up). PLACEHOLDER values: use the rates in your Shadowfax contract.
+    baseKm: num(env.DELIVERY_BASE_KM, 3),
+    baseFee: int(env.DELIVERY_BASE_FEE_PAISE, 4000),
+    perKmFee: int(env.DELIVERY_PER_KM_PAISE, 1000),
   },
 
   // Delivery partner. SHADOWFAX_MODE=simulate runs a pretend Shadowfax (dev/demo).

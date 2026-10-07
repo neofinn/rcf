@@ -278,3 +278,18 @@ test('long carts keep button messages within WhatsApp limits', () => {
   for (const x of r) if (x.type === 'buttons') assert.ok(x.text.length <= 1024);
   assert.equal(r.at(-1).type, 'buttons');
 });
+
+test('WhatsApp shows the Shadowfax delivery charge before ordering', () => {
+  const c = chat();
+  let r = c.text('3 veg fried rice');
+  assert.match(r.at(-1).text, /Delivery by Shadowfax: ₹40 for the first 3 km \+ ₹10\/km/);
+  r = c.tap('act:checkout');
+  r = c.say({ type: 'location', location: PLACES.panchkula5 });
+  assert.match(r[0].text, /Delivery by Shadowfax: \*₹\d+\*/);
+  r = c.text('House 77, Sector 5, Panchkula');
+  assert.match(r[0].text, /Delivery by Shadowfax \([\d.]+ km\): ₹\d+/);
+  c.tap('act:place');
+  const o = c.orders.latestOrderForPhone('919876543210');
+  assert.ok(o.delivery_fee >= 4000);
+  assert.equal(o.total, o.subtotal + o.packing + o.gst + o.delivery_fee);
+});

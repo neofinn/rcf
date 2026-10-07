@@ -9,7 +9,8 @@
 // { contentType, filename, text } for a file. ValidationError means 400.
 
 const config = require('../config');
-const { assignOutlet, isOpen, etaMinutes } = require('../geo');
+const { assignOutlet, isOpen, etaMinutes, rangeKm } = require('../geo');
+const { deliveryCharge } = require('../orders');
 const { qrSvg } = require('../payments');
 
 const ACTIVE = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
@@ -22,7 +23,7 @@ const csvCell = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '
 
 const publicOutlet = (o, now) => ({
   id: o.id, slug: o.slug, name: o.name, city: o.city, address: o.address, lat: o.lat, lng: o.lng,
-  phone: o.phone, deliveryRadiusKm: o.delivery_radius_km, opens: o.opens, closes: o.closes, open: isOpen(o, now),
+  phone: o.phone, deliveryRadiusKm: rangeKm(o), opens: o.opens, closes: o.closes, open: isOpen(o, now),
   upi: !!o.upi_id,
 });
 
@@ -46,7 +47,7 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher }) {
         return {
           gstPercent: p.gstPercent, packing: p.packingPerOrder, minDeliveryOrder: p.minDeliveryOrder,
           freeDeliveryAbove: p.freeDeliveryAbove,
-          deliverySlabs: p.deliverySlabs.map((s) => ({ uptoKm: Number.isFinite(s.uptoKm) ? s.uptoKm : null, fee: s.fee })),
+          delivery: { ...config.delivery },
         };
       },
     },
@@ -67,6 +68,10 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher }) {
           outlet: a.outlet && publicOutlet(a.outlet, now),
           distanceKm: a.distanceKm,
           etaMinutes: a.outlet ? etaMinutes(fulfilment, a.distanceKm) : null,
+          // Shadowfax charge for this distance, shown before the customer orders.
+          deliveryCharge: a.outlet && fulfilment === 'delivery' ? deliveryCharge(a.distanceKm) : null,
+          deliveryPartner: config.delivery.partner,
+          freeDeliveryAbove: config.pricing.freeDeliveryAbove,
           reason: a.reason,
           pickupSuggestion: a.pickupSuggestion && { outlet: publicOutlet(a.pickupSuggestion.outlet, now), distanceKm: a.pickupSuggestion.distanceKm },
           nearby: a.ranked.slice(0, 3).map((r) => ({ outlet: publicOutlet(r.outlet, now), distanceKm: r.distanceKm, inRange: r.inRange })),
@@ -102,7 +107,8 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher }) {
         return {
           code: o.code, status: o.status, statusLabel: o.statusLabel, fulfilment: o.fulfilment,
           customerName: o.customer_name.split(' ')[0], items: o.items, subtotal: o.subtotal, packing: o.packing,
-          gst: o.gst, deliveryFee: o.delivery_fee, total: o.total, paymentMethod: o.payment_method,
+          gst: o.gst, deliveryFee: o.delivery_fee, deliveryKm: o.distance_km, deliveryPartner: o.fulfilment === 'delivery' ? config.delivery.partner : null,
+          total: o.total, paymentMethod: o.payment_method,
           etaMinutes: o.etaMinutes, createdAt: o.created_at, updatedAt: o.updated_at, outlet: o.outlet,
           payment: publicPayment(o),
           delivery: publicDelivery(o.delivery),

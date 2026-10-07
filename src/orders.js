@@ -62,10 +62,16 @@ function normalisePhone(raw) {
   return /^[6-9]\d{9}$/.test(local) ? `+91${local}` : null;
 }
 
+/** What Shadowfax charges for a delivery of this road distance (rate card). */
+function deliveryCharge(distanceKm) {
+  const d = config.delivery;
+  return d.baseFee + Math.ceil(Math.max(0, (distanceKm || 0) - d.baseKm)) * d.perKmFee;
+}
+
+/** What the customer pays for delivery: the partner charge, unless the order qualifies for free delivery. */
 function deliveryFee(subtotal, distanceKm) {
-  const p = config.pricing;
-  if (subtotal >= p.freeDeliveryAbove) return 0;
-  return p.deliverySlabs.find((s) => distanceKm <= s.uptoKm).fee;
+  const free = config.pricing.freeDeliveryAbove;
+  return free > 0 && subtotal >= free ? 0 : deliveryCharge(distanceKm);
 }
 
 /**
@@ -100,9 +106,14 @@ function priceCart(menuList, items, fulfilment, distanceKm) {
   const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
   const packing = p.packingPerOrder;
   const gst = Math.round(((subtotal + packing) * p.gstPercent) / 100);
-  const fee = fulfilment === 'delivery' ? deliveryFee(subtotal, distanceKm) : 0;
+  const delivery = fulfilment === 'delivery';
+  const fee = delivery ? deliveryFee(subtotal, distanceKm) : 0;
   return {
     lines, subtotal, packing, gst, deliveryFee: fee, total: subtotal + packing + gst + fee,
+    // Shown on the bill: "Delivery by Shadowfax (6.2 km)", with the partner charge even when it's free.
+    deliveryKm: delivery ? distanceKm : null,
+    deliveryCharge: delivery ? deliveryCharge(distanceKm) : 0,
+    deliveryPartner: delivery ? config.delivery.partner : null,
     minDeliveryOrder: p.minDeliveryOrder, freeDeliveryAbove: p.freeDeliveryAbove,
   };
 }
@@ -301,5 +312,5 @@ function createOrderService(store) {
 }
 
 module.exports = {
-  createOrderService, priceCart, ValidationError, normalisePhone, STATUSES, STATUS_LABELS, TRANSITIONS, deliveryFee, DELIVERY_LABELS,
+  createOrderService, priceCart, ValidationError, normalisePhone, STATUSES, STATUS_LABELS, TRANSITIONS, deliveryFee, deliveryCharge, DELIVERY_LABELS,
 };

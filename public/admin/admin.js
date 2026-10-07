@@ -96,7 +96,7 @@ function orderCard(o) {
     ${o.notes ? `<div class="small"><b>Note:</b> ${esc(o.notes)}</div>` : ''}
     <div class="small"><b>${esc(o.customer_name)}</b> · <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></div>
     ${o.address ? `<div class="small">${esc(o.address)}${o.distance_km != null ? ` (${o.distance_km} km)` : ''}${map}</div>` : ''}
-    <div style="margin:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${rupees(o.total)}</b> <span class="chip pay-${o.payment_status}">${esc(o.paymentLabel)}</span></div>
+    <div style="margin:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${rupees(o.total)}</b>${o.fulfilment === 'delivery' ? ` <span class="small muted">incl. delivery ${rupees(o.delivery_fee)}</span>` : ''} <span class="chip pay-${o.payment_status}">${esc(o.paymentLabel)}</span></div>
     ${payActions(o)}
     ${deliveryBlock(o)}
     <div class="actions">${o.nextStatuses.map((s) => `<button type="button" class="${s === 'cancelled' ? 'cancel' : ''}" data-code="${o.code}" data-status="${s}">${NEXT_LABEL[s]}</button>`).join('')}</div>
