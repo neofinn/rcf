@@ -17,6 +17,8 @@ const { createDispatcher } = require('./delivery/dispatcher');
 const { createShadowfaxClient } = require('./delivery/shadowfax');
 const { createSimulatedShadowfax } = require('./delivery/simulator');
 const { qrPng } = require('./payments');
+const { createCrm } = require('./crm');
+const { createMenuAdmin } = require('./menu-admin');
 
 function isAdmin(req) {
   const token = Buffer.from((req.get('authorization') || '').replace(/^Bearer\s+/i, ''));
@@ -43,13 +45,15 @@ function createApp({
   const store = createSqliteStore(db);
   const orders = createOrderService(store);
   const handoffs = createHandoffService(store);
-  const bot = createBot({ orders, handoffs, sessions: createSessionStore(store), places: () => store.localities() });
+  const crm = createCrm({ store, orders }); // before notifications, so points are credited first
+  const menuAdmin = createMenuAdmin({ store });
+  const bot = createBot({ orders, handoffs, crm, sessions: createSessionStore(store), places: () => store.localities() });
 
   // Dev: keep messages the business sends on its own so the simulator can show them.
   const outbox = [];
   const baseClient = waClient || createClient({ log });
   const client = enableDevTools ? recordOutbox(baseClient, outbox) : baseClient;
-  notifyOnStatusChange({ orders, client, log });
+  notifyOnStatusChange({ orders, client, crm, log });
   relayHandoffReplies({ handoffs, client, log });
   notifyOnPayment({ orders, client, log });
 
@@ -84,7 +88,7 @@ function createApp({
     ? safeEqual(req.get('x-callback-token'), config.shadowfax.callbackToken)
     : !config.production);
 
-  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher })) {
+  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin })) {
     if (route.dev && !enableDevTools) continue;
     // Shadowfax may call back with POST or PUT.
     const methods = route.partner ? ['post', 'put'] : [route.method.toLowerCase()];
@@ -113,7 +117,7 @@ function createApp({
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, store, orders, handoffs, bot, dispatcher };
+  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin };
 }
 
 module.exports = { createApp };

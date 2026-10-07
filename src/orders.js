@@ -220,7 +220,8 @@ function createOrderService(store) {
       created_at: ts, updated_at: ts,
     }, priced.lines);
     const order = getOrder(code);
-    events.emit('created', order);
+    // The customer's marketing consent travels with the event to the CRM.
+    events.emit('created', { ...order, marketingOptIn: !!input.marketingOptIn });
     return order;
   }
 

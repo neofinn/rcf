@@ -90,6 +90,33 @@ Delivery orders are handed to **Shadowfax Hyperlocal** riders using their *Dedic
 
 Setup: get API access from Shadowfax (Dedicated Store model). Put each outlet's store code in `outlets.sfx_store_code`, set `SHADOWFAX_TOKEN` and `SHADOWFAX_BASE_URL` (staging `https://hlbackend.staging.shadowfax.in`, production `https://api.shadowfax.in`), and give Shadowfax your callback URL `https://<your-domain>/webhooks/shadowfax` with the header `X-Callback-Token: <SHADOWFAX_CALLBACK_TOKEN>`. The API paths are in `src/delivery/shadowfax.js` and follow Shadowfax's public docs. Confirm them, especially cancel, during onboarding. `SHADOWFAX_MODE=simulate` runs a pretend Shadowfax for local testing; the demo uses the same simulator.
 
+## Back office (admin panel `/admin/`)
+
+### Customers: CRM and loyalty (`src/crm.js`)
+- **Saved automatically from every order** (web and WhatsApp), keyed by phone: name, address, location, first channel, favourite outlet. Orders, total spent, average order, last order and favourite dishes are worked out from the orders themselves, so they never drift.
+- **Segments for campaigns:** New (1 order), Regular (3+), VIP (top 10% by spend), Lapsed (no order in 30 days). Combine them with search, outlet and "opted in to offers" filters, then **Export for campaign** (CSV).
+- **Offers opt-in:** a checkbox at web checkout, and a one-time "Want our offers?" question on WhatsApp after the first order. *stop offers* opts out. Staff can change it per customer. Only message customers who opted in (WhatsApp marketing rules).
+- **Loyalty: 1 point for every ₹100** of a completed order's total (`LOYALTY_RUPEES_PER_POINT`), credited once per order and never for cancelled ones.
+  - On WhatsApp: "You'll earn X points" when ordering, "You earned X, balance Y" on completion, and *points* shows the balance.
+  - The tracking page also shows the points for the order.
+  - Staff can **redeem** (e.g. -20 for a free drink) or adjust points with a reason. Every change is in the points history, and the balance can't go below zero.
+  - Redeeming points as a discount at online checkout is not built yet.
+- **Customer page:** profile, order history, favourite dishes, points history, tags and notes.
+
+### Menu (`src/menu-admin.js`)
+- Edit name, category, veg, price and on-menu inline, or add a dish. With an outlet selected, the same table shows that outlet's **In stock** column.
+- **One-click price change:** choose all dishes, one category or ticked dishes, then change by % or ₹ (quick buttons +5%, +10%, −5%, +₹10, −₹10). Round to ₹1/₹5/₹10, **preview** old → new, then apply. **Undo** reverts the last change, and every change is kept in `price_history`. New prices apply to web, WhatsApp and the catalog feed straight away.
+
+### Analytics (`src/analytics.js`)
+- Filters: date range (today, 7/30/90 days, this month, custom), outlet, channel and order type. Everything below follows them.
+- **KPIs with change vs the previous period:** gross sales, orders, average order, customers (new vs returning), item sales, cancellations, delivery charges and GST.
+- **Charts:** daily sales trend, outlet-wise sales, category mix, top 10 dishes, and a weekday × hour heatmap of when orders arrive. Also channel, payment and order-type splits.
+- **Tables:** item-wise sales (qty, revenue, share, % of orders it appears in), dishes that didn't sell, top customers, and a money breakdown (items, packing, GST, delivery).
+- **Exports:** outlet and item tables as CSV, for Excel or Power BI.
+- Sales exclude cancelled orders. Dates are IST days.
+
+The demo ships ~90 days of generated sample history (`demo/sample-history.js`) so these screens have data. The real server starts empty and fills from real orders.
+
 ## Pricing rules (`src/config.js`)
 
 - GST 5% on food + packing
@@ -158,6 +185,9 @@ src/
   orders.js              menu, pricing, order creation and status changes
   handoff.js             WhatsApp chats handed to outlet staff
   payments.js            UPI payment links and QR codes
+  crm.js                 customers, segments, loyalty points
+  menu-admin.js          dish editing, bulk price changes, undo
+  analytics.js           sales analytics for the dashboard
   delivery/shadowfax.js  Shadowfax Hyperlocal API client
   delivery/dispatcher.js books riders, applies Shadowfax callbacks
   delivery/simulator.js  pretend Shadowfax for demo and local testing

@@ -9,6 +9,9 @@ const { createOrderService, ValidationError, deliveryCharge } = require('../src/
 const config = require('./config');
 const { createHandoffService } = require('../src/handoff');
 const { createRoutes, recordOutbox, matchPath } = require('../src/routes/handlers');
+const { createCrm } = require('../src/crm');
+const { createMenuAdmin } = require('../src/menu-admin');
+const { seedSampleHistory } = require('./sample-history');
 const { createBot, createSessionStore } = require('../src/whatsapp/bot');
 const { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment, notifyOnDelivery } = require('../src/whatsapp/notify');
 const { createDispatcher } = require('../src/delivery/dispatcher');
@@ -19,13 +22,17 @@ function createDemoBackend() {
   // Demo outlets stay open around the clock so it works at any hour.
   const demoSeed = { ...seed, outlets: seed.outlets.map((o, i) => ({ ...o, opens: '00:00', closes: '00:00', sfxStoreCode: `DEMO-${i + 1}` })) };
   const store = createMemoryStore(demoSeed);
+  // Sample history so CRM and analytics have data (demo only).
+  seedSampleHistory(store);
   const orders = createOrderService(store);
   const handoffs = createHandoffService(store);
-  const bot = createBot({ orders, handoffs, sessions: createSessionStore(store), places: () => store.localities(), baseUrl: 'https://order.rajuchinese.example' });
+  const crm = createCrm({ store, orders });
+  const menuAdmin = createMenuAdmin({ store });
+  const bot = createBot({ orders, handoffs, crm, sessions: createSessionStore(store), places: () => store.localities(), baseUrl: 'https://order.rajuchinese.example' });
   const outbox = [];
   const client = recordOutbox({ send: async () => {} }, outbox);
   const quiet = { error: () => {}, info: () => {} };
-  notifyOnStatusChange({ orders, client, log: quiet });
+  notifyOnStatusChange({ orders, client, crm, log: quiet });
   relayHandoffReplies({ handoffs, client, log: quiet });
   notifyOnPayment({ orders, client, log: quiet });
   // Pretend Shadowfax: riders are booked when an outlet accepts a delivery order.
@@ -33,7 +40,7 @@ function createDemoBackend() {
   const shadowfax = createSimulatedShadowfax({ onCallback: (p) => dispatcher.handleCallback(p) });
   dispatcher = createDispatcher({ orders, store, provider: shadowfax, log: quiet });
   notifyOnDelivery({ dispatcher, client, log: quiet });
-  const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher });
+  const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin });
 
   /** Serve one API request. Resolves to { status, body }. */
   async function request(method, url, body) {

@@ -76,6 +76,7 @@
       ${o.status === 'cancelled' ? '' : payHtml(o)}
       ${stepsHtml}
       ${riderHtml(o)}
+      ${o.loyalty && o.loyalty.points && o.status !== 'cancelled' ? `<p class="small">⭐ ${o.loyalty.earned ? `You earned <b>${o.loyalty.points} loyalty points</b> on this order.` : `You'll earn <b>${o.loyalty.points} loyalty points</b> when this order is ${o.fulfilment === 'delivery' ? 'delivered' : 'picked up'}.`}</p>` : ''}
       <p><b>${esc(o.outlet.name)}</b><br><span class="small muted">${esc(o.outlet.address)}</span><br>
         <a href="tel:${esc(o.outlet.phone)}">📞 Call outlet</a> ·
         <a href="https://www.google.com/maps/search/?api=1&query=${o.outlet.lat},${o.outlet.lng}" target="_blank" rel="noopener">🗺️ Directions</a></p>

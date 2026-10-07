@@ -13,6 +13,7 @@ module.exports = {
     minDeliveryOrder: 14900,
     freeDeliveryAbove: 0,
   },
+  loyalty: { rupeesPerPoint: 100 },
   delivery: { rangeKm: 20, partner: 'Shadowfax', baseKm: 3, baseFee: 4000, perKmFee: 1000 },
   whatsapp: { payments: true, goodsType: 'digital-goods' },
 };

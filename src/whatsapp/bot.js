@@ -52,7 +52,7 @@ function freshSession() {
   };
 }
 
-function createBot({ orders, sessions, handoffs = null, places = () => [], baseUrl = config.publicBaseUrl }) {
+function createBot({ orders, sessions, handoffs = null, crm = null, places = () => [], baseUrl = config.publicBaseUrl }) {
   function load(phone, now) {
     const s = sessions.get(phone);
     if (!s || now - new Date(s.updatedAt).getTime() > SESSION_TTL_MS) return freshSession();
@@ -457,6 +457,22 @@ function createBot({ orders, sessions, handoffs = null, places = () => [], baseU
     return [];
   }
 
+  // Ask once for permission to send offers (needed for WhatsApp campaigns).
+  function optInAsk() {
+    return [buttons('🎁 Want our offers, new dishes and loyalty updates here on WhatsApp? You can stop anytime by typing *stop offers*.', [
+      btn('act:optin_yes', '✅ Yes, send offers'),
+      btn('act:optin_no', 'No thanks'),
+    ])];
+  }
+
+  function pointsView(phone) {
+    if (!crm) return [text('Loyalty points are not available right now.')];
+    const c = crm.get(phone);
+    if (!c) return [text(`⭐ You don't have any points yet. Earn 1 point for every ₹${config.loyalty.rupeesPerPoint} you spend. Type *hi* to order.`)];
+    const recent = c.ledger.slice(0, 3).map((l) => `${l.points > 0 ? '+' : ''}${l.points} · ${l.note || l.kind}`).join('\n');
+    return [text(`⭐ You have *${c.points} loyalty points*.\nYou earn 1 point for every ₹${config.loyalty.rupeesPerPoint} spent. Show this chat at the outlet to redeem.${recent ? `\n\nRecent:\n${recent}` : ''}`)];
+  }
+
   function latestUnpaid(phone) {
     const o = orders.latestOrderForPhone(phone);
     return o && ['pending', 'claimed'].includes(o.payment_status) ? o : null;
@@ -480,10 +496,13 @@ function createBot({ orders, sessions, handoffs = null, places = () => [], baseU
       s.cart = [];
       s.orderNotes = [];
       s.state = 'browsing';
+      const willEarn = crm ? crm.pointsFor(order.total) : 0;
+      const loyalty = willEarn ? `\n⭐ You'll earn *${willEarn} loyalty point${willEarn > 1 ? 's' : ''}* when it's delivered.` : '';
+      const optIn = crm && !crm.get(order.phone)?.optIn ? optInAsk() : [];
       if (order.payment_method === 'upi') {
-        return [text(`🎉 Order placed! Your order ID is *${order.code}*.\n\n${order.outlet.name} will ${order.fulfilment === 'delivery' ? `deliver in about ${order.etaMinutes} min` : `have it ready in about ${order.etaMinutes} min`}. Outlet phone: ${order.outlet.phone}`), ...payView(order)];
+        return [text(`🎉 Order placed! Your order ID is *${order.code}*.\n\n${order.outlet.name} will ${order.fulfilment === 'delivery' ? `deliver in about ${order.etaMinutes} min` : `have it ready in about ${order.etaMinutes} min`}. Outlet phone: ${order.outlet.phone}${loyalty}`), ...payView(order), ...optIn];
       }
-      return [text(`🎉 Order placed! Your order ID is *${order.code}*.\n\n${order.outlet.name} will ${order.fulfilment === 'delivery' ? `deliver in about ${order.etaMinutes} min` : `have it ready in about ${order.etaMinutes} min`}.\nPay ${rupees(order.total)} by cash/UPI on ${order.fulfilment === 'delivery' ? 'delivery' : 'pickup'}.\n\nTrack your order: ${baseUrl}/track.html?code=${order.code}\nOutlet phone: ${order.outlet.phone}\n\nWe'll message you here as your order moves along. Thank you! 🙏`)];
+      return [text(`🎉 Order placed! Your order ID is *${order.code}*.\n\n${order.outlet.name} will ${order.fulfilment === 'delivery' ? `deliver in about ${order.etaMinutes} min` : `have it ready in about ${order.etaMinutes} min`}.\nPay ${rupees(order.total)} by cash/UPI on ${order.fulfilment === 'delivery' ? 'delivery' : 'pickup'}.${loyalty}\n\nTrack your order: ${baseUrl}/track.html?code=${order.code}\nOutlet phone: ${order.outlet.phone}\n\nWe'll message you here as your order moves along. Thank you! 🙏`), ...optIn];
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
       s.state = 'browsing';
@@ -554,6 +573,11 @@ function createBot({ orders, sessions, handoffs = null, places = () => [], baseU
         return [text('Okay, starting fresh. 👍'), ...welcome(msg.name)];
       }
       if (['track', 'status', 'order status', 'where is my order'].includes(t)) return trackView(msg.from);
+      if (['points', 'my points', 'loyalty', 'rewards'].includes(t)) return pointsView(msg.from);
+      if (['stop offers', 'stop', 'unsubscribe'].includes(t) && crm) {
+        crm.update(msg.from, { optIn: false });
+        return [text("👍 Done. We won't send you offers. You'll still get updates about your orders.")];
+      }
       if (t === 'cart') return s.outletId || s.cart.length ? cartView(s) : welcome(msg.name);
       if (['menu', 'order'].includes(t)) return s.outletId ? categoriesList(s) : welcome(msg.name);
       if (['change address', 'new address', 'change location'].includes(t)) {
@@ -696,6 +720,11 @@ function createBot({ orders, sessions, handoffs = null, places = () => [], baseU
             orders.claimPayment(o.code, now);
             return [text(`🙏 Thank you! ${o.outlet.name} will confirm as soon as ${rupees(o.total)} shows in their UPI account. We'll message you here.`)];
           }
+          case 'optin_yes':
+            if (crm) crm.update(msg.from, { optIn: true });
+            return [text("🎉 You're in! We'll send offers and loyalty updates here. Type *points* anytime to see your points.")];
+          case 'optin_no':
+            return [text('No problem. 🙂 Type *points* anytime to see your loyalty points.')];
           case 'pay_again': {
             const o = latestUnpaid(msg.from);
             if (!o) return [text("You don't have a UPI payment waiting. Type *track* to see your order.")];

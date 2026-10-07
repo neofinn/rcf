@@ -17,7 +17,7 @@ const STATUS_MESSAGES = {
 };
 
 /** Message WhatsApp customers when their order status changes. */
-function notifyOnStatusChange({ orders, client, log = console }) {
+function notifyOnStatusChange({ orders, client, crm = null, log = console }) {
   orders.events.on('status', (o, meta = {}) => {
     if (meta.quiet) return;
     // Free-form messages are only allowed inside WhatsApp's 24h customer
@@ -25,7 +25,11 @@ function notifyOnStatusChange({ orders, client, log = console }) {
     // approved template message.
     if (o.channel !== 'whatsapp' || !STATUS_MESSAGES[o.status]) return;
     const to = o.phone.replace(/^\+/, '');
-    const body = STATUS_MESSAGES[o.status](o);
+    let body = STATUS_MESSAGES[o.status](o);
+    if (o.status === 'completed' && crm) {
+      const earned = crm.pointsFor(o.total);
+      if (earned) body += `\n\n⭐ You earned *${earned} loyalty point${earned > 1 ? 's' : ''}*. Balance: *${crm.balance(o.phone)}* points. Type *points* to see them.`;
+    }
     // Orders sent with "Review and pay" also get their order card in WhatsApp updated.
     const outlet = orders.getOutlet(o.outlet_id);
     const card = config.whatsapp.payments && o.payment_method === 'upi' && outlet?.wa_payment_config && WA_ORDER_STATUS[o.status];

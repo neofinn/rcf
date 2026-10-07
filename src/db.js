@@ -129,6 +129,46 @@ CREATE TABLE IF NOT EXISTS wa_handoff_messages (
   at TEXT NOT NULL
 );
 
+-- CRM: one row per customer (by phone), saved automatically from every order.
+CREATE TABLE IF NOT EXISTS customers (
+  phone TEXT PRIMARY KEY,
+  name TEXT,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  first_channel TEXT,
+  last_address TEXT,
+  last_lat REAL,
+  last_lng REAL,
+  last_outlet_id INTEGER,
+  marketing_opt_in INTEGER NOT NULL DEFAULT 0,
+  tags TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT ''
+);
+
+-- Loyalty points: earned on completed orders, redeemed or adjusted by staff.
+CREATE TABLE IF NOT EXISTS loyalty_ledger (
+  id INTEGER PRIMARY KEY,
+  phone TEXT NOT NULL,
+  order_id INTEGER,
+  points INTEGER NOT NULL,
+  kind TEXT NOT NULL, -- earn | redeem | adjust
+  note TEXT,
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS loyalty_phone ON loyalty_ledger(phone);
+CREATE UNIQUE INDEX IF NOT EXISTS loyalty_earn_once ON loyalty_ledger(order_id) WHERE kind = 'earn';
+
+-- Menu price changes, so a bulk change can be undone.
+CREATE TABLE IF NOT EXISTS price_history (
+  id INTEGER PRIMARY KEY,
+  batch TEXT NOT NULL,
+  item_id INTEGER NOT NULL,
+  old_price INTEGER NOT NULL,
+  new_price INTEGER NOT NULL,
+  note TEXT,
+  at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS wa_processed (
   message_id TEXT PRIMARY KEY,
   at TEXT NOT NULL

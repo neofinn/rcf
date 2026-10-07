@@ -323,6 +323,7 @@ $('checkout').addEventListener('submit', async (e) => {
   const body = {
     ...quoteBody(), name: $('name').value, phone: $('phone').value, address: $('address').value, notes: $('notes').value,
     paymentMethod: $('payUpi').checked ? 'upi' : 'cod',
+    marketingOptIn: $('marketingOptIn').checked,
   };
   if (!body.name.trim()) return showCheckoutError('Please enter your name.');
   if (!/^\D*(?:\+?91|0)?\D*[6-9](?:\D*\d){9}\D*$/.test(body.phone)) return showCheckoutError('Please enter a valid 10-digit mobile number.');

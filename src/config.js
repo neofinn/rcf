@@ -36,6 +36,11 @@ module.exports = {
     freeDeliveryAbove: int(env.FREE_DELIVERY_ABOVE_PAISE, 0),
   },
 
+  // Loyalty: 1 point for every ₹100 of a completed order.
+  loyalty: {
+    rupeesPerPoint: num(env.LOYALTY_RUPEES_PER_POINT, 100),
+  },
+
   delivery: {
     // Every outlet delivers up to this road distance; the nearest open outlet
     // cooks. 20 km leaves no blind spot across Chandigarh, Mohali, Panchkula,

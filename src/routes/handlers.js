@@ -11,6 +11,7 @@
 const config = require('../config');
 const { assignOutlet, isOpen, etaMinutes, rangeKm } = require('../geo');
 const { deliveryCharge } = require('../orders');
+const { computeAnalytics } = require('../analytics');
 const { qrSvg } = require('../payments');
 
 const ACTIVE = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
@@ -37,7 +38,7 @@ const publicDelivery = (d) => d && {
   riderLat: d.rider_lat, riderLng: d.rider_lng, trackUrl: d.track_url,
 };
 
-function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher }) {
+function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin }) {
   return [
     // ---- Customer API ------------------------------------------------------
     {
@@ -112,6 +113,7 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher }) {
           etaMinutes: o.etaMinutes, createdAt: o.created_at, updatedAt: o.updated_at, outlet: o.outlet,
           payment: publicPayment(o),
           delivery: publicDelivery(o.delivery),
+          loyalty: crm ? { points: crm.pointsFor(o.total), earned: o.status === 'completed' } : null,
         };
       },
     },
@@ -159,6 +161,30 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher }) {
       },
     },
     { method: 'GET', path: '/api/admin/outlets', admin: true, handle: () => orders.listOutlets() },
+
+    // ---- CRM & loyalty --------------------------------------------------
+    { method: 'GET', path: '/api/admin/customers', admin: true, handle: ({ query }) => crm.list(query) },
+    {
+      method: 'GET', path: '/api/admin/customers.csv', admin: true,
+      handle: ({ query }) => ({ contentType: 'text/csv', filename: 'raju-chinese-customers.csv', text: crm.exportCsv(query) }),
+    },
+    { method: 'GET', path: '/api/admin/customers/:phone', admin: true, handle: ({ params }) => crm.get(params.phone) || notFound('Customer not found') },
+    { method: 'PATCH', path: '/api/admin/customers/:phone', admin: true, handle: ({ params, body }) => crm.update(params.phone, body) || notFound('Customer not found') },
+    {
+      // Redeem (negative) or adjust loyalty points.
+      method: 'POST', path: '/api/admin/customers/:phone/points', admin: true,
+      handle: ({ params, body }) => crm.adjustPoints(params.phone, body.points, body.note, body.kind === 'redeem' ? 'redeem' : 'adjust') || notFound('Customer not found'),
+    },
+
+    // ---- Menu management ------------------------------------------------
+    { method: 'GET', path: '/api/admin/menu', admin: true, handle: () => ({ items: menuAdmin.list(), lastChange: menuAdmin.lastChange() }) },
+    { method: 'POST', path: '/api/admin/menu', admin: true, handle: ({ body }) => ({ httpStatus: 201, body: menuAdmin.add(body) }) },
+    { method: 'PATCH', path: '/api/admin/menu/:id', admin: true, handle: ({ params, body }) => menuAdmin.update(params.id, body) || notFound('Dish not found') },
+    { method: 'POST', path: '/api/admin/menu/bulk-price', admin: true, handle: ({ body }) => menuAdmin.bulkPrice(body) },
+    { method: 'POST', path: '/api/admin/menu/undo', admin: true, handle: () => menuAdmin.undo() },
+
+    // ---- Analytics ------------------------------------------------------
+    { method: 'GET', path: '/api/admin/analytics', admin: true, handle: ({ query }) => computeAnalytics(store, query) },
     {
       method: 'PATCH', path: '/api/admin/outlets/:id', admin: true,
       handle: ({ params, body }) => {

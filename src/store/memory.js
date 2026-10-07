@@ -21,6 +21,9 @@ function createMemoryStore(seed) {
   const handoffMsgs = new Map();
   const sessions = new Map();
   const deliveries = new Map();
+  const customers = new Map();
+  const ledger = [];
+  const priceHistory = [];
   const copy = (x) => (x ? { ...x } : null);
   const byNewest = (a, b) => b.id - a.id;
 
@@ -98,6 +101,53 @@ function createMemoryStore(seed) {
     listHandoffs: ({ outletId, status }) => handoffs
       .filter((h) => h.status === status && (!outletId || !h.outlet_id || h.outlet_id === Number(outletId)))
       .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1)).map(copy),
+
+    allMenuItems: () => items.map(copy),
+    updateMenuItem(id, fields) {
+      const it = items.find((i) => i.id === Number(id));
+      if (!it) return;
+      for (const k of ['category', 'name', 'description', 'price', 'veg', 'active', 'sort']) if (fields[k] !== undefined) it[k] = fields[k];
+    },
+    insertMenuItem(i) {
+      const id = Math.max(0, ...items.map((x) => x.id)) + 1;
+      items.push({ id, category: i.category, name: i.name, description: i.description || '', price: i.price, veg: i.veg ? 1 : 0, sort: i.sort ?? 9999, active: i.active === 0 ? 0 : 1 });
+      return id;
+    },
+    setPrices(changes, batch, note, ts) {
+      for (const c of changes) {
+        items.find((i) => i.id === c.id).price = c.newPrice;
+        if (batch) priceHistory.push({ batch, item_id: c.id, old_price: c.oldPrice, new_price: c.newPrice, note: note || null, at: ts });
+      }
+    },
+    lastPriceBatch() {
+      const last = priceHistory.at(-1);
+      return last ? priceHistory.filter((h) => h.batch === last.batch).map(copy) : [];
+    },
+    dropPriceBatch(batch) { for (let i = priceHistory.length - 1; i >= 0; i--) if (priceHistory[i].batch === batch) priceHistory.splice(i, 1); },
+
+    customer: (phone) => copy(customers.get(phone)),
+    customers: () => [...customers.values()].map(copy),
+    upsertCustomer(c) {
+      const cur = customers.get(c.phone) || { tags: '', notes: '', marketing_opt_in: 0 };
+      customers.set(c.phone, { ...cur, ...Object.fromEntries(Object.entries(c).filter(([, v]) => v !== undefined)) });
+    },
+    addPoints(e) {
+      if (e.kind === 'earn' && ledger.some((l) => l.kind === 'earn' && l.order_id === e.orderId)) return false;
+      ledger.push({ id: ledger.length + 1, phone: e.phone, order_id: e.orderId ?? null, points: e.points, kind: e.kind, note: e.note ?? null, at: e.at });
+      return true;
+    },
+    pointsLedger: (phone) => ledger.filter((l) => l.phone === phone).reverse().map(copy),
+    pointsBalances() {
+      const m = new Map();
+      for (const l of ledger) m.set(l.phone, (m.get(l.phone) || 0) + l.points);
+      return m;
+    },
+    pointsEarnedFor: (orderId) => ledger.find((l) => l.kind === 'earn' && l.order_id === orderId)?.points ?? null,
+    ordersForPhone: (phone) => [...orders].sort(byNewest).filter((o) => o.phone === phone).map(copy),
+    ordersBetween: (fromIso, toIso) => orders.filter((o) => o.created_at >= fromIso && o.created_at < toIso)
+      .sort((a, b) => (a.created_at < b.created_at ? -1 : 1)).map(copy),
+    linesBetween: (fromIso, toIso) => orders.filter((o) => o.created_at >= fromIso && o.created_at < toIso)
+      .flatMap((o) => (lines.get(o.id) || []).map((l) => ({ ...l, order_id: o.id }))),
 
     getSession: (phone) => (sessions.has(phone) ? JSON.parse(sessions.get(phone)) : null),
     putSession(phone, data, ts) { sessions.set(phone, JSON.stringify({ data, updatedAt: ts })); },

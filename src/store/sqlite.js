@@ -39,6 +39,21 @@ function createSqliteStore(db) {
     handoffMsgs: db.prepare('SELECT direction, body, at FROM wa_handoff_messages WHERE handoff_id = ? ORDER BY id'),
     closeHandoff: db.prepare("UPDATE wa_handoffs SET status = 'closed', updated_at = ? WHERE id = ? AND status = 'open'"),
 
+    allItems: db.prepare('SELECT * FROM menu_items ORDER BY sort, id'),
+    customer: db.prepare('SELECT * FROM customers WHERE phone = ?'),
+    customers: db.prepare('SELECT * FROM customers'),
+    addPoints: db.prepare('INSERT OR IGNORE INTO loyalty_ledger (phone, order_id, points, kind, note, at) VALUES (?, ?, ?, ?, ?, ?)'),
+    ledger: db.prepare('SELECT * FROM loyalty_ledger WHERE phone = ? ORDER BY id DESC'),
+    balances: db.prepare('SELECT phone, SUM(points) AS balance FROM loyalty_ledger GROUP BY phone'),
+    earnedFor: db.prepare("SELECT points FROM loyalty_ledger WHERE order_id = ? AND kind = 'earn'"),
+    ordersForPhone: db.prepare('SELECT * FROM orders WHERE phone = ? ORDER BY id DESC'),
+    ordersBetween: db.prepare('SELECT * FROM orders WHERE created_at >= ? AND created_at < ? ORDER BY created_at'),
+    linesBetween: db.prepare(`SELECT oi.order_id, oi.item_id, oi.name, oi.price, oi.qty, oi.note FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id WHERE o.created_at >= ? AND o.created_at < ?`),
+    insertItem: db.prepare('INSERT INTO menu_items (category, name, description, price, veg, sort, active) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+    addPriceHistory: db.prepare('INSERT INTO price_history (batch, item_id, old_price, new_price, note, at) VALUES (?, ?, ?, ?, ?, ?)'),
+    lastBatch: db.prepare('SELECT * FROM price_history WHERE batch = (SELECT batch FROM price_history ORDER BY id DESC LIMIT 1)'),
+    deleteBatch: db.prepare('DELETE FROM price_history WHERE batch = ?'),
     getSession: db.prepare('SELECT data, updated_at FROM wa_sessions WHERE phone = ?'),
     putSession: db.prepare(`INSERT INTO wa_sessions (phone, data, updated_at) VALUES (?, ?, ?)
       ON CONFLICT(phone) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`),
@@ -121,6 +136,44 @@ function createSqliteStore(db) {
       if (outletId) { where.push('(outlet_id = ? OR outlet_id IS NULL)'); args.push(outletId); }
       return db.prepare(`SELECT * FROM wa_handoffs WHERE ${where.join(' AND ')} ORDER BY updated_at DESC LIMIT 100`).all(...args);
     },
+
+    // Menu management (includes inactive items)
+    allMenuItems: () => q.allItems.all(),
+    updateMenuItem(id, fields) {
+      const allowed = ['category', 'name', 'description', 'price', 'veg', 'active', 'sort'];
+      const keys = Object.keys(fields).filter((k) => allowed.includes(k));
+      if (keys.length) db.prepare(`UPDATE menu_items SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k]), id);
+    },
+    insertMenuItem: (i) => Number(q.insertItem.run(i.category, i.name, i.description || '', i.price, i.veg ? 1 : 0, i.sort ?? 9999, i.active === 0 ? 0 : 1).lastInsertRowid),
+    setPrices: (changes, batch, note, ts) => transaction(() => {
+      for (const c of changes) {
+        db.prepare('UPDATE menu_items SET price = ? WHERE id = ?').run(c.newPrice, c.id);
+        if (batch) q.addPriceHistory.run(batch, c.id, c.oldPrice, c.newPrice, note || null, ts);
+      }
+    }),
+    lastPriceBatch: () => q.lastBatch.all(),
+    dropPriceBatch: (batch) => q.deleteBatch.run(batch),
+
+    // CRM & loyalty
+    customer: (phone) => q.customer.get(phone) || null,
+    customers: () => q.customers.all(),
+    upsertCustomer(c) {
+      const cur = q.customer.get(c.phone);
+      const row = { tags: '', notes: '', marketing_opt_in: 0, ...cur, ...Object.fromEntries(Object.entries(c).filter(([, v]) => v !== undefined)) };
+      const cols = ['phone', 'name', 'first_seen_at', 'last_seen_at', 'first_channel', 'last_address', 'last_lat', 'last_lng', 'last_outlet_id', 'marketing_opt_in', 'tags', 'notes'];
+      db.prepare(`INSERT INTO customers (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
+        ON CONFLICT(phone) DO UPDATE SET ${cols.slice(1).map((k) => `${k} = excluded.${k}`).join(', ')}`)
+        .run(...cols.map((k) => row[k] ?? null));
+    },
+    addPoints: (e) => q.addPoints.run(e.phone, e.orderId ?? null, e.points, e.kind, e.note ?? null, e.at).changes > 0,
+    pointsLedger: (phone) => q.ledger.all(phone),
+    pointsBalances: () => new Map(q.balances.all().map((r) => [r.phone, r.balance])),
+    pointsEarnedFor: (orderId) => q.earnedFor.get(orderId)?.points ?? null,
+    ordersForPhone: (phone) => q.ordersForPhone.all(phone),
+
+    // Analytics
+    ordersBetween: (fromIso, toIso) => q.ordersBetween.all(fromIso, toIso),
+    linesBetween: (fromIso, toIso) => q.linesBetween.all(fromIso, toIso),
 
     // WhatsApp conversation state
     getSession(phone) {

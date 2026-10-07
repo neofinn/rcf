@@ -151,15 +151,6 @@ async function renderChats(chats) {
   $('view').querySelectorAll('.bubbles').forEach((b) => { b.scrollTop = b.scrollHeight; });
 }
 
-async function renderMenu() {
-  if (!state.outletId) { $('view').innerHTML = '<p class="muted">Choose an outlet to manage its stock.</p>'; return; }
-  const items = await api(`/outlets/${state.outletId}/menu`);
-  $('view').innerHTML = `<table><thead><tr><th>Item</th><th>Category</th><th>Price</th><th>In stock</th></tr></thead><tbody>
-    ${items.map((i) => `<tr><td>${esc(i.name)}</td><td>${esc(i.category)}</td><td>${rupees(i.price)}</td>
-      <td><input type="checkbox" style="width:auto" data-item="${i.id}" ${i.available ? 'checked' : ''}></td></tr>`).join('')}
-  </tbody></table>`;
-}
-
 async function renderStats() {
   const rows = await api('/summary');
   const name = (id) => (state.outlets.find((o) => o.id === id)?.name || '').replace('Raju Chinese - ', '');
@@ -172,7 +163,8 @@ async function renderStats() {
 async function refresh() {
   try {
     const chats = await loadChats();
-    const view = state.view === 'menu' ? renderMenu() : state.view === 'chats' ? renderChats(chats) : renderOrders();
+    const insights = window.RCInsights?.[state.view];
+    const view = insights ? insights() : state.view === 'chats' ? renderChats(chats) : renderOrders();
     await Promise.all([view, renderStats()]);
   } catch (e) {
     if (e.message !== 'unauthorized') console.error(e);
@@ -205,12 +197,18 @@ document.addEventListener('click', async (e) => {
     refresh();
   }
   const v = e.target.closest('[data-view]');
-  if (v) {
-    state.view = v.dataset.view;
-    document.querySelectorAll('[data-view]').forEach((x) => x.classList.toggle('on', x === v));
-    refresh();
-  }
+  if (v) setView(v.dataset.view);
 });
+
+function setView(view) {
+  state.view = view;
+  document.querySelector('.viz-tip')?.setAttribute('hidden', '');
+  document.querySelectorAll('[data-view]').forEach((x) => x.classList.toggle('on', x.dataset.view === view));
+  return refresh();
+}
+
+// Shared with insights.js (Customers, Menu, Analytics).
+window.RCAdmin = { api, state, refresh, setView };
 
 document.addEventListener('submit', async (e) => {
   const f = e.target.closest('[data-chat]');
@@ -264,7 +262,8 @@ async function start() {
   syncAccepting();
   refresh();
   clearInterval(poll);
-  poll = setInterval(() => { if (state.view !== 'menu') refresh(); }, 5000);
+  // Live views refresh themselves; back-office views refresh when you act.
+  poll = setInterval(() => { if (['live', 'chats', 'history'].includes(state.view)) refresh(); else loadChats().catch(() => {}); }, 5000);
 }
 
 start();
