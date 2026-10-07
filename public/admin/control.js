@@ -75,18 +75,53 @@
 
   // ---- Outlets ----------------------------------------------------------------
 
+  // Add-outlet form, also used to edit one (S.editing = outlet id).
+  const CITIES = ['Chandigarh', 'Mohali', 'Panchkula', 'Zirakpur', 'Kharar', 'Dera Bassi', 'New Chandigarh'];
+  function outletForm(o) {
+    const v = (k) => esc(o?.[k] ?? '');
+    const f = (name, label, input, hint = '') => `<label class="ofield"><span>${label}</span>${input}${hint ? `<small class="muted">${hint}</small>` : ''}</label>`;
+    return `<form id="outletForm" class="outlet-form" data-id="${o ? o.id : ''}">
+      ${f('name', 'Outlet name', `<input name="name" required value="${o ? esc(short(o.name)) : ''}" placeholder="e.g. Sector 22">`, 'Shown to customers as "Raju Chinese - …"')}
+      ${f('city', 'City', `<input name="city" required list="cityList" value="${v('city')}" placeholder="Chandigarh">`)}
+      ${f('address', 'Full address', `<input name="address" required value="${v('address')}" placeholder="SCO / booth no., market, sector, PIN code">`)}
+      ${f('phone', 'Outlet phone', `<input name="phone" required inputmode="tel" value="${v('phone')}" placeholder="98765 43210">`)}
+      ${f('mapsLink', 'Location', `<input name="mapsLink" placeholder="Paste the Google Maps link of the outlet">`, `Or type the coordinates:${o ? ` now ${o.lat}, ${o.lng}` : ''}`)}
+      <div class="row"><input name="lat" type="number" step="any" placeholder="Latitude 30.7…" value="${v('lat')}" aria-label="Latitude"><input name="lng" type="number" step="any" placeholder="Longitude 76.7…" value="${v('lng')}" aria-label="Longitude"></div>
+      <div class="row">${f('opens', 'Opens', `<input name="opens" type="time" required value="${o ? v('opens') : '11:00'}">`)}${f('closes', 'Closes', `<input name="closes" type="time" required value="${o ? v('closes') : '23:00'}">`, 'Same time = open 24 hours')}</div>
+      ${f('upiId', 'UPI ID for online payments', `<input name="upiId" value="${v('upi_id')}" placeholder="rajuchinese.sec22@okaxis">`, 'Optional. Without it, customers pay cash/UPI on delivery.')}
+      ${f('sfxStoreCode', 'Shadowfax store code', `<input name="sfxStoreCode" value="${v('sfx_store_code')}">`, 'Optional, from Shadowfax onboarding.')}
+      ${f('waPaymentConfig', 'WhatsApp payment configuration', `<input name="waPaymentConfig" value="${v('wa_payment_config')}">`, 'Optional, from WhatsApp Manager → Payments.')}
+      ${o ? '' : f('pin', 'Outlet panel PIN', '<input name="pin" type="password" inputmode="numeric" pattern="\\d{4,8}" placeholder="4–8 digits">', 'Optional now; you can set it later.')}
+      <datalist id="cityList">${CITIES.map((c) => `<option value="${c}">`).join('')}</datalist>
+      <p class="error hidden" role="alert"></p>
+      <div class="row"><button class="btn" style="width:auto">${o ? 'Save changes' : 'Add outlet'}</button><button type="button" class="btn secondary" style="width:auto" data-outlet-form="close">Cancel</button></div>
+    </form>`;
+  }
+
   async function renderOutlets(ctx) {
-    if (document.activeElement?.closest?.('#view .outlet-table input')) return;
+    if (document.activeElement?.closest?.('#view .outlet-table input, #view .outlet-form')) return;
     const [outlets, logins] = await Promise.all([ctx.api('/outlets'), ctx.api('/logins')]);
     ctx.state.outlets = outlets;
+    // Keep the top bar's outlet filter in step with new outlets.
+    const sel = $('outlet');
+    if (sel && sel.options.length !== outlets.length + 1) {
+      sel.innerHTML = '<option value="">All outlets</option>' + outlets.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
+      sel.value = ctx.state.outletId;
+    }
     const login = new Map(logins.map((l) => [l.outletId, l]));
+    const editing = S.editing === 'new' ? null : outlets.find((o) => o.id === S.editing);
     $('view').innerHTML = `
+      <section class="card">
+        <header><h3>${S.editing ? (editing ? `Edit ${esc(short(editing.name))}` : 'Add a new outlet') : `${outlets.length} outlets`}</h3>
+          ${S.editing ? '' : '<button type="button" class="btn" style="width:auto" data-outlet-form="new">+ Add outlet</button>'}</header>
+        ${S.editing ? outletForm(editing) : '<p class="small muted">A new outlet takes orders straight away: customers nearest to it are routed there, the whole menu is in stock until you change it on the Stock tab, and its tablet can log in once it has a PIN.</p>'}
+      </section>
       <section class="card">
         <header><h3>Outlets and outlet panel logins</h3>
           <span class="muted small">Each outlet's tablet opens <b>/outlet/</b> and logs in with the PIN you set here. It then sees only that outlet's orders, chats and (read-only) stock. Changing a PIN signs that outlet's tablets out.</span></header>
         ${S.msg ? `<p class="small" role="status">${esc(S.msg)}</p>` : ''}
         <div class="table-wrap"><table class="data outlet-table">
-          <thead><tr><th>Outlet</th><th>Taking orders</th><th>Panel login</th><th>Tablets signed in</th><th>Set new PIN</th></tr></thead>
+          <thead><tr><th>Outlet</th><th>Taking orders</th><th>Panel login</th><th>Tablets signed in</th><th>Set new PIN</th><th><span class="sr-only">Edit</span></th></tr></thead>
           <tbody>${outlets.map((o) => {
             const l = login.get(o.id) || {};
             return `<tr>
@@ -95,6 +130,7 @@
               <td>${l.hasPin ? `PIN set ${esc(when(l.pinSetAt))}` : '<span class="chip">No PIN yet</span>'}</td>
               <td>${l.devices || 0}${l.lastLoginAt ? `<br><span class="small muted">last ${esc(when(l.lastLoginAt))}</span>` : ''}${l.devices ? `<br><button type="button" class="link" data-signout="${o.id}">Sign out all</button>` : ''}</td>
               <td><form class="row" data-pin="${o.id}"><input name="pin" type="password" inputmode="numeric" pattern="\\d{4,8}" placeholder="4–8 digits" required aria-label="New PIN for ${esc(short(o.name))}" style="max-width:120px"><button class="btn" style="width:auto">Save</button></form></td>
+              <td><button type="button" class="link" data-outlet-form="${o.id}">Edit</button></td>
             </tr>`;
           }).join('')}</tbody>
         </table></div>
@@ -139,6 +175,14 @@
       saveStock(body, 'Saved for every outlet.');
       return;
     }
+    const of = e.target.closest('[data-outlet-form]');
+    if (of) {
+      const v = of.dataset.outletForm;
+      S.editing = v === 'close' ? null : v === 'new' ? 'new' : Number(v);
+      document.activeElement?.blur();
+      window.RCAdmin.refresh().then(() => { $('outletForm')?.elements.name.focus(); window.scrollTo({ top: 0 }); });
+      return;
+    }
     const so = e.target.closest('[data-signout]');
     if (so && confirm('Sign out every tablet of this outlet? They will need the PIN again.')) {
       window.RCAdmin.api(`/outlets/${so.dataset.signout}/sign-out`, { method: 'POST' })
@@ -147,6 +191,32 @@
   });
 
   document.addEventListener('submit', async (e) => {
+    const form = e.target.closest('#outletForm');
+    if (form) {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(form));
+      const body = { name: data.name, city: data.city, address: data.address, phone: data.phone, opens: data.opens, closes: data.closes,
+        upiId: data.upiId, sfxStoreCode: data.sfxStoreCode, waPaymentConfig: data.waPaymentConfig };
+      if (data.mapsLink.trim()) body.mapsLink = data.mapsLink.trim(); else { body.lat = data.lat; body.lng = data.lng; }
+      const id = form.dataset.id;
+      try {
+        const res = await window.RCAdmin.api(id ? `/outlets/${id}` : '/outlets', { method: id ? 'PATCH' : 'POST', body });
+        const outlet = res.outlet || res;
+        const near = res.nearest ? ` Nearest other outlet: ${short(res.nearest.name)}, ${res.nearest.km} km away${res.nearest.km < 0.5 ? ' (check the location is right)' : ''}.` : '';
+        if (!id && data.pin) await window.RCAdmin.api(`/outlets/${outlet.id}/pin`, { method: 'POST', body: { pin: data.pin } });
+        S.msg = id ? `Saved ${short(outlet.name)}.${near}` : `${short(outlet.name)} added and taking orders.${near}${data.pin ? ' PIN set.' : ' Set its PIN below so its tablet can log in.'}`;
+        S.editing = null;
+        document.activeElement?.blur();
+      } catch (err) {
+        // Keep what was typed; just show the problem.
+        const p = form.querySelector('.error');
+        p.textContent = err.message;
+        p.classList.remove('hidden');
+        return;
+      }
+      window.RCAdmin.refresh();
+      return;
+    }
     const f = e.target.closest('[data-pin]');
     if (!f) return;
     e.preventDefault();
@@ -158,7 +228,7 @@
     window.RCAdmin.refresh();
   });
 
-  const reset = (fn) => (ctx) => { if (window.RCAdmin.state.lastView !== window.RCAdmin.state.view) S.msg = ''; window.RCAdmin.state.lastView = window.RCAdmin.state.view; return fn(ctx); };
+  const reset = (fn) => (ctx) => { if (window.RCAdmin.state.lastView !== window.RCAdmin.state.view) { S.msg = ''; S.editing = null; } window.RCAdmin.state.lastView = window.RCAdmin.state.view; return fn(ctx); };
   Object.assign(window.RCInsights, {
     stock: () => reset(renderStock)(window.RCAdmin),
     outlets: () => reset(renderOutlets)(window.RCAdmin),

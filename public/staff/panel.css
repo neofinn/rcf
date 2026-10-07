@@ -139,3 +139,9 @@ td, th { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: le
 .stock-cell.out input[type=number], .stock-cell.low input[type=number] { border-color: var(--accent); background: rgba(244, 163, 0, 0.12); }
 .stock-all { white-space: nowrap; }
 .stock-all .chip { cursor: pointer; }
+
+/* Add / edit outlet */
+.outlet-form { display: grid; gap: 10px; max-width: 640px; }
+.outlet-form .row > * { flex: 1; }
+.ofield { display: grid; gap: 4px; font-weight: 600; font-size: 0.88rem; }
+.ofield small { font-weight: 400; }

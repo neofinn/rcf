@@ -23,6 +23,7 @@ const { createMenuAdmin } = require('./menu-admin');
 const { createReviews } = require('./reviews');
 const { createStaffAuth } = require('./staff-auth');
 const { createStockService } = require('./stock');
+const { createOutletAdmin } = require('./outlet-admin');
 
 function safeEqual(a, b) {
   const x = Buffer.from(String(a || ''));
@@ -50,6 +51,7 @@ function createApp({
   const crm = createCrm({ store, orders }); // before notifications, so points are credited first
   const menuAdmin = createMenuAdmin({ store });
   const stock = createStockService({ store, orders });
+  const outletAdmin = createOutletAdmin({ store });
   const staffAuth = createStaffAuth({ store, adminToken: config.adminToken });
   // Dev: keep messages the business sends on its own so the simulator can show them.
   const outbox = [];
@@ -92,7 +94,7 @@ function createApp({
     ? safeEqual(req.get('x-callback-token'), config.shadowfax.callbackToken)
     : !config.production);
 
-  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock })) {
+  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin })) {
     if (route.dev && !enableDevTools) continue;
     // Shadowfax may call back with POST or PUT.
     const methods = route.partner ? ['post', 'put'] : [route.method.toLowerCase()];

@@ -50,7 +50,7 @@ function authorize(route, auth) {
   return true;
 }
 
-function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock }) {
+function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin }) {
   // Head office reaches every outlet; an outlet tablet only its own.
   const scope = (auth, requested) => (auth.role === 'outlet' ? auth.outletId : Number(requested) || null);
   const mine = (auth, outletId) => auth.role === 'admin' || outletId === auth.outletId;
@@ -324,13 +324,14 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
     // ---- Analytics ------------------------------------------------------
     { method: 'GET', path: '/api/admin/analytics', admin: true, handle: ({ query }) => computeAnalytics(store, query) },
     {
+      // Edit details (name, address, location, phone, hours, UPI, Shadowfax code) or pause.
       method: 'PATCH', path: '/api/admin/outlets/:id', admin: true,
-      handle: ({ params, body }) => {
-        const id = Number(params.id);
-        if (!orders.getOutlet(id)) return notFound('Unknown outlet');
-        if (typeof body.acceptingOrders === 'boolean') store.setAccepting(id, body.acceptingOrders);
-        return orders.getOutlet(id);
-      },
+      handle: ({ params, body }) => outletAdmin.update(Number(params.id), body) || notFound('Unknown outlet'),
+    },
+    {
+      // Open a new outlet. Returns { outlet, nearest } (nearest other outlet, as a sanity check).
+      method: 'POST', path: '/api/admin/outlets', admin: true,
+      handle: ({ body }) => ({ httpStatus: 201, body: outletAdmin.add(body) }),
     },
     { method: 'GET', path: '/api/admin/outlets/:id/menu', admin: true, handle: ({ params }) => orders.menuFor(Number(params.id)) },
     {

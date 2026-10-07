@@ -156,6 +156,46 @@ test('outlet panel: PIN login, only its own orders and chats, stock is read-only
   assert.equal((await s.call('POST', '/api/outlet/login', { outletId: 2, pin: '777123' })).status, 429);
 });
 
+test('head office opens a new outlet: it gets orders, stock and a tablet login', async (t) => {
+  const s = await start();
+  t.after(s.close);
+  const site = { lat: 30.8205, lng: 76.7010 }; // New Chandigarh, away from the fixture outlets
+  const body = {
+    name: 'New Chandigarh', city: 'Mohali', address: 'SCO 12, Omaxe New Chandigarh 140901', phone: '98765 43210',
+    // Open 24h (00:00-00:00) so the test doesn't depend on the clock.
+    mapsLink: `https://www.google.com/maps/place/Raju+Chinese/@${site.lat},${site.lng},17z`, opens: '00:00', closes: '00:00', upiId: 'rc-newchd@okaxis',
+  };
+  assert.equal((await s.call('POST', '/api/admin/outlets', body)).status, 401, 'head office only');
+  for (const [bad, msg] of [[{ mapsLink: 'https://example.com' }, /Couldn't read a location/], [{ mapsLink: undefined, lat: 76.6, lng: 30.7 }, /Location looks wrong/],
+    [{ opens: '9am' }, /Opening time/], [{ upiId: 'nope' }, /UPI ID/], [{ address: '' }, /Address is required/]]) {
+    const r = await s.call('POST', '/api/admin/outlets', { ...body, ...bad }, admin);
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, msg);
+  }
+  const created = await s.call('POST', '/api/admin/outlets', body, admin);
+  assert.equal(created.status, 201);
+  const o = created.body.outlet;
+  assert.equal(o.name, 'Raju Chinese - New Chandigarh');
+  assert.deepEqual([o.lat, o.lng, o.phone, o.slug], [site.lat, site.lng, '+919876543210', 'new-chandigarh']);
+  assert.ok(created.body.nearest.km > 0);
+  assert.equal((await s.call('POST', '/api/admin/outlets', body, admin)).body.error, 'There is already an outlet called "Raju Chinese - New Chandigarh".');
+
+  // Customers right next to it now get it, with the full menu in stock.
+  assert.equal((await s.call('POST', '/api/locate', site)).body.outlet.id, o.id);
+  assert.ok((await s.call('GET', `/api/menu?outletId=${o.id}`)).body.flatMap((c) => c.items).every((i) => i.available));
+  assert.ok((await s.call('GET', '/api/admin/stock', undefined, admin)).body.outlets.some((x) => x.id === o.id));
+
+  // Its tablet can log in once head office sets the PIN.
+  await s.call('POST', `/api/admin/outlets/${o.id}/pin`, { pin: '2468' }, admin);
+  assert.equal((await s.call('POST', '/api/outlet/login', { outletId: o.id, pin: '2468' })).status, 200);
+
+  // Fix a pin dropped in the wrong place, change hours.
+  const moved = await s.call('PATCH', `/api/admin/outlets/${o.id}`, { lat: 30.8150, lng: 76.7050, closes: '22:30' }, admin);
+  assert.deepEqual([moved.body.lat, moved.body.closes], [30.815, '22:30']);
+  assert.equal(moved.body.name, 'Raju Chinese - New Chandigarh', 'fields not sent stay as they were');
+  assert.equal((await s.call('PATCH', `/api/admin/outlets/${o.id}`, { closes: '25:00' }, admin)).status, 400);
+});
+
 test('WhatsApp webhook: verification, signature, dedupe and status notifications', async (t) => {
   const s = await start();
   t.after(s.close);

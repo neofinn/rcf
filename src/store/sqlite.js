@@ -9,6 +9,10 @@ function createSqliteStore(db) {
     outlets: db.prepare('SELECT * FROM outlets WHERE active = 1 ORDER BY id'),
     outlet: db.prepare('SELECT * FROM outlets WHERE id = ?'),
     setAccepting: db.prepare('UPDATE outlets SET accepting_orders = ? WHERE id = ?'),
+    allOutlets: db.prepare('SELECT * FROM outlets ORDER BY id'),
+    insertOutlet: db.prepare(`INSERT INTO outlets
+      (slug, name, city, address, lat, lng, phone, delivery_radius_km, opens, closes, upi_id, upi_name, sfx_store_code, wa_payment_config, accepting_orders, active)
+      VALUES (@slug, @name, @city, @address, @lat, @lng, @phone, @delivery_radius_km, @opens, @closes, @upi_id, @upi_name, @sfx_store_code, @wa_payment_config, @accepting_orders, @active)`),
     items: db.prepare('SELECT * FROM menu_items WHERE active = 1 ORDER BY sort'),
     unavailable: db.prepare('SELECT item_id FROM outlet_unavailable_items WHERE outlet_id = ?'),
     stock: db.prepare('SELECT item_id, remaining, updated_at FROM outlet_stock WHERE outlet_id = ?'),
@@ -105,6 +109,13 @@ function createSqliteStore(db) {
     outlets: () => q.outlets.all(),
     outlet: (id) => q.outlet.get(id) || null,
     setAccepting: (id, accepting) => q.setAccepting.run(accepting ? 1 : 0, id),
+    allOutlets: () => q.allOutlets.all(),
+    insertOutlet: (o) => Number(q.insertOutlet.run(o).lastInsertRowid),
+    updateOutlet(id, fields) {
+      const cols = Object.keys(fields);
+      if (!cols.length) return;
+      db.prepare(`UPDATE outlets SET ${cols.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`).run({ ...fields, id });
+    },
     menuItems: () => q.items.all(),
     unavailableItemIds: (outletId) => q.unavailable.all(outletId).map((r) => r.item_id),
     setAvailability: (outletId, itemId, available) => (available ? q.markIn : q.markOut).run(outletId, itemId),

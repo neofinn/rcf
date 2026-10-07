@@ -13,6 +13,7 @@ const { createCrm } = require('../src/crm');
 const { createMenuAdmin } = require('../src/menu-admin');
 const { createStaffAuth } = require('../src/staff-auth');
 const { createStockService } = require('../src/stock');
+const { createOutletAdmin } = require('../src/outlet-admin');
 const { seedSampleHistory } = require('./sample-history');
 const { createReviews } = require('../src/reviews');
 const { createBot, createSessionStore } = require('../src/whatsapp/bot');
@@ -53,7 +54,8 @@ function createDemoBackend() {
   const staffAuth = createStaffAuth({ store, adminToken: 'demo' });
   for (const o of orders.listOutlets()) staffAuth.setPin(o.id, DEMO_PIN);
   const stock = createStockService({ store, orders });
-  const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, staffAuth, stock });
+  const outletAdmin = createOutletAdmin({ store });
+  const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, staffAuth, stock, outletAdmin });
 
   /** Serve one API request. Resolves to { status, body }. */
   async function request(method, url, body, token = '') {
@@ -79,7 +81,9 @@ function createDemoBackend() {
     return { status: 404, body: { error: 'Not found' } };
   }
 
-  return { request, orders, handoffs, store, dispatcher, assignOutlet, deliveryCharge, delivery: config.delivery, outlets: () => orders.listOutlets(), localities: () => store.localities() };
+  // Demo: a new outlet without a PIN gets the demo PIN so its tablet can sign in.
+  const ensureDemoPin = (id) => { if (!store.outletPinHash(id)) staffAuth.setPin(id, DEMO_PIN); };
+  return { request, ensureDemoPin, orders, handoffs, store, dispatcher, assignOutlet, deliveryCharge, delivery: config.delivery, outlets: () => orders.listOutlets(), localities: () => store.localities() };
 }
 
 module.exports = { createDemoBackend };

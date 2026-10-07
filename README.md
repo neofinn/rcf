@@ -106,7 +106,7 @@ Setup: get API access from Shadowfax (Dedicated Store model). Put each outlet's 
 **Head office panel (`/admin/`)**, for the owner, logs in with `ADMIN_TOKEN` and sees every outlet:
 - Live orders, chats and history for all outlets (or filter to one).
 - **Stock** (`src/stock.js`): every dish × every outlet. Tick to sell it there; type a count to sell only that many (orders take from it, a cancellation puts it back, at 0 the dish shows as sold out on web and WhatsApp, and customers can't order more than what's left). Empty count = no limit. Per dish: *All on*, *All off*, *No limits* across outlets. Tiles show what's off, sold out and running low.
-- **Outlets:** pause or resume an outlet, set each outlet's panel PIN, see how many tablets are signed in, sign them out.
+- **Outlets:** **add a new outlet** or edit one (name, address, phone, location from a pasted Google Maps link or coordinates, opening hours, UPI ID, Shadowfax store code, WhatsApp payment configuration; `src/outlet-admin.js`). A new outlet takes orders straight away: routing sends nearby customers to it, the whole menu is in stock, and its tablet logs in once it has a PIN. Also pause or resume an outlet, set each outlet's panel PIN, see how many tablets are signed in, sign them out.
 - Customers, Menu and Analytics below.
 
 ## Back office (head office panel `/admin/`)
@@ -223,6 +223,7 @@ src/
   crm.js                 customers, segments, loyalty points
   menu-admin.js          dish editing, bulk price changes, undo
   stock.js               per-outlet stock: on/off and counts (head office)
+  outlet-admin.js        add a new outlet, edit outlet details
   staff-auth.js          outlet PIN logins and head office token
   analytics.js           sales, rush, speed, combos and review analytics
   reviews.js             WhatsApp star ratings after delivery

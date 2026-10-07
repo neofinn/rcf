@@ -320,6 +320,15 @@ function observe(from, req, res) {
   }
   // Pausing an outlet hands its zone to the neighbours.
   if (req.method === 'PATCH' && (path.startsWith('/api/admin/outlets/') || path === '/api/outlet/me')) drawZones();
+  // A new or moved outlet: redraw the map and offer its tablet.
+  if (res.status < 300 && ((req.method === 'POST' && path === '/api/admin/outlets') || (req.method === 'PATCH' && path.startsWith('/api/admin/outlets/') && (req.body.lat !== undefined || req.body.mapsLink)))) {
+    drawMap();
+    const o = res.body.outlet || res.body;
+    if (req.method === 'POST') setTimeout(() => be.ensureDemoPin(o.id), 0); // after the form sets its own PIN, if any
+    if (req.method === 'POST') log('Head office', 'outlet', `New outlet <b>${esc(short(o.name))}</b> opened; nearby customers now go there`);
+    $('tabletOutlet').innerHTML = be.outlets().map((x) => `<option value="${x.id}">${esc(short(x.name))}</option>`).join('');
+    $('tabletOutlet').value = String(tabletOutlet);
+  }
   if (path === '/api/dev/whatsapp' && req.body.type === 'location') {
     const p = req.body.location;
     const a = be.assignOutlet(be.outlets(), p, { fulfilment: 'delivery' });

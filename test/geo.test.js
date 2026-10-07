@@ -53,3 +53,11 @@ test('closed outlets are reported as closed', () => {
   assert.equal(a.reason, 'closed');
   assert.equal(a.pickupSuggestion, null);
 });
+
+test('outlet location from a pasted Google Maps link or "lat, lng"', () => {
+  const { coordsFromMapsLink } = require('../src/outlet-admin');
+  assert.deepEqual(coordsFromMapsLink('https://www.google.com/maps/place/X/@30.7527,76.7711,17z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!8m2!3d30.75266!4d76.77114'), { lat: 30.75266, lng: 76.77114 });
+  assert.deepEqual(coordsFromMapsLink('https://maps.google.com/?q=30.71998,76.7656'), { lat: 30.71998, lng: 76.7656 });
+  assert.deepEqual(coordsFromMapsLink(' 30.70053, 76.76582 '), { lat: 30.70053, lng: 76.76582 });
+  assert.equal(coordsFromMapsLink('https://maps.app.goo.gl/abc123'), null);
+});
