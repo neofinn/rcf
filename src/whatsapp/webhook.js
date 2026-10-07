@@ -15,7 +15,15 @@ function parseWebhook(body) {
         const base = { id: m.id, from: m.from, name: names.get(m.from) || null };
         if (m.type === 'text') out.push({ ...base, type: 'text', text: m.text?.body || '' });
         else if (m.type === 'location') out.push({ ...base, type: 'location', location: { lat: m.location.latitude, lng: m.location.longitude } });
-        else if (m.type === 'interactive') {
+        else if (m.type === 'interactive' && m.interactive?.type === 'payment') {
+          // Payment confirmation for a "Review and pay" order.
+          const p = m.interactive.payment || {};
+          out.push({
+            ...base, type: 'payment', referenceId: p.reference_id, status: String(p.status || '').toLowerCase(),
+            transactionId: p.transaction_id || null,
+            amount: p.total_amount ? Math.round((p.total_amount.value * 100) / (p.total_amount.offset || 100)) : null,
+          });
+        } else if (m.type === 'interactive') {
           const id = m.interactive?.button_reply?.id || m.interactive?.list_reply?.id;
           out.push(id ? { ...base, type: 'reply', replyId: id } : { ...base, type: 'unsupported' });
         } else if (m.type === 'order') {
@@ -28,6 +36,17 @@ function parseWebhook(body) {
           out.push({ ...base, type: 'image', mediaId: m.image?.id, text: m.image?.caption || '' });
         } else if (m.type === 'button') out.push({ ...base, type: 'text', text: m.button?.payload || m.button?.text || '' });
         else out.push({ ...base, type: 'unsupported' });
+      }
+      // Payment status updates for "Review and pay" orders arrive as statuses.
+      for (const st of v.statuses || []) {
+        if (st.type !== 'payment' || !st.payment?.reference_id) continue;
+        const from = st.from || st.recipient_id;
+        out.push({
+          id: `${st.id}:${st.status}`, from, name: names.get(from) || null, type: 'payment',
+          referenceId: st.payment.reference_id, status: String(st.status || '').toLowerCase(),
+          transactionId: st.payment.transaction?.id || null,
+          amount: st.payment.amount ? Math.round((st.payment.amount.value * 100) / (st.payment.amount.offset || 100)) : null,
+        });
       }
     }
   }

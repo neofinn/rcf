@@ -8,6 +8,7 @@ function createMemoryStore(seed) {
     id: i + 1, slug: o.slug, name: o.name, city: o.city, address: o.address, lat: o.lat, lng: o.lng, phone: o.phone,
     delivery_radius_km: o.radiusKm, opens: o.opens, closes: o.closes, accepting_orders: 1, active: 1,
     upi_id: o.upiId || null, upi_name: 'Raju Chinese', sfx_store_code: o.sfxStoreCode || null,
+    wa_payment_config: o.waPaymentConfig || null,
   }));
   const items = seed.menu.map((m, i) => ({
     id: i + 1, category: m.category, name: m.name, description: m.description || '', price: m.price * 100,

@@ -230,8 +230,8 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher }) {
     {
       method: 'POST', path: '/api/dev/whatsapp', dev: true,
       handle: ({ body }) => {
-        const { from = '919999999999', name = 'Guest', type = 'text', text, location, replyId, items } = body;
-        return bot.handle({ from, name, type, text, location, replyId, items });
+        const { from = '919999999999', name = 'Guest', type = 'text', text, location, replyId, items, referenceId, status, amount, transactionId } = body;
+        return bot.handle({ from, name, type, text, location, replyId, items, referenceId, status, amount, transactionId });
       },
     },
     {

@@ -249,6 +249,8 @@ function createOrderService(store) {
   const PAYMENT_TRANSITIONS = {
     pending: ['claimed', 'paid', 'cod'],
     claimed: ['paid', 'pending', 'cod'],
+    // A WhatsApp/UPI payment can still land after the customer chose cash.
+    cod: ['paid'],
   };
 
   // by: 'staff' (dashboard), 'customer' (WhatsApp/web) or 'gateway' (future

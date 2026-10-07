@@ -55,10 +55,16 @@ Customers can type `menu`, `cart`, `track` or `reset` at any time. Orders from W
 At checkout (web and WhatsApp) the customer picks **💳 Pay now (UPI)** or **💵 Pay on delivery/pickup**.
 
 - **Each order gets its own UPI request**, unlike a fixed QR printed or saved in the WhatsApp Business app. The request is for the exact bill amount, with the order code as the reference, and goes to the **UPI ID of the outlet that is cooking it**. Every outlet's own merchant UPI ID is stored on the outlet (`outlets.upi_id`); point them all at one ID if payments are collected centrally.
-- **On WhatsApp** the customer gets the QR as an image (`/pay/<code>/qr.png`) plus a link to the order page, whose **Pay with UPI app** button opens GPay/PhonePe/Paytm/BHIM with payee, amount and note filled in. Then they tap **I've paid** or send the payment screenshot.
+- **On WhatsApp, paid inside the chat** (`WHATSAPP_PAYMENTS=on`): the bot sends WhatsApp's own **"Review and pay"** order message (`order_details`, India UPI). It lists the items, packing, GST, "Delivery by Shadowfax" and the total, with the order code as `reference_id`.
+  - The customer pays with **WhatsApp's built-in UPI or any UPI app** on the phone.
+  - WhatsApp reports the result to our webhook, and the order is marked **paid automatically**. This only happens when the amount matches and the payment comes from the ordering number; otherwise it goes to staff to check.
+  - A failed payment offers **Try again** or **Pay cash instead**.
+  - Later status changes update the order card in WhatsApp (`order_status`: processing → shipped → completed).
+  - Setup: in Meta Business Suite → WhatsApp Manager → Payments, add each outlet's UPI ID as a *direct payment method* configuration, and put its name in `outlets.wa_payment_config` (seed: `rc-<outlet>`).
+- **On WhatsApp, also always**: the **dynamic QR for this order and amount** as an image (`/pay/<code>/qr.png`), for paying from another phone. There's also a link to the order page, whose **Pay with UPI app** button opens GPay/PhonePe/Paytm/BHIM pre-filled. QR payments are confirmed with **I've paid by QR** or a screenshot, then checked by staff, because a plain QR doesn't report back. Without WhatsApp payments configured, the bot sends just the QR and link.
 - **On the web** the tracking page shows the same QR and button straight after ordering.
 - **Outlet staff** see `UPI payment pending` / `Customer says paid` on the order card and tap **Payment received** once it shows in their UPI app (or **Not received** / **Take cash instead**). WhatsApp customers are told either way.
-- Confirmation is manual because plain UPI QR codes don't report payments back to us. For automatic confirmation, add a payment gateway (Razorpay, PayU, Cashfree) or Meta's *Payments on WhatsApp (India)*. Their webhook calls `orders.setPayment(code, 'paid', now, 'gateway')`, and the rest of the flow stays as is.
+- QR and web payments are confirmed by staff because plain UPI QR codes don't report back; payments made through WhatsApp's "Review and pay" confirm themselves. For automatic confirmation, add a payment gateway (Razorpay, PayU, Cashfree) or Meta's *Payments on WhatsApp (India)*. Their webhook calls `orders.setPayment(code, 'paid', now, 'gateway')`, and the rest of the flow stays as is.
 - Outlets without a UPI ID only offer pay on delivery.
 
 ## Delivery riders: Shadowfax (`src/delivery/`)

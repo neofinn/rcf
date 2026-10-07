@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS outlets (
   upi_id TEXT,
   upi_name TEXT,
   sfx_store_code TEXT, -- Shadowfax store code, assigned at Shadowfax onboarding
+  wa_payment_config TEXT, -- WhatsApp payment configuration name (Meta Business Suite)
   opens TEXT NOT NULL DEFAULT '11:00',
   closes TEXT NOT NULL DEFAULT '23:00',
   accepting_orders INTEGER NOT NULL DEFAULT 1,
@@ -157,6 +158,11 @@ function migrate(db) {
   if (!db.prepare('PRAGMA table_info(outlets)').all().some((c) => c.name === 'sfx_store_code')) {
     db.exec('ALTER TABLE outlets ADD COLUMN sfx_store_code TEXT');
   }
+  if (!db.prepare('PRAGMA table_info(outlets)').all().some((c) => c.name === 'wa_payment_config')) {
+    db.exec('ALTER TABLE outlets ADD COLUMN wa_payment_config TEXT');
+    const set = db.prepare('UPDATE outlets SET wa_payment_config = ? WHERE slug = ?');
+    for (const o of seed.outlets) set.run(o.waPaymentConfig || null, o.slug);
+  }
   const orderCols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
   if (!orderCols.includes('payment_status')) db.exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'cod'");
 }
@@ -166,10 +172,10 @@ function seedIfEmpty(db) {
   db.exec('BEGIN');
   try {
     const o = db.prepare(`INSERT INTO outlets
-      (slug, name, city, address, lat, lng, phone, delivery_radius_km, opens, closes, upi_id, upi_name)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      (slug, name, city, address, lat, lng, phone, delivery_radius_km, opens, closes, upi_id, upi_name, wa_payment_config)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const x of seed.outlets) {
-      o.run(x.slug, x.name, x.city, x.address, x.lat, x.lng, x.phone, x.radiusKm, x.opens, x.closes, x.upiId || null, 'Raju Chinese');
+      o.run(x.slug, x.name, x.city, x.address, x.lat, x.lng, x.phone, x.radiusKm, x.opens, x.closes, x.upiId || null, 'Raju Chinese', x.waPaymentConfig || null);
     }
     const m = db.prepare(`INSERT INTO menu_items (category, name, description, price, veg, sort)
       VALUES (?, ?, ?, ?, ?, ?)`);

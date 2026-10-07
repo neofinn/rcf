@@ -50,4 +50,75 @@ function qrPng(text) {
   return QRCode.toBuffer(text, { errorCorrectionLevel: 'M', width: 600, margin: 3 });
 }
 
-module.exports = { upiLink, qrSvg, qrPng, PAYMENT_LABELS };
+// WhatsApp amounts are { value, offset } with offset 100 = paise.
+const money = (paise) => ({ value: Math.round(paise), offset: 100 });
+
+/**
+ * WhatsApp "Review and pay" message (interactive order_details, India UPI).
+ * The customer pays inside WhatsApp or picks any UPI app; WhatsApp reports
+ * the result to our webhook with reference_id = order code.
+ * Amounts must add up: items (incl. packing) = subtotal; subtotal + tax
+ * (GST) + shipping (delivery charge) = total.
+ */
+function orderDetailsReply(order, outlet, { goodsType = 'digital-goods', now = new Date() } = {}) {
+  const items = order.items.map((i) => ({
+    retailer_id: `RC-${i.item_id}`,
+    name: (i.note ? `${i.name} (${i.note})` : i.name).slice(0, 60),
+    amount: money(i.price),
+    quantity: i.qty,
+  }));
+  if (order.packing) items.push({ retailer_id: 'RC-PACKING', name: 'Packing charges', amount: money(order.packing), quantity: 1 });
+  return {
+    type: 'order_details',
+    text: `Order ${order.code} · ${outlet.name}\nPay with WhatsApp UPI or any UPI app.`,
+    referenceId: order.code,
+    paymentConfiguration: outlet.wa_payment_config,
+    goodsType,
+    total: order.total,
+    order: {
+      status: 'pending',
+      items,
+      subtotal: order.subtotal + (order.packing || 0),
+      tax: { value: order.gst, description: 'GST 5%' },
+      ...(order.delivery_fee ? { shipping: { value: order.delivery_fee, description: `Delivery by Shadowfax${order.distance_km != null ? ` (${order.distance_km} km)` : ''}` } } : {}),
+      // Unpaid requests expire after an hour; the QR and cash stay available.
+      expiration: { timestamp: Math.floor(now.getTime() / 1000) + 3600, description: 'Payment request expired. Pay by QR or cash.' },
+    },
+  };
+}
+
+/** Cloud API payload for an order_details reply. */
+function orderDetailsPayload(r) {
+  const amt = (v) => money(v);
+  return {
+    type: 'order_details',
+    body: { text: r.text },
+    action: {
+      name: 'review_and_pay',
+      parameters: {
+        reference_id: r.referenceId,
+        type: r.goodsType,
+        payment_type: 'upi',
+        payment_configuration: r.paymentConfiguration,
+        currency: 'INR',
+        total_amount: amt(r.total),
+        order: {
+          status: r.order.status,
+          items: r.order.items,
+          subtotal: amt(r.order.subtotal),
+          tax: { ...amt(r.order.tax.value), description: r.order.tax.description },
+          ...(r.order.shipping ? { shipping: { ...amt(r.order.shipping.value), description: r.order.shipping.description } } : {}),
+          expiration: r.order.expiration,
+        },
+      },
+    },
+  };
+}
+
+// Our order status -> WhatsApp order card status.
+const WA_ORDER_STATUS = {
+  accepted: 'processing', preparing: 'processing', ready: 'processing', out_for_delivery: 'shipped',
+  completed: 'completed', cancelled: 'canceled',
+};
+
+module.exports = { upiLink, qrSvg, qrPng, orderDetailsReply, orderDetailsPayload, WA_ORDER_STATUS, PAYMENT_LABELS };

@@ -4,6 +4,7 @@
 // sends them. Without credentials it only logs, so local dev works offline.
 
 const config = require('../config');
+const { orderDetailsPayload } = require('../payments');
 
 function toPayload(to, r) {
   const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to };
@@ -25,6 +26,17 @@ function toPayload(to, r) {
       };
     case 'image':
       return { ...base, type: 'image', image: { link: r.url, ...(r.text ? { caption: r.text } : {}) } };
+    case 'order_details':
+      return { ...base, type: 'interactive', interactive: orderDetailsPayload(r) };
+    case 'order_status':
+      // Updates the order card shown with the "Review and pay" message.
+      return {
+        ...base, type: 'interactive',
+        interactive: {
+          type: 'order_status', body: { text: r.text },
+          action: { name: 'review_order', parameters: { reference_id: r.referenceId, order: { status: r.status, ...(r.description ? { description: r.description } : {}) } } },
+        },
+      };
     case 'location_request':
       return {
         ...base, type: 'interactive',

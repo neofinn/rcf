@@ -4,6 +4,8 @@
 // from the dashboard.
 
 const { rupees } = require('../format');
+const config = require('../config');
+const { WA_ORDER_STATUS } = require('../payments');
 
 const STATUS_MESSAGES = {
   accepted: (o) => `✅ ${o.outlet.name} has accepted your order *${o.code}*.`,
@@ -23,7 +25,12 @@ function notifyOnStatusChange({ orders, client, log = console }) {
     // approved template message.
     if (o.channel !== 'whatsapp' || !STATUS_MESSAGES[o.status]) return;
     const to = o.phone.replace(/^\+/, '');
-    client.send(to, [{ type: 'text', text: STATUS_MESSAGES[o.status](o) }]).catch((e) => log.error('[whatsapp] notify failed', e));
+    const body = STATUS_MESSAGES[o.status](o);
+    // Orders sent with "Review and pay" also get their order card in WhatsApp updated.
+    const outlet = orders.getOutlet(o.outlet_id);
+    const card = config.whatsapp.payments && o.payment_method === 'upi' && outlet?.wa_payment_config && WA_ORDER_STATUS[o.status];
+    const reply = card ? { type: 'order_status', referenceId: o.code, status: card, text: body } : { type: 'text', text: body };
+    client.send(to, [reply]).catch((e) => log.error('[whatsapp] notify failed', e));
   });
 }
 
@@ -42,8 +49,8 @@ function relayHandoffReplies({ handoffs, client, log = console }) {
 /** Tell WhatsApp customers when the outlet confirms (or can't find) their UPI payment. */
 function notifyOnPayment({ orders, client, log = console }) {
   orders.events.on('payment', (o, previous, by) => {
-    // The bot already answers changes the customer made in the chat.
-    if (o.channel !== 'whatsapp' || by === 'customer') return;
+    // The bot already answers changes made in the chat (customer or WhatsApp Pay).
+    if (o.channel !== 'whatsapp' || by === 'customer' || by === 'whatsapp') return;
     let text = null;
     if (o.payment_status === 'paid') text = `✅ Payment of ${rupees(o.total)} received for order *${o.code}*. Thank you!`;
     else if (o.payment_status === 'pending' && previous === 'claimed') {

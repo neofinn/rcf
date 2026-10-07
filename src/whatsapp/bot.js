@@ -21,7 +21,7 @@ const { assignOutlet, isOpen, etaMinutes } = require('../geo');
 const { rupees } = require('../format');
 const { ValidationError, deliveryFee, deliveryCharge } = require('../orders');
 const { parseOrderText } = require('./nlu');
-const { qrSvg } = require('../payments');
+const { qrSvg, orderDetailsReply } = require('../payments');
 
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_QTY = 20;
@@ -335,6 +335,20 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
   // UPI request for an order: QR image plus a link that opens the customer's UPI app.
   function payView(order) {
     const page = `${baseUrl}/track.html?code=${order.code}`;
+    const outlet = orders.getOutlet(order.outlet_id);
+    const qrImage = (text) => ({ type: 'image', url: `${baseUrl}/pay/${order.code}/qr.png`, svg: qrSvg(order.upi.link), text });
+    if (config.whatsapp.payments && outlet?.wa_payment_config) {
+      // In-chat payment: WhatsApp's own UPI or any UPI app, confirmed by WhatsApp.
+      // The dynamic QR (this order, this amount) covers paying from another phone.
+      return [
+        orderDetailsReply(order, outlet, { goodsType: config.whatsapp.goodsType }),
+        qrImage(`Paying from another phone? Scan to pay ${rupees(order.total)} to ${order.upi.payee} (${order.upi.upiId}) · Order ${order.code}`),
+        buttons(`💳 Tap *Review and pay* above to pay ${rupees(order.total)} with WhatsApp's UPI or any UPI app on this phone. We'll confirm here automatically.\n\nPaid by scanning the QR instead? Tap *I've paid*.`, [
+          btn('act:paid', "✅ I've paid by QR"),
+          btn('act:pay_cash', '💵 Pay cash instead'),
+        ]),
+      ];
+    }
     return [
       { type: 'image', url: `${baseUrl}/pay/${order.code}/qr.png`, svg: qrSvg(order.upi.link), text: `Scan to pay ${rupees(order.total)} to ${order.upi.payee} (${order.upi.upiId}) · Order ${order.code}` },
       buttons(`💳 *Pay ${rupees(order.total)} by UPI*\n\nOn this phone, open 👉 ${page}\nand tap *Pay with UPI app*. GPay, PhonePe, Paytm or BHIM opens with the amount filled in.\nOr scan the QR above from another phone.\n\nWhen done, tap *I've paid* or send the payment screenshot here.`, [
@@ -342,6 +356,30 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
         btn('act:pay_cash', '💵 Pay cash instead'),
       ]),
     ];
+  }
+
+  // WhatsApp reports the result of a "Review and pay" payment.
+  function onPayment(msg, now) {
+    const o = orders.getOrder(msg.referenceId);
+    // Only accept results for this customer's own order.
+    if (!o || (msg.from && o.phone.replace(/\D/g, '') !== String(msg.from).replace(/\D/g, ''))) return [];
+    if (['success', 'captured'].includes(msg.status)) {
+      if (o.payment_status === 'paid') return [];
+      if (msg.amount != null && msg.amount !== o.total) {
+        // Never mark an order paid for the wrong amount; staff check it.
+        if (o.payment_status === 'pending') orders.setPayment(o.code, 'claimed', now, 'whatsapp');
+        return [text(`We received ${rupees(msg.amount)} for order *${o.code}*, but the bill is ${rupees(o.total)}. ${o.outlet.name} will check and get back to you.`)];
+      }
+      orders.setPayment(o.code, 'paid', now, 'whatsapp');
+      return [text(`✅ Payment of ${rupees(o.total)} received for order *${o.code}*${msg.transactionId ? ` (UPI ref ${msg.transactionId})` : ''}. Thank you! 🙏`)];
+    }
+    if (['failed', 'canceled', 'cancelled', 'expired'].includes(msg.status) && ['pending', 'claimed'].includes(o.payment_status)) {
+      return [buttons(`⚠️ Your UPI payment for order *${o.code}* didn't go through. No money was taken.\nTry again, or pay ${rupees(o.total)} by cash/UPI ${o.fulfilment === 'delivery' ? 'on delivery' : 'at pickup'}.`, [
+        btn('act:pay_again', '🔁 Try again'),
+        btn('act:pay_cash', '💵 Pay cash instead'),
+      ])];
+    }
+    return [];
   }
 
   function latestUnpaid(phone) {
@@ -416,6 +454,9 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
   function route(s, msg, now) {
     const raw = (msg.text || '').trim();
     const t = raw.toLowerCase();
+
+    // Payment results are handled even while a person is on the chat.
+    if (msg.type === 'payment') return onPayment(msg, now);
 
     // A person is handling this chat: pass messages through, stay quiet.
     const open = handoffs && handoffs.openForPhone(msg.from);
@@ -553,6 +594,11 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
             if (!o) return [text("You don't have a UPI payment waiting. Type *track* to see your order.")];
             orders.claimPayment(o.code, now);
             return [text(`🙏 Thank you! ${o.outlet.name} will confirm as soon as ${rupees(o.total)} shows in their UPI account. We'll message you here.`)];
+          }
+          case 'pay_again': {
+            const o = latestUnpaid(msg.from);
+            if (!o) return [text("You don't have a UPI payment waiting. Type *track* to see your order.")];
+            return payView(o);
           }
           case 'pay_cash': {
             const o = latestUnpaid(msg.from);

@@ -68,5 +68,12 @@ module.exports = {
     verifyToken: env.WHATSAPP_VERIFY_TOKEN || 'raju-verify',
     appSecret: env.WHATSAPP_APP_SECRET || '',
     graphVersion: env.WHATSAPP_GRAPH_VERSION || 'v21.0',
+    // In-chat UPI payments ("Review and pay" order_details messages, India).
+    // Needs each outlet's UPI ID added as a payment configuration in Meta
+    // Business Suite (WhatsApp Manager > Payments > Direct payment methods);
+    // its name goes in outlets.wa_payment_config.
+    payments: env.WHATSAPP_PAYMENTS === 'on',
+    // 'digital-goods' needs no shipping address block; 'physical-goods' does.
+    goodsType: env.WHATSAPP_PAYMENTS_GOODS_TYPE || 'digital-goods',
   },
 };

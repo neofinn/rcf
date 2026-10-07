@@ -152,7 +152,7 @@
     <button class="chip" type="button" data-say="bhaiya 3 momos aur 2 coke, call before coming"><q>bhaiya 3 momos aur 2 coke, call before coming</q></button>
     <button class="chip" type="button" data-say="Can I talk to someone about a party order for 30 people?"><q>Can I talk to someone about a party order?</q></button>
     <button class="chip" type="button" data-say="track"><q>track</q></button>
-    <span class="muted" style="font-size:0.85rem">At checkout, pick <b>💳 Pay now (UPI)</b> to get the payment QR.</span>
+    <span class="muted" style="font-size:0.85rem">At checkout, pick <b>💳 Pay now (UPI)</b>: pay inside WhatsApp or with any UPI app, or scan the order QR.</span>
   </div>
 
   <nav class="tabs" role="tablist" aria-label="Demo screens">
@@ -324,6 +324,7 @@ function wireEvents() {
   be.orders.events.on('payment', (o, previous, by) => {
     const who = o.channel === 'whatsapp' ? 'WhatsApp' : 'Web app';
     if (o.payment_status === 'claimed') log(who, o.channel === 'whatsapp' ? 'wa' : 'web', `Customer says they paid <b>${o.code}</b> by UPI`);
+    else if (o.payment_status === 'paid' && by === 'whatsapp') log('WhatsApp', 'wa', `Customer paid ${rupees(o.total)} for <b>${o.code}</b> inside WhatsApp; confirmed automatically, no staff check`);
     else if (o.payment_status === 'paid') log('Outlet', 'outlet', `${esc(short(o.outlet.name))} confirmed ${rupees(o.total)} UPI payment for <b>${o.code}</b>${o.channel === 'whatsapp' ? ', customer notified' : ''}`);
     else if (o.payment_status === 'cod') log(by === 'customer' ? who : 'Outlet', by === 'customer' ? (o.channel === 'whatsapp' ? 'wa' : 'web') : 'outlet', `<b>${o.code}</b> switched to cash/UPI on delivery`);
     else if (o.payment_status === 'pending' && previous === 'claimed') log('Outlet', 'outlet', `${esc(short(o.outlet.name))} couldn't find the UPI payment for <b>${o.code}</b>`);
