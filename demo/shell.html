@@ -146,6 +146,7 @@
     <button class="chip" type="button" data-say="bhaiya 3 momos aur 2 coke, call before coming"><q>bhaiya 3 momos aur 2 coke, call before coming</q></button>
     <button class="chip" type="button" data-say="Can I talk to someone about a party order for 30 people?"><q>Can I talk to someone about a party order?</q></button>
     <button class="chip" type="button" data-say="track"><q>track</q></button>
+    <span class="muted" style="font-size:0.85rem">At checkout, pick <b>💳 Pay now (UPI)</b> to get the payment QR.</span>
   </div>
 
   <nav class="tabs" role="tablist" aria-label="Demo screens">
@@ -195,7 +196,7 @@
     </div>
   </section>
 
-  <footer>Demo data: outlet addresses, coordinates, phone numbers and prices are placeholders. Outlets are open 24 hours here so the demo works at any time; in the real app they follow their opening hours. Nothing is saved: reloading the page starts a fresh demo.</footer>
+  <footer>Demo data: outlet addresses, coordinates, phone numbers, UPI IDs and prices are placeholders, and the UPI IDs are deliberately invalid, so no real payment can be made. Inside this demo the <b>Pay with UPI app</b> button can't open a UPI app; on a real phone it opens GPay, PhonePe, Paytm or BHIM with the amount filled in. Outlets are open 24 hours here so the demo works at any time; in the real app they follow their opening hours. Nothing is saved: reloading the page starts a fresh demo.</footer>
 </div>
 
 <script>/*__BACKEND__*/</script>
@@ -206,7 +207,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const short = (name) => name.replace('Raju Chinese - ', '');
-const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', p % 100 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {});
 
 let be;
 const frames = { web: $('f-web'), whatsapp: $('f-whatsapp'), admin: $('f-admin') };
@@ -303,12 +304,20 @@ function wireEvents() {
   be.orders.events.on('created', (o) => {
     const items = o.items.map((i) => `${i.qty}× ${esc(i.name)}${i.note ? ` <i>(${esc(i.note)})</i>` : ''}`).join(', ');
     log(o.channel === 'whatsapp' ? 'WhatsApp' : 'Web app', o.channel === 'whatsapp' ? 'wa' : 'web',
-      `Order <b>${o.code}</b> sent to <b>${esc(short(o.outlet.name))}</b> · ${rupees(o.total)} · ${items}${o.notes ? ` · note: ${esc(o.notes)}` : ''}`);
+      `Order <b>${o.code}</b> sent to <b>${esc(short(o.outlet.name))}</b> · ${rupees(o.total)} ${o.payment_method === 'upi' ? `by UPI to <b>${esc(o.upi.upiId)}</b>` : 'cash/UPI on delivery'} · ${items}${o.notes ? ` · note: ${esc(o.notes)}` : ''}`);
     flagTab('dash');
   });
   be.orders.events.on('status', (o) => {
     log('Outlet', 'outlet', `${esc(short(o.outlet.name))} marked <b>${o.code}</b> as ${esc(o.statusLabel.toLowerCase())}${o.channel === 'whatsapp' ? ', customer notified on WhatsApp' : ''}`);
     if (o.channel === 'whatsapp') flagTab('whatsapp');
+  });
+  be.orders.events.on('payment', (o, previous, by) => {
+    const who = o.channel === 'whatsapp' ? 'WhatsApp' : 'Web app';
+    if (o.payment_status === 'claimed') log(who, o.channel === 'whatsapp' ? 'wa' : 'web', `Customer says they paid <b>${o.code}</b> by UPI`);
+    else if (o.payment_status === 'paid') log('Outlet', 'outlet', `${esc(short(o.outlet.name))} confirmed ${rupees(o.total)} UPI payment for <b>${o.code}</b>${o.channel === 'whatsapp' ? ', customer notified' : ''}`);
+    else if (o.payment_status === 'cod') log(by === 'customer' ? who : 'Outlet', by === 'customer' ? (o.channel === 'whatsapp' ? 'wa' : 'web') : 'outlet', `<b>${o.code}</b> switched to cash/UPI on delivery`);
+    else if (o.payment_status === 'pending' && previous === 'claimed') log('Outlet', 'outlet', `${esc(short(o.outlet.name))} couldn't find the UPI payment for <b>${o.code}</b>`);
+    flagTab(by === 'customer' ? 'dash' : (o.channel === 'whatsapp' ? 'whatsapp' : 'web'));
   });
   be.handoffs.events.on('opened', (h) => {
     const o = h.outlet_id ? be.orders.getOutlet(h.outlet_id) : null;

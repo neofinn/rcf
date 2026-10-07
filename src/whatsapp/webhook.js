@@ -24,6 +24,8 @@ function parseWebhook(body) {
             ...base, type: 'catalog_order', text: m.order?.text || '',
             items: (m.order?.product_items || []).map((p) => ({ retailerId: p.product_retailer_id, qty: Number(p.quantity) || 1 })),
           });
+        } else if (m.type === 'image') {
+          out.push({ ...base, type: 'image', mediaId: m.image?.id, text: m.image?.caption || '' });
         } else if (m.type === 'button') out.push({ ...base, type: 'text', text: m.button?.payload || m.button?.text || '' });
         else out.push({ ...base, type: 'unsupported' });
       }

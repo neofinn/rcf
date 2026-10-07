@@ -10,6 +10,7 @@
 
 const config = require('../config');
 const { assignOutlet, isOpen, etaMinutes } = require('../geo');
+const { qrSvg } = require('../payments');
 
 const ACTIVE = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
 const IST_OFFSET_MS = 330 * 60 * 1000; // IST is UTC+5:30, no daylight saving
@@ -22,6 +23,12 @@ const csvCell = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '
 const publicOutlet = (o, now) => ({
   id: o.id, slug: o.slug, name: o.name, city: o.city, address: o.address, lat: o.lat, lng: o.lng,
   phone: o.phone, deliveryRadiusKm: o.delivery_radius_km, opens: o.opens, closes: o.closes, open: isOpen(o, now),
+  upi: !!o.upi_id,
+});
+
+const publicPayment = (o) => ({
+  method: o.payment_method, status: o.payment_status, label: o.paymentLabel,
+  ...(o.upi && o.payment_status !== 'cod' ? { upiId: o.upi.upiId, payee: o.upi.payee, link: o.upi.link, qrSvg: qrSvg(o.upi.link) } : {}),
 });
 
 function createRoutes({ store, orders, handoffs, bot, outbox }) {
@@ -92,7 +99,16 @@ function createRoutes({ store, orders, handoffs, bot, outbox }) {
           customerName: o.customer_name.split(' ')[0], items: o.items, subtotal: o.subtotal, packing: o.packing,
           gst: o.gst, deliveryFee: o.delivery_fee, total: o.total, paymentMethod: o.payment_method,
           etaMinutes: o.etaMinutes, createdAt: o.created_at, updatedAt: o.updated_at, outlet: o.outlet,
+          payment: publicPayment(o),
         };
+      },
+    },
+    {
+      // Customer taps "I've paid" on the tracking page.
+      method: 'POST', path: '/api/orders/:code/paid',
+      handle: ({ params }) => {
+        const o = orders.claimPayment(params.code);
+        return o ? { payment: publicPayment(o) } : notFound('Order not found');
       },
     },
 
@@ -106,6 +122,11 @@ function createRoutes({ store, orders, handoffs, bot, outbox }) {
     {
       method: 'POST', path: '/api/admin/orders/:code/status', admin: true,
       handle: ({ params, body }) => orders.updateStatus(params.code, String(body.status || '')) || notFound('Order not found'),
+    },
+    {
+      // Staff confirm a UPI payment arrived, say it hasn't, or switch the order to cash.
+      method: 'POST', path: '/api/admin/orders/:code/payment', admin: true,
+      handle: ({ params, body }) => orders.setPayment(params.code, String(body.status || '')) || notFound('Order not found'),
     },
     { method: 'GET', path: '/api/admin/outlets', admin: true, handle: () => orders.listOutlets() },
     {

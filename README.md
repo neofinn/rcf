@@ -48,6 +48,17 @@ Built on the official **WhatsApp Business Cloud API** (Meta). Customers can orde
 
 Customers can type `menu`, `cart`, `track` or `reset` at any time. Orders from WhatsApp get status updates on WhatsApp (accepted, preparing, out for delivery / ready, completed, cancelled).
 
+## Payments: UPI QR or pay on delivery (`src/payments.js`)
+
+At checkout (web and WhatsApp) the customer picks **💳 Pay now (UPI)** or **💵 Pay on delivery/pickup**.
+
+- **Each order gets its own UPI request**, unlike a fixed QR printed or saved in the WhatsApp Business app. The request is for the exact bill amount, with the order code as the reference, and goes to the **UPI ID of the outlet that is cooking it**. Every outlet's own merchant UPI ID is stored on the outlet (`outlets.upi_id`); point them all at one ID if payments are collected centrally.
+- **On WhatsApp** the customer gets the QR as an image (`/pay/<code>/qr.png`) plus a link to the order page, whose **Pay with UPI app** button opens GPay/PhonePe/Paytm/BHIM with payee, amount and note filled in. Then they tap **I've paid** or send the payment screenshot.
+- **On the web** the tracking page shows the same QR and button straight after ordering.
+- **Outlet staff** see `UPI payment pending` / `Customer says paid` on the order card and tap **Payment received** once it shows in their UPI app (or **Not received** / **Take cash instead**). WhatsApp customers are told either way.
+- Confirmation is manual because plain UPI QR codes don't report payments back to us. For automatic confirmation, add a payment gateway (Razorpay, PayU, Cashfree) or Meta's *Payments on WhatsApp (India)*. Their webhook calls `orders.setPayment(code, 'paid', now, 'gateway')`, and the rest of the flow stays as is.
+- Outlets without a UPI ID only offer pay on delivery.
+
 ## Pricing rules (`src/config.js`)
 
 - GST 5% on food + packing
@@ -77,7 +88,7 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
 
 ## Going live checklist
 
-1. **Real outlet data.** `src/seed.js` contains *placeholder* addresses, coordinates, phone numbers, prices and hours. Replace them before the first start (the seed runs only on an empty database), or edit the `outlets` / `menu_items` tables afterwards. Take each outlet's latitude/longitude from Google Maps (right-click the location).
+1. **Real outlet data.** `src/seed.js` contains *placeholder* addresses, coordinates, phone numbers, UPI IDs (`…@example`, deliberately invalid), prices and hours. Replace them before the first start (the seed runs only on an empty database), or edit the `outlets` / `menu_items` tables afterwards. Take each outlet's latitude/longitude from Google Maps (right-click the location).
 2. **Hosting.** Any small VPS or PaaS with a persistent disk for `data/`, behind HTTPS (required by both WhatsApp webhooks and browser geolocation). Set `NODE_ENV=production`, `PUBLIC_BASE_URL` and a long random `ADMIN_TOKEN`.
 3. **WhatsApp Business.**
    - Create a Meta Business account and a WhatsApp Business app at developers.facebook.com, and add and verify the business phone number.
@@ -89,7 +100,7 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
 
 ## Suggested next steps
 
-- Online payments (Razorpay/PhonePe UPI) in addition to cash/UPI on delivery
+- Automatic UPI confirmation through a payment gateway webhook (today staff confirm UPI payments by hand)
 - Separate logins per outlet (today one admin token sees every outlet)
 - An LLM (e.g. Claude) behind the WhatsApp parser for messages the rule-based parser can't follow, with the current parser as the fast path
 - WhatsApp template messages so web customers also get WhatsApp status updates (Meta only allows free-form messages within 24 h of the customer's last message)
@@ -110,6 +121,7 @@ src/
   geo.js                 distance, opening hours, outlet assignment
   orders.js              menu, pricing, order creation and status changes
   handoff.js             WhatsApp chats handed to outlet staff
+  payments.js            UPI payment links and QR codes
   routes/handlers.js     the HTTP API as plain functions (server + demo)
   whatsapp/bot.js        WhatsApp conversation
   whatsapp/nlu.js        free-text order understanding

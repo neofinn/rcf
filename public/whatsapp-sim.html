@@ -61,6 +61,7 @@
     let html = fmt(r.text);
     if (r.type === 'buttons') html += '<div class="opts">' + r.buttons.map((b) => `<button data-id="${esc(b.id)}" data-title="${esc(b.title)}">${esc(b.title)}</button>`).join('') + '</div>';
     if (r.type === 'list') html += `<div class="small muted" style="margin-top:6px">☰ ${esc(r.button)}</div><div class="opts">` + r.sections.flatMap((s) => s.rows).map((x) => `<button data-id="${esc(x.id)}" data-title="${esc(x.title)}">${esc(x.title)}${x.description ? `<small>${esc(x.description)}</small>` : ''}</button>`).join('') + '</div>';
+    if (r.type === 'image') html = `<div style="background:#fff;border-radius:8px;line-height:0;margin-bottom:6px">${r.svg || `<img src="${esc(r.url)}" alt="" style="width:100%">`}</div>${fmt(r.text || '')}`;
     if (r.type === 'location_request') html += '<div class="opts"><button data-loc="1">📍 Send location (use picker below)</button></div>';
     bubble(html, 'bot');
   }

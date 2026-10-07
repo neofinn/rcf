@@ -4,7 +4,7 @@
 // localStorage so a refresh keeps the cart and location.
 
 const $ = (id) => document.getElementById(id);
-const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', p % 100 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {});
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const store = {
@@ -235,6 +235,10 @@ async function renderCart() {
   const l = state.location;
   $('addressBox').classList.toggle('hidden', l.fulfilment !== 'delivery');
   $('payWhen').textContent = l.fulfilment === 'delivery' ? 'delivery' : 'pickup';
+  // Online UPI only where the outlet has a UPI ID set up.
+  const upiOk = l.outlet.upi !== false;
+  $('payUpiOpt').classList.toggle('hidden', !upiOk);
+  if (!upiOk) $('payCod').checked = true;
   $('cartHeading').textContent = l.fulfilment === 'delivery' ? `Delivery from ${l.outlet.name.replace('Raju Chinese - ', '')}` : `Pickup from ${l.outlet.name.replace('Raju Chinese - ', '')}`;
   $('cartLines').innerHTML = entries.map((e) => `
     <div class="line"><span class="vegmark ${e.item.veg ? '' : 'non'}"></span>
@@ -288,7 +292,10 @@ $('openCart').addEventListener('click', () => {
 
 $('checkout').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const body = { ...quoteBody(), name: $('name').value, phone: $('phone').value, address: $('address').value, notes: $('notes').value };
+  const body = {
+    ...quoteBody(), name: $('name').value, phone: $('phone').value, address: $('address').value, notes: $('notes').value,
+    paymentMethod: $('payUpi').checked ? 'upi' : 'cod',
+  };
   if (!body.name.trim()) return showCheckoutError('Please enter your name.');
   if (!/^\D*(?:\+?91|0)?\D*[6-9](?:\D*\d){9}\D*$/.test(body.phone)) return showCheckoutError('Please enter a valid 10-digit mobile number.');
   if (body.fulfilment === 'delivery' && body.address.trim().length < 5) return showCheckoutError('Please enter your full delivery address.');

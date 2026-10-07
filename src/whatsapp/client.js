@@ -23,6 +23,8 @@ function toPayload(to, r) {
         ...base, type: 'interactive',
         interactive: { type: 'list', body: { text: r.text }, action: { button: r.button, sections: r.sections } },
       };
+    case 'image':
+      return { ...base, type: 'image', image: { link: r.url, ...(r.text ? { caption: r.text } : {}) } };
     case 'location_request':
       return {
         ...base, type: 'interactive',

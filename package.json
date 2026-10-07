@@ -15,7 +15,8 @@
   },
   "license": "UNLICENSED",
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "qrcode": "1.5"
   },
   "devDependencies": {
     "esbuild": "^0.25.12"

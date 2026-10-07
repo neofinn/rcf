@@ -21,6 +21,7 @@ const { assignOutlet, isOpen, etaMinutes } = require('../geo');
 const { rupees } = require('../format');
 const { ValidationError } = require('../orders');
 const { parseOrderText } = require('./nlu');
+const { qrSvg } = require('../payments');
 
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_QTY = 20;
@@ -33,6 +34,8 @@ const row = (id, title, description) => ({ id, title: clip(title, 24), ...(descr
 const text = (t) => ({ type: 'text', text: t });
 const buttons = (t, list) => ({ type: 'buttons', text: t, buttons: list.slice(0, 3) });
 const list = (t, button, sections) => ({ type: 'list', text: t, button: clip(button, 20), sections });
+// Button messages allow 1024 characters; send long summaries (big carts) as a text first.
+const longButtons = (t, list) => (t.length <= 1024 ? [buttons(t, list)] : [text(t), buttons('What would you like to do?', list)]);
 
 const HUMAN_RE = /\b(human|agent|real person|a person|staff|manager|talk to (?:someone|somebody|you|a person|team|staff)|call me|baat karni|baat karo|customer care|complaint|special request|bulk order|party order|catering)\b/;
 const BACK_TO_BOT = ['bot', 'menu', 'exit', 'order', 'back'];
@@ -126,11 +129,11 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
   function cartView(s, heading = '🛒 *Your cart*') {
     const { lines, body, subtotal } = cartSummary(s);
     if (!lines.length) return [buttons('Your cart is empty 🛒 Type your order or open the menu.', [btn('act:more', '📋 Menu')])];
-    return [buttons(`${heading}\n${body}\n\nItem total: *${rupees(subtotal)}*`, [
+    return longButtons(`${heading}\n${body}\n\nItem total: *${rupees(subtotal)}*`, [
       btn('act:checkout', '✅ Checkout'),
       btn('act:more', '➕ Add more'),
       btn('act:clear', '🗑️ Clear cart'),
-    ])];
+    ]);
   }
 
   function confirmView(s) {
@@ -147,17 +150,27 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     const where = s.fulfilment === 'delivery'
       ? `🛵 Delivery to: ${s.address}\nFrom: ${outlet.name}`
       : `🏃 Pickup from: ${outlet.name}\n${outlet.address}`;
-    return [buttons(`*Please confirm your order*\n\n${lines}\n${notes}\n${charges}\n*To pay: ${rupees(qte.total)}* (cash/UPI on ${s.fulfilment === 'delivery' ? 'delivery' : 'pickup'})\n\n${where}`, [
+    const later = s.fulfilment === 'delivery' ? 'delivery' : 'pickup';
+    const summary = `*Please confirm your order*\n\n${lines}\n${notes}\n${charges}\n*To pay: ${rupees(qte.total)}*\n\n${where}`;
+    if (outlet.upi_id) {
+      return longButtons(`${summary}\n\nHow would you like to pay?\n💳 *Pay now*: UPI QR / link for the exact amount\n💵 *Pay on ${later}*: cash or UPI to the rider${s.fulfilment === 'pickup' ? '/counter' : ''}\n\n(Type *cancel* to drop this order.)`, [
+        btn('act:place_upi', '💳 Pay now (UPI)'),
+        btn('act:place', s.fulfilment === 'delivery' ? '💵 Pay on delivery' : '💵 Pay at pickup'),
+        btn('act:cart', '✏️ Edit cart'),
+      ]);
+    }
+    return longButtons(`${summary} (cash/UPI on ${later})`, [
       btn('act:place', '✅ Place order'),
       btn('act:cart', '✏️ Edit cart'),
       btn('act:cancel', '❌ Cancel'),
-    ])];
+    ]);
   }
 
   function trackView(phone) {
     const o = orders.latestOrderForPhone(phone);
     if (!o) return [text("You don't have any orders yet. Send *hi* to start ordering.")];
-    return [text(`📦 Order *${o.code}*: ${o.statusLabel}\nFrom ${o.outlet.name} (${o.outlet.phone})\nTotal ${rupees(o.total)}\n\nTrack: ${baseUrl}/track.html?code=${o.code}`)];
+    const tracking = text(`📦 Order *${o.code}*: ${o.statusLabel}\nFrom ${o.outlet.name} (${o.outlet.phone})\nTotal ${rupees(o.total)} · ${o.paymentLabel}\n\nTrack: ${baseUrl}/track.html?code=${o.code}`);
+    return o.payment_status === 'pending' ? [tracking, ...payView(o)] : [tracking];
   }
 
   // Ask the customer to pick between variants of something they typed.
@@ -295,7 +308,24 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     return confirmView(s);
   }
 
-  function place(s, msg, now) {
+  // UPI request for an order: QR image plus a link that opens the customer's UPI app.
+  function payView(order) {
+    const page = `${baseUrl}/track.html?code=${order.code}`;
+    return [
+      { type: 'image', url: `${baseUrl}/pay/${order.code}/qr.png`, svg: qrSvg(order.upi.link), text: `Scan to pay ${rupees(order.total)} to ${order.upi.payee} (${order.upi.upiId}) · Order ${order.code}` },
+      buttons(`💳 *Pay ${rupees(order.total)} by UPI*\n\nOn this phone, open 👉 ${page}\nand tap *Pay with UPI app*. GPay, PhonePe, Paytm or BHIM opens with the amount filled in.\nOr scan the QR above from another phone.\n\nWhen done, tap *I've paid* or send the payment screenshot here.`, [
+        btn('act:paid', "✅ I've paid"),
+        btn('act:pay_cash', '💵 Pay cash instead'),
+      ]),
+    ];
+  }
+
+  function latestUnpaid(phone) {
+    const o = orders.latestOrderForPhone(phone);
+    return o && ['pending', 'claimed'].includes(o.payment_status) ? o : null;
+  }
+
+  function place(s, msg, now, paymentMethod = 'cod') {
     try {
       const order = orders.createOrder({
         channel: 'whatsapp',
@@ -308,10 +338,14 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
         outletId: s.outletId,
         notes: s.orderNotes.join('; '),
         items: s.cart,
+        paymentMethod,
       }, now);
       s.cart = [];
       s.orderNotes = [];
       s.state = 'browsing';
+      if (order.payment_method === 'upi') {
+        return [text(`🎉 Order placed! Your order ID is *${order.code}*.\n\n${order.outlet.name} will ${order.fulfilment === 'delivery' ? `deliver in about ${order.etaMinutes} min` : `have it ready in about ${order.etaMinutes} min`}. Outlet phone: ${order.outlet.phone}`), ...payView(order)];
+      }
       return [text(`🎉 Order placed! Your order ID is *${order.code}*.\n\n${order.outlet.name} will ${order.fulfilment === 'delivery' ? `deliver in about ${order.etaMinutes} min` : `have it ready in about ${order.etaMinutes} min`}.\nPay ${rupees(order.total)} by cash/UPI on ${order.fulfilment === 'delivery' ? 'delivery' : 'pickup'}.\n\nTrack your order: ${baseUrl}/track.html?code=${order.code}\nOutlet phone: ${order.outlet.phone}\n\nWe'll message you here as your order moves along. Thank you! 🙏`)];
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
@@ -347,6 +381,7 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
       : msg.type === 'location' ? `📍 Shared location: https://maps.google.com/?q=${msg.location.lat},${msg.location.lng}`
         : msg.type === 'reply' ? `[tapped ${msg.replyId}]`
           : msg.type === 'catalog_order' ? `[sent a catalog cart with ${(msg.items || []).length} items]`
+            : msg.type === 'image' ? `📷 [sent a photo${msg.text ? `: ${msg.text}` : ''}]`
             : '[sent an unsupported message]';
     handoffs.addMessage(h.id, 'in', body);
     return [];
@@ -418,10 +453,20 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
       ])];
     }
 
+    if (msg.type === 'image') {
+      // Most photos at this point are UPI payment screenshots.
+      const o = latestUnpaid(msg.from);
+      if (o) {
+        orders.claimPayment(o.code, now);
+        return [text(`📸 Got your payment screenshot for order *${o.code}*. ${o.outlet.name} will confirm as soon as ${rupees(o.total)} shows in their UPI account. 🙏`)];
+      }
+      return [buttons('Thanks for the photo! If you need help with something, our team can take a look.', [btn('act:human', '💬 Talk to us'), btn('act:more', '📋 Menu')])];
+    }
+
     if (msg.type !== 'reply') return [text('Sorry, I can only understand text, buttons and shared locations. Type *hi* to start.')];
 
     const [kind, arg] = msg.replyId.split(/:(.*)/s);
-    const needsOutlet = ['cat', 'item', 'qty'].includes(kind) || ['more', 'place', 'same_address'].includes(arg);
+    const needsOutlet = ['cat', 'item', 'qty'].includes(kind) || ['more', 'place', 'place_upi', 'same_address'].includes(arg);
     if (needsOutlet && !s.outletId) return s.cart.length ? nextStep(s) : welcome(msg.name);
 
     switch (kind) {
@@ -473,8 +518,21 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
             s.state = 'confirm';
             return confirmView(s);
           case 'place':
+          case 'place_upi':
             if (s.state !== 'confirm') return checkout(s);
-            return place(s, msg, now);
+            return place(s, msg, now, arg === 'place_upi' ? 'upi' : 'cod');
+          case 'paid': {
+            const o = latestUnpaid(msg.from);
+            if (!o) return [text("You don't have a UPI payment waiting. Type *track* to see your order.")];
+            orders.claimPayment(o.code, now);
+            return [text(`🙏 Thank you! ${o.outlet.name} will confirm as soon as ${rupees(o.total)} shows in their UPI account. We'll message you here.`)];
+          }
+          case 'pay_cash': {
+            const o = latestUnpaid(msg.from);
+            if (!o) return [text("You don't have a UPI payment waiting. Type *track* to see your order.")];
+            orders.setPayment(o.code, 'cod', now, 'customer');
+            return [text(`👍 No problem, pay ${rupees(o.total)} by cash/UPI ${o.fulfilment === 'delivery' ? 'when your order arrives' : 'at pickup'}.`)];
+          }
           case 'cancel': s.state = 'browsing'; return [text('No problem, your order was not placed. Your cart is still saved.'), ...cartView(s)];
           case 'track': return trackView(msg.from);
           case 'human': return startHandoff(s, msg, now);

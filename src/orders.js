@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const config = require('./config');
 const { assignOutlet, isOpen, etaMinutes } = require('./geo');
+const { upiLink, PAYMENT_LABELS } = require('./payments');
 
 class ValidationError extends Error {
   constructor(message, code = 'invalid') {
@@ -164,7 +165,8 @@ function createOrderService(store) {
 
   /**
    * Create an order. Input:
-   * { channel, fulfilment, name, phone, address?, lat?, lng?, outletId?, notes?, items: [{id, qty, note?}] }
+   * { channel, fulfilment, name, phone, address?, lat?, lng?, outletId?, notes?, items: [{id, qty, note?}],
+   *   paymentMethod?: 'cod' | 'upi' }
    */
   function createOrder(input, now = new Date()) {
     const fulfilment = input.fulfilment === 'pickup' ? 'pickup' : 'delivery';
@@ -184,6 +186,9 @@ function createOrderService(store) {
       throw new ValidationError(`Minimum order for delivery is ₹${config.pricing.minDeliveryOrder / 100}.`, 'min_order');
     }
 
+    const payUpi = input.paymentMethod === 'upi';
+    if (payUpi && !outlet.upi_id) throw new ValidationError(`${outlet.name} doesn't take UPI payments online yet. Please choose cash/UPI on ${fulfilment}.`, 'no_upi');
+
     const code = newCode();
     const ts = now.toISOString();
     store.insertOrder({
@@ -191,7 +196,7 @@ function createOrderService(store) {
       customer_name: name, phone, address: fulfilment === 'delivery' ? address : null,
       lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null, distance_km: distanceKm,
       notes: notes || null, subtotal: priced.subtotal, packing: priced.packing, gst: priced.gst,
-      delivery_fee: priced.deliveryFee, total: priced.total, payment_method: 'cod', status: 'placed',
+      delivery_fee: priced.deliveryFee, total: priced.total, payment_method: payUpi ? 'upi' : 'cod', payment_status: payUpi ? 'pending' : 'cod', status: 'placed',
       created_at: ts, updated_at: ts,
     }, priced.lines);
     const order = getOrder(code);
@@ -209,7 +214,43 @@ function createOrderService(store) {
       nextStatuses: (TRANSITIONS[row.fulfilment][row.status] || []),
       etaMinutes: etaMinutes(row.fulfilment, row.distance_km || 0),
       outlet: outlet && { id: outlet.id, name: outlet.name, phone: outlet.phone, address: outlet.address, lat: outlet.lat, lng: outlet.lng },
+      paymentLabel: PAYMENT_LABELS[row.payment_status],
+      upi: row.payment_method === 'upi' && outlet?.upi_id ? {
+        upiId: outlet.upi_id,
+        payee: outlet.upi_name || 'Raju Chinese',
+        link: upiLink({ upiId: outlet.upi_id, payee: outlet.upi_name || 'Raju Chinese', amountPaise: row.total, code: row.code }),
+      } : null,
     };
+  }
+
+  // Payment: pending -> claimed (customer says paid) -> paid (outlet confirms).
+  // Staff can also bounce a claim back to pending, or switch to cash.
+  const PAYMENT_TRANSITIONS = {
+    pending: ['claimed', 'paid', 'cod'],
+    claimed: ['paid', 'pending', 'cod'],
+  };
+
+  // by: 'staff' (dashboard), 'customer' (WhatsApp/web) or 'gateway' (future
+  // payment-gateway webhook). Listeners use it to avoid echoing the customer.
+  function setPayment(code, next, now = new Date(), by = 'staff') {
+    const order = getOrder(code);
+    if (!order) return null;
+    if (!(PAYMENT_TRANSITIONS[order.payment_status] || []).includes(next)) {
+      throw new ValidationError(`Payment is already "${order.paymentLabel}".`, 'bad_payment_transition');
+    }
+    if (!store.setPaymentStatus(order.id, order.payment_status, next, now.toISOString())) {
+      throw new ValidationError('Order was updated by someone else. Refresh and try again.', 'conflict');
+    }
+    const updated = getOrder(code);
+    events.emit('payment', updated, order.payment_status, by);
+    return updated;
+  }
+
+  /** Customer says they've paid. Idempotent. */
+  function claimPayment(code, now = new Date()) {
+    const o = getOrder(code);
+    if (o && o.payment_status === 'claimed') return o;
+    return setPayment(code, 'claimed', now, 'customer');
   }
 
   const getOrder = (code) => present(store.orderByCode(String(code || '').toUpperCase()));
@@ -237,7 +278,7 @@ function createOrderService(store) {
 
   return {
     events, listOutlets, getOutlet, menuFor, categories, resolveOutlet, quote, createOrder, getOrder,
-    latestOrderForPhone, listOrders, updateStatus,
+    latestOrderForPhone, listOrders, updateStatus, setPayment, claimPayment,
   };
 }
 

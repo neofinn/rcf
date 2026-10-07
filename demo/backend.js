@@ -9,7 +9,7 @@ const { createOrderService, ValidationError } = require('../src/orders');
 const { createHandoffService } = require('../src/handoff');
 const { createRoutes, recordOutbox, matchPath } = require('../src/routes/handlers');
 const { createBot, createSessionStore } = require('../src/whatsapp/bot');
-const { notifyOnStatusChange, relayHandoffReplies } = require('../src/whatsapp/notify');
+const { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment } = require('../src/whatsapp/notify');
 const { assignOutlet } = require('../src/geo');
 
 function createDemoBackend() {
@@ -24,6 +24,7 @@ function createDemoBackend() {
   const quiet = { error: () => {}, info: () => {} };
   notifyOnStatusChange({ orders, client, log: quiet });
   relayHandoffReplies({ handoffs, client, log: quiet });
+  notifyOnPayment({ orders, client, log: quiet });
   const routes = createRoutes({ store, orders, handoffs, bot, outbox });
 
   /** Serve one API request. Returns { status, body }. */

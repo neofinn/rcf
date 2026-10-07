@@ -221,3 +221,54 @@ test('address step is not hijacked by handoff keywords', () => {
   const r = c.text('House 4, near staff quarters, Sector 22');
   assert.match(r[0].text, /Please confirm/);
 });
+
+test('UPI: pay now sends QR and link for the exact amount to the cooking outlet', () => {
+  const c = chat();
+  c.say({ type: 'location', location: PLACES.phase7 });
+  c.text('2 chilli chicken dry');
+  c.tap('act:checkout');
+  let r = c.text('Flat 3, Phase 7, near market');
+  assert.deepEqual(allIds(r), ['act:place_upi', 'act:place', 'act:cart']);
+  r = c.tap('act:place_upi');
+  const o = c.orders.latestOrderForPhone('919876543210');
+  assert.equal(o.payment_method, 'upi');
+  assert.equal(o.payment_status, 'pending');
+  assert.equal(o.upi.upiId, 'rc-phase-7-mohali@example');
+  assert.equal(o.upi.link, `upi://pay?pa=rc-phase-7-mohali%40example&pn=Raju%20Chinese&am=${(o.total / 100).toFixed(2)}&cu=INR&tn=Raju%20Chinese%20order%20${o.code}&tr=${o.code}`);
+  const img = r.find((x) => x.type === 'image');
+  assert.equal(img.url, `https://order.example/pay/${o.code}/qr.png`);
+  assert.match(img.svg, /^<svg/);
+  assert.deepEqual(allIds(r), ["act:paid", 'act:pay_cash']);
+
+  r = c.tap('act:paid');
+  assert.match(r[0].text, /will confirm/);
+  assert.equal(c.orders.getOrder(o.code).payment_status, 'claimed');
+  assert.equal(c.orders.setPayment(o.code, 'paid').paymentLabel, 'Paid by UPI');
+  assert.match(c.text('track')[0].text, /Paid by UPI/);
+});
+
+test('UPI: screenshot counts as a claim; customer can switch to cash', () => {
+  const c = chat();
+  c.say({ type: 'location', location: PLACES.sector22 });
+  c.text('3 veg fried rice');
+  c.tap('act:checkout');
+  c.text('House 12, Sector 22-B');
+  c.tap('act:place_upi');
+  const { code } = c.orders.latestOrderForPhone('919876543210');
+  assert.match(c.say({ type: 'image', mediaId: 'm1' })[0].text, /Got your payment screenshot/);
+  assert.equal(c.orders.getOrder(code).payment_status, 'claimed');
+  c.orders.setPayment(code, 'pending'); // outlet can't find it
+  assert.match(c.tap('act:pay_cash')[0].text, /pay ₹\d+(\.\d+)? by cash/);
+  assert.equal(c.orders.getOrder(code).payment_status, 'cod');
+  assert.match(c.tap('act:paid')[0].text, /don't have a UPI payment waiting/);
+});
+
+test('long carts keep button messages within WhatsApp limits', () => {
+  const c = chat();
+  c.say({ type: 'location', location: PLACES.sector22 });
+  for (const i of c.orders.menuFor(1).slice(0, 25)) c.tap(`item:${i.id}`) && c.text('2 less spicy please, sauce separate');
+  c.tap('act:checkout');
+  const r = c.text('House 12, Sector 22-B, near the big gurudwara');
+  for (const x of r) if (x.type === 'buttons') assert.ok(x.text.length <= 1024);
+  assert.equal(r.at(-1).type, 'buttons');
+});

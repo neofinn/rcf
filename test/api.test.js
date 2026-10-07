@@ -183,3 +183,32 @@ test('catalog cart over the webhook, human handoff with staff replies, catalog f
   assert.match(s.sent.at(-1).replies[0].text, /closed this chat/);
   assert.equal((await s.call('GET', '/api/admin/chats', undefined, admin)).body.length, 0);
 });
+
+test('UPI on the web: QR on tracking, customer claim, staff confirm; PNG QR for WhatsApp', async (t) => {
+  const s = await start();
+  t.after(s.close);
+  const menu = (await s.call('GET', '/api/menu?outletId=1')).body.flatMap((c) => c.items);
+  const items = [{ id: menu.find((i) => i.name === 'Veg Fried Rice').id, qty: 2 }];
+  const created = await s.call('POST', '/api/orders', { fulfilment: 'delivery', ...PLACES.sector22, items, name: 'Kiran', phone: '9876501234', address: 'House 1, Sector 22', paymentMethod: 'upi' });
+  const { code } = created.body;
+
+  const track = await s.call('GET', `/api/orders/${code}`);
+  assert.equal(track.body.payment.status, 'pending');
+  assert.match(track.body.payment.link, /^upi:\/\/pay\?pa=rc-sec-17-chd%40example&pn=Raju%20Chinese&am=\d+\.\d{2}&cu=INR/);
+  assert.match(track.body.payment.qrSvg, /^<svg/);
+
+  const png = await fetch(`${s.base}/pay/${code}/qr.png`);
+  assert.equal(png.headers.get('content-type'), 'image/png');
+  assert.equal(Buffer.from(await png.arrayBuffer()).subarray(1, 4).toString(), 'PNG');
+
+  const claimed = await s.call('POST', `/api/orders/${code}/paid`, {});
+  assert.equal(claimed.body.payment.status, 'claimed');
+
+  const live = await s.call('GET', '/api/admin/orders?outletId=1', undefined, admin);
+  assert.equal(live.body[0].paymentLabel, 'Customer says paid, check UPI app');
+  const paid = await s.call('POST', `/api/admin/orders/${code}/payment`, { status: 'paid' }, admin);
+  assert.equal(paid.body.payment_status, 'paid');
+  assert.equal((await s.call('POST', `/api/admin/orders/${code}/payment`, { status: 'pending' }, admin)).status, 400);
+  // Web orders don't get WhatsApp messages.
+  assert.equal(s.sent.length, 0);
+});

@@ -174,6 +174,16 @@ textarea { resize: vertical; min-height: 64px; }
 .bill { background: var(--card); border-radius: 10px; padding: 10px 12px; margin: 12px 0; }
 .bill div { display: flex; justify-content: space-between; padding: 3px 0; }
 .bill .total { font-weight: 800; border-top: 1px dashed var(--line); margin-top: 6px; padding-top: 8px; }
+.payopts { border: 0; padding: 0; margin: 14px 0 0; display: grid; gap: 8px; }
+.payopts legend { font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; padding: 0; }
+.payopt { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 10px 12px; font-weight: 400; background: var(--card); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.payopt input { width: auto; margin-top: 3px; accent-color: var(--brand); }
+.payopt:has(input:checked) { border-color: var(--brand); }
+.paybox { display: grid; gap: 10px; justify-items: center; text-align: center; background: var(--card); border: 1.5px solid var(--accent); border-radius: var(--radius); padding: 16px; margin: 12px 0; }
+.paybox .qr { background: #fff; padding: 6px; border-radius: 10px; line-height: 0; }
+.paybox .qr svg { width: 200px; height: 200px; }
+.paybox .btn { text-decoration: none; text-align: center; }
+.paybox.done { border-color: var(--ok); }
 .error { color: var(--nonveg); font-weight: 600; margin: 8px 0; }
 
 /* Tracking */

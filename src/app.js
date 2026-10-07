@@ -12,7 +12,8 @@ const { createRoutes, recordOutbox } = require('./routes/handlers');
 const { createBot, createSessionStore } = require('./whatsapp/bot');
 const { createClient } = require('./whatsapp/client');
 const { createWebhookRouter } = require('./whatsapp/webhook');
-const { notifyOnStatusChange, relayHandoffReplies } = require('./whatsapp/notify');
+const { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment } = require('./whatsapp/notify');
+const { qrPng } = require('./payments');
 
 function isAdmin(req) {
   const token = Buffer.from((req.get('authorization') || '').replace(/^Bearer\s+/i, ''));
@@ -33,6 +34,7 @@ function createApp({ dbPath = config.dbPath, waClient, enableDevTools = !config.
   const client = enableDevTools ? recordOutbox(baseClient, outbox) : baseClient;
   notifyOnStatusChange({ orders, client, log });
   relayHandoffReplies({ handoffs, client, log });
+  notifyOnPayment({ orders, client, log });
 
   const app = express();
   app.disable('x-powered-by');
@@ -43,6 +45,15 @@ function createApp({ dbPath = config.dbPath, waClient, enableDevTools = !config.
 
   app.use(express.json({ limit: '100kb' }));
   app.get('/healthz', (req, res) => res.json({ ok: true }));
+
+  // UPI QR image for an order (sent as a WhatsApp image; WhatsApp can't show SVG).
+  app.get('/pay/:code/qr.png', async (req, res, next) => {
+    try {
+      const o = orders.getOrder(req.params.code);
+      if (!o || !o.upi) return res.sendStatus(404);
+      res.type('png').set('Cache-Control', 'private, max-age=3600').send(await qrPng(o.upi.link));
+    } catch (e) { next(e); }
+  });
 
   for (const route of createRoutes({ store, orders, handoffs, bot, outbox })) {
     if (route.dev && !enableDevTools) continue;

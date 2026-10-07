@@ -1,7 +1,7 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', p % 100 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {});
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem('rca.' + k)) ?? d; } catch { return d; } },
@@ -59,6 +59,16 @@ const ago = (iso) => {
   return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' });
 };
 
+function payActions(o) {
+  if (o.payment_status === 'claimed') {
+    return `<div class="actions" style="margin-bottom:6px"><button type="button" class="paid" data-pay="${o.code}" data-to="paid">✅ Payment received</button><button type="button" class="cancel" data-pay="${o.code}" data-to="pending">Not received</button></div>`;
+  }
+  if (o.payment_status === 'pending') {
+    return `<div class="actions" style="margin-bottom:6px"><button type="button" class="paid" data-pay="${o.code}" data-to="paid">✅ Payment received</button><button type="button" class="cancel" data-pay="${o.code}" data-to="cod">Take cash instead</button></div>`;
+  }
+  return '';
+}
+
 function orderCard(o) {
   const map = o.lat != null ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${o.lat},${o.lng}" target="_blank" rel="noopener">map</a>` : '';
   return `<div class="order ${o.status}">
@@ -68,7 +78,8 @@ function orderCard(o) {
     ${o.notes ? `<div class="small"><b>Note:</b> ${esc(o.notes)}</div>` : ''}
     <div class="small"><b>${esc(o.customer_name)}</b> · <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></div>
     ${o.address ? `<div class="small">${esc(o.address)}${o.distance_km != null ? ` (${o.distance_km} km)` : ''}${map}</div>` : ''}
-    <div style="margin:8px 0"><b>${rupees(o.total)}</b> <span class="small muted">cash/UPI</span></div>
+    <div style="margin:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${rupees(o.total)}</b> <span class="chip pay-${o.payment_status}">${esc(o.paymentLabel)}</span></div>
+    ${payActions(o)}
     <div class="actions">${o.nextStatuses.map((s) => `<button type="button" class="${s === 'cancelled' ? 'cancel' : ''}" data-code="${o.code}" data-status="${s}">${NEXT_LABEL[s]}</button>`).join('')}</div>
   </div>`;
 }
@@ -155,6 +166,12 @@ document.addEventListener('click', async (e) => {
     if (b.dataset.status === 'cancelled' && !confirm(`Cancel order ${b.dataset.code}?`)) return;
     b.disabled = true;
     try { await api(`/orders/${b.dataset.code}/status`, { method: 'POST', body: { status: b.dataset.status } }); } catch (err) { alert(err.message); }
+    refresh();
+  }
+  const pay = e.target.closest('[data-pay]');
+  if (pay) {
+    pay.disabled = true;
+    try { await api(`/orders/${pay.dataset.pay}/payment`, { method: 'POST', body: { status: pay.dataset.to } }); } catch (err) { alert(err.message); }
     refresh();
   }
   const c = e.target.closest('[data-close-chat]');

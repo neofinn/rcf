@@ -17,12 +17,13 @@ function createSqliteStore(db) {
 
     insertOrder: db.prepare(`INSERT INTO orders (code, outlet_id, channel, fulfilment, customer_name, phone,
       address, lat, lng, distance_km, notes, subtotal, packing, gst, delivery_fee, total, payment_method,
-      status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+      payment_status, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     insertLine: db.prepare('INSERT INTO order_items (order_id, item_id, name, price, qty, note) VALUES (?, ?, ?, ?, ?, ?)'),
     byCode: db.prepare('SELECT * FROM orders WHERE code = ?'),
     lines: db.prepare('SELECT item_id, name, price, qty, note FROM order_items WHERE order_id = ? ORDER BY rowid'),
     latestForPhone: db.prepare('SELECT * FROM orders WHERE phone = ? ORDER BY id DESC LIMIT 1'),
     setStatus: db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status = ?'),
+    setPayment: db.prepare('UPDATE orders SET payment_status = ?, updated_at = ? WHERE id = ? AND payment_status = ?'),
     summary: db.prepare(`SELECT outlet_id, COUNT(*) AS orders, SUM(total) AS revenue FROM orders
       WHERE status != 'cancelled' AND created_at >= ? GROUP BY outlet_id`),
 
@@ -67,7 +68,7 @@ function createSqliteStore(db) {
     insertOrder: (o, lines) => transaction(() => {
       const id = q.insertOrder.run(o.code, o.outlet_id, o.channel, o.fulfilment, o.customer_name, o.phone, o.address,
         o.lat, o.lng, o.distance_km, o.notes, o.subtotal, o.packing, o.gst, o.delivery_fee, o.total, o.payment_method,
-        o.status, o.created_at, o.updated_at).lastInsertRowid;
+        o.payment_status, o.status, o.created_at, o.updated_at).lastInsertRowid;
       for (const l of lines) q.insertLine.run(id, l.item_id, l.name, l.price, l.qty, l.note);
       return id;
     }),
@@ -86,6 +87,7 @@ function createSqliteStore(db) {
       return db.prepare(sql).all(...args, limit);
     },
     setOrderStatus: (id, from, to, ts) => q.setStatus.run(to, ts, id, from).changes > 0,
+    setPaymentStatus: (id, from, to, ts) => q.setPayment.run(to, ts, id, from).changes > 0,
     summarySince: (iso) => q.summary.all(iso),
 
     // WhatsApp handoffs to staff

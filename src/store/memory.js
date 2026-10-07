@@ -7,6 +7,7 @@ function createMemoryStore(seed) {
   const outlets = seed.outlets.map((o, i) => ({
     id: i + 1, slug: o.slug, name: o.name, city: o.city, address: o.address, lat: o.lat, lng: o.lng, phone: o.phone,
     delivery_radius_km: o.radiusKm, opens: o.opens, closes: o.closes, accepting_orders: 1, active: 1,
+    upi_id: o.upiId || null, upi_name: 'Raju Chinese',
   }));
   const items = seed.menu.map((m, i) => ({
     id: i + 1, category: m.category, name: m.name, description: m.description || '', price: m.price * 100,
@@ -47,6 +48,12 @@ function createMemoryStore(seed) {
       const o = orders.find((x) => x.id === id && x.status === from);
       if (!o) return false;
       Object.assign(o, { status: to, updated_at: ts });
+      return true;
+    },
+    setPaymentStatus(id, from, to, ts) {
+      const o = orders.find((x) => x.id === id && x.payment_status === from);
+      if (!o) return false;
+      Object.assign(o, { payment_status: to, updated_at: ts });
       return true;
     },
     summarySince(iso) {

@@ -38,4 +38,18 @@ function relayHandoffReplies({ handoffs, client, log = console }) {
   });
 }
 
-module.exports = { notifyOnStatusChange, relayHandoffReplies };
+/** Tell WhatsApp customers when the outlet confirms (or can't find) their UPI payment. */
+function notifyOnPayment({ orders, client, log = console }) {
+  orders.events.on('payment', (o, previous, by) => {
+    // The bot already answers changes the customer made in the chat.
+    if (o.channel !== 'whatsapp' || by === 'customer') return;
+    let text = null;
+    if (o.payment_status === 'paid') text = `✅ Payment of ${rupees(o.total)} received for order *${o.code}*. Thank you!`;
+    else if (o.payment_status === 'pending' && previous === 'claimed') {
+      text = `⚠️ ${o.outlet.name} can't see your payment for order *${o.code}* yet. Please check your UPI app, or pay ${rupees(o.total)} by cash/UPI when your order arrives.`;
+    } else if (o.payment_status === 'cod' && previous !== 'cod') text = `👍 No problem, pay ${rupees(o.total)} by cash/UPI ${o.fulfilment === 'delivery' ? 'when your order arrives' : 'at pickup'}.`;
+    if (text) client.send(o.phone.replace(/^\+/, ''), [{ type: 'text', text }]).catch((e) => log.error('[whatsapp] notify failed', e));
+  });
+}
+
+module.exports = { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment };

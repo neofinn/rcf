@@ -18,13 +18,36 @@
   <script>
   'use strict';
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', p % 100 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {});
   const code = new URLSearchParams(window.RC_QUERY || location.search).get('code');
   const STEPS = {
     delivery: [['placed', 'Order placed'], ['accepted', 'Accepted by outlet'], ['preparing', 'Being prepared'], ['out_for_delivery', 'Out for delivery'], ['completed', 'Delivered']],
     pickup: [['placed', 'Order placed'], ['accepted', 'Accepted by outlet'], ['preparing', 'Being prepared'], ['ready', 'Ready for pickup'], ['completed', 'Picked up']],
   };
   let timer;
+
+  function payHtml(o) {
+    const p = o.payment;
+    if (p.status === 'paid') return `<div class="paybox done"><b>✅ Paid ${rupees(o.total)} by UPI</b></div>`;
+    if (p.status === 'cod') return `<p class="small">💵 Pay <b>${rupees(o.total)}</b> by cash or UPI ${o.fulfilment === 'delivery' ? 'when your order arrives' : 'at pickup'}.</p>`;
+    const claimed = p.status === 'claimed';
+    return `<div class="paybox">
+      <b>${claimed ? '⏳ Checking your payment' : `💳 Pay ${rupees(o.total)} by UPI`}</b>
+      <span class="small muted">To ${esc(p.payee)} · UPI ID <b>${esc(p.upiId)}</b> · Ref ${esc(o.code)}</span>
+      ${claimed ? '<span class="small">Thanks! The outlet will confirm as soon as it shows in their UPI account.</span>' : `
+        <a class="btn" href="${esc(p.link)}">Pay with UPI app</a>
+        <span class="small muted">Opens GPay, PhonePe, Paytm or BHIM with the amount filled in. On a computer, scan this QR with your phone:</span>
+        <div class="qr">${p.qrSvg}</div>
+        <button class="btn secondary" type="button" id="paidBtn">I've paid</button>`}
+    </div>`;
+  }
+
+  document.addEventListener('click', async (e) => {
+    if (e.target.id !== 'paidBtn') return;
+    e.target.disabled = true;
+    await fetch('/api/orders/' + encodeURIComponent(code) + '/paid', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    load();
+  });
 
   async function load() {
     const card = document.getElementById('card');
@@ -40,6 +63,7 @@
     card.innerHTML = `
       <h2 style="margin:0">Order ${esc(o.code)}</h2>
       <p class="muted small">Thanks, ${esc(o.customerName)}! ${o.status === 'completed' || o.status === 'cancelled' ? '' : `Estimated ${o.fulfilment === 'delivery' ? 'delivery' : 'ready'} time: about <b>${o.etaMinutes} min</b> from ordering.`}</p>
+      ${o.status === 'cancelled' ? '' : payHtml(o)}
       ${stepsHtml}
       <p><b>${esc(o.outlet.name)}</b><br><span class="small muted">${esc(o.outlet.address)}</span><br>
         <a href="tel:${esc(o.outlet.phone)}">📞 Call outlet</a> ·
@@ -49,7 +73,7 @@
         <div><span>Packing</span><span>${rupees(o.packing)}</span></div>
         <div><span>GST</span><span>${rupees(o.gst)}</span></div>
         ${o.fulfilment === 'delivery' ? `<div><span>Delivery</span><span>${o.deliveryFee ? rupees(o.deliveryFee) : 'FREE'}</span></div>` : ''}
-        <div class="total"><span>To pay (cash/UPI)</span><span>${rupees(o.total)}</span></div>
+        <div class="total"><span>${o.payment.status === 'paid' ? 'Paid' : 'To pay'}</span><span>${rupees(o.total)}</span></div>
       </div>`;
     clearTimeout(timer);
     if (!['completed', 'cancelled'].includes(o.status)) timer = setTimeout(load, 15000);
