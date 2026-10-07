@@ -2,6 +2,7 @@
 
 const { openDb } = require('../src/db');
 const { createOrderService } = require('../src/orders');
+const { createSqliteStore } = require('../src/store/sqlite');
 
 // 2:00 pm IST, when all seeded outlets are open.
 const LUNCH = new Date('2026-10-07T08:30:00Z');
@@ -17,8 +18,9 @@ const PLACES = {
 
 function setup() {
   const db = openDb(':memory:');
-  const orders = createOrderService(db);
-  return { db, orders };
+  const store = createSqliteStore(db);
+  const orders = createOrderService(store);
+  return { db, store, orders };
 }
 
 module.exports = { setup, LUNCH, NIGHT, PLACES };

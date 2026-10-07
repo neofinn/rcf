@@ -1,22 +1,38 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const path = require('node:path');
 const express = require('express');
 const config = require('./config');
 const { openDb } = require('./db');
+const { createSqliteStore } = require('./store/sqlite');
 const { createOrderService, ValidationError } = require('./orders');
-const { createApiRouter } = require('./routes/api');
-const { createAdminRouter } = require('./routes/admin');
+const { createHandoffService } = require('./handoff');
+const { createRoutes, recordOutbox } = require('./routes/handlers');
 const { createBot, createSessionStore } = require('./whatsapp/bot');
 const { createClient } = require('./whatsapp/client');
-const { createWebhookRouter, notifyOnStatusChange } = require('./whatsapp/webhook');
+const { createWebhookRouter } = require('./whatsapp/webhook');
+const { notifyOnStatusChange, relayHandoffReplies } = require('./whatsapp/notify');
+
+function isAdmin(req) {
+  const token = Buffer.from((req.get('authorization') || '').replace(/^Bearer\s+/i, ''));
+  const expected = Buffer.from(config.adminToken);
+  return token.length === expected.length && crypto.timingSafeEqual(token, expected);
+}
 
 function createApp({ dbPath = config.dbPath, waClient, enableDevTools = !config.production, log = console } = {}) {
   const db = openDb(dbPath);
-  const orders = createOrderService(db);
-  const bot = createBot({ orders, sessions: createSessionStore(db) });
-  const client = waClient || createClient({ log });
+  const store = createSqliteStore(db);
+  const orders = createOrderService(store);
+  const handoffs = createHandoffService(store);
+  const bot = createBot({ orders, handoffs, sessions: createSessionStore(store) });
+
+  // Dev: keep messages the business sends on its own so the simulator can show them.
+  const outbox = [];
+  const baseClient = waClient || createClient({ log });
+  const client = enableDevTools ? recordOutbox(baseClient, outbox) : baseClient;
   notifyOnStatusChange({ orders, client, log });
+  relayHandoffReplies({ handoffs, client, log });
 
   const app = express();
   app.disable('x-powered-by');
@@ -27,14 +43,15 @@ function createApp({ dbPath = config.dbPath, waClient, enableDevTools = !config.
 
   app.use(express.json({ limit: '100kb' }));
   app.get('/healthz', (req, res) => res.json({ ok: true }));
-  app.use('/api/admin', createAdminRouter({ db, orders }));
-  app.use('/api', createApiRouter({ db, orders }));
 
-  if (enableDevTools) {
-    // Chat with the WhatsApp bot from the browser (public/whatsapp-sim.html).
-    app.post('/api/dev/whatsapp', (req, res) => {
-      const { from = '919999999999', name = 'Guest', type = 'text', text, location, replyId } = req.body;
-      res.json(bot.handle({ from, name, type, text, location, replyId }));
+  for (const route of createRoutes({ store, orders, handoffs, bot, outbox })) {
+    if (route.dev && !enableDevTools) continue;
+    app[route.method.toLowerCase()](route.path, (req, res) => {
+      if (route.admin && !isAdmin(req)) return res.status(401).json({ error: 'Unauthorized' });
+      const out = route.handle({ params: req.params, query: req.query, body: req.body || {} });
+      if (out && out.contentType) return res.type(out.contentType).attachment(out.filename).send(out.text);
+      if (out && out.httpStatus) return res.status(out.httpStatus).json(out.body);
+      res.json(out);
     });
   }
 
@@ -50,7 +67,7 @@ function createApp({ dbPath = config.dbPath, waClient, enableDevTools = !config.
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, orders, bot };
+  return { app, db, store, orders, handoffs, bot };
 }
 
 module.exports = { createApp };

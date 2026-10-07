@@ -5,14 +5,25 @@
 // The bot is transport-agnostic: it takes a normalised incoming message and
 // returns a list of abstract replies ({type: 'text' | 'buttons' | 'list' |
 // 'location_request'}). src/whatsapp/client.js turns those into WhatsApp Cloud
-// API payloads; the dev simulator renders them directly.
+// API payloads; the dev simulator and the browser demo render them directly.
+//
+// Customers can order three ways, and mix them freely:
+//   1. Tapping through menu lists and buttons.
+//   2. Typing like they'd text a person: "2 chilli paneer dry less spicy, ek
+//      veg chowmein no onion" (see nlu.js). Special instructions stay attached
+//      to each item; ambiguous items ("chilli paneer") get a follow-up question.
+//   3. Sending a cart from the WhatsApp Business catalog.
+// Whatever the route, the outlet is chosen from the customer's location.
+// Anything the bot can't handle goes to a person at the outlet (handoff).
 
 const config = require('../config');
 const { assignOutlet, isOpen, etaMinutes } = require('../geo');
 const { rupees } = require('../format');
 const { ValidationError } = require('../orders');
+const { parseOrderText } = require('./nlu');
 
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
+const MAX_QTY = 20;
 
 // WhatsApp interactive message limits.
 const clip = (s, n) => (s.length <= n ? s : s.slice(0, n - 1) + '…');
@@ -23,35 +34,54 @@ const text = (t) => ({ type: 'text', text: t });
 const buttons = (t, list) => ({ type: 'buttons', text: t, buttons: list.slice(0, 3) });
 const list = (t, button, sections) => ({ type: 'list', text: t, button: clip(button, 20), sections });
 
+const HUMAN_RE = /\b(human|agent|real person|a person|staff|manager|talk to (?:someone|somebody|you|a person|team|staff)|call me|baat karni|baat karo|customer care|complaint|special request|bulk order|party order|catering)\b/;
+const BACK_TO_BOT = ['bot', 'menu', 'exit', 'order', 'back'];
+const CATALOG_PREFIX = 'RC-';
+
+const describe = (name, note) => `${name}${note ? ` _(${note})_` : ''}`;
+
 function freshSession() {
-  return { state: 'start', fulfilment: null, lat: null, lng: null, outletId: null, distanceKm: null, cart: [], pendingItemId: null, address: null };
+  return {
+    state: 'start', fulfilment: null, lat: null, lng: null, outletId: null, distanceKm: null,
+    cart: [], pendingItemId: null, address: null, choices: [], orderNotes: [],
+  };
 }
 
-function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
+function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicBaseUrl }) {
   function load(phone, now) {
     const s = sessions.get(phone);
     if (!s || now - new Date(s.updatedAt).getTime() > SESSION_TTL_MS) return freshSession();
-    return s.data;
+    return { ...freshSession(), ...s.data };
   }
 
   const outletOf = (s) => (s.outletId ? orders.getOutlet(s.outletId) : null);
+  const menuMap = (s) => new Map(orders.menuFor(s.outletId).map((i) => [i.id, i]));
+
+  function addLine(s, id, qty, note = '') {
+    const line = s.cart.find((l) => l.id === id && (l.note || '') === (note || ''));
+    if (line) line.qty = Math.min(line.qty + qty, MAX_QTY);
+    else s.cart.push({ id, qty: Math.min(qty, MAX_QTY), ...(note ? { note } : {}) });
+  }
 
   // ---- Screens -----------------------------------------------------------
 
   function welcome(name) {
     return [
-      buttons(`Namaste${name ? ' ' + name : ''}! 🙏 Welcome to *Raju Chinese* 🥡\n\nHow would you like your order?`, [
+      buttons(`Namaste${name ? ' ' + name : ''}! 🙏 Welcome to *Raju Chinese* 🥡\n\n`
+        + 'Order by tapping below, or just type what you want, like:\n'
+        + '_"2 chilli paneer dry less spicy and 1 veg noodles no onion"_\n\n'
+        + 'Type *track* for your order status.', [
         btn('mode:delivery', '🛵 Delivery'),
         btn('mode:pickup', '🏃 Pickup'),
-        btn('act:track', '📦 Track order'),
+        btn('act:human', '💬 Talk to us'),
       ]),
     ];
   }
 
-  function askLocation() {
+  function askLocation(prefix = '') {
     return [{
       type: 'location_request',
-      text: 'Please share your delivery location 📍 so we can send your order from the nearest Raju Chinese outlet.\n\n(Tap *Send location*, or use 📎 → Location.)',
+      text: `${prefix}Please share your delivery location 📍 so we can send your order from the nearest Raju Chinese outlet.\n\n(Tap *Send location*, or use 📎 → Location.)`,
     }];
   }
 
@@ -69,7 +99,7 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
       const from = Math.min(...c.items.filter((i) => i.available).map((i) => i.price));
       return row(`cat:${c.name}`, c.name, `${c.items.length} items · from ${rupees(from)}`);
     });
-    return [list(`${intro ? intro + '\n\n' : ''}What would you like to eat? 😋`, 'View menu', [{ title: 'Menu', rows }])];
+    return [list(`${intro ? intro + '\n\n' : ''}What would you like to eat? 😋 Pick from the menu or just type your order.`, 'View menu', [{ title: 'Menu', rows }])];
   }
 
   function itemsList(s, category) {
@@ -81,18 +111,22 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
   }
 
   function cartLines(s) {
-    const menu = new Map(orders.menuFor(s.outletId).map((i) => [i.id, i]));
+    const menu = menuMap(s);
     return s.cart.filter((l) => menu.has(l.id)).map((l) => ({ ...l, item: menu.get(l.id) }));
   }
 
-  function cartView(s) {
+  function cartSummary(s) {
     const lines = cartLines(s);
-    if (!lines.length) {
-      return [buttons('Your cart is empty 🛒', [btn('act:more', '📋 Menu')])];
-    }
-    const body = lines.map((l) => `${l.qty} × ${l.item.name} — ${rupees(l.item.price * l.qty)}`).join('\n');
+    const body = lines.map((l) => `${l.qty} × ${describe(l.item.name, l.note)} — ${rupees(l.item.price * l.qty)}`).join('\n');
     const subtotal = lines.reduce((t, l) => t + l.item.price * l.qty, 0);
-    return [buttons(`🛒 *Your cart*\n${body}\n\nItem total: *${rupees(subtotal)}*`, [
+    const notes = s.orderNotes.length ? `\n📝 ${s.orderNotes.join('; ')}` : '';
+    return { lines, body: `${body}${notes}`, subtotal };
+  }
+
+  function cartView(s, heading = '🛒 *Your cart*') {
+    const { lines, body, subtotal } = cartSummary(s);
+    if (!lines.length) return [buttons('Your cart is empty 🛒 Type your order or open the menu.', [btn('act:more', '📋 Menu')])];
+    return [buttons(`${heading}\n${body}\n\nItem total: *${rupees(subtotal)}*`, [
       btn('act:checkout', '✅ Checkout'),
       btn('act:more', '➕ Add more'),
       btn('act:clear', '🗑️ Clear cart'),
@@ -102,17 +136,18 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
   function confirmView(s) {
     const outlet = outletOf(s);
     const qte = orders.quote({ outletId: s.outletId, items: s.cart, fulfilment: s.fulfilment, distanceKm: s.distanceKm || 0 });
-    const lines = qte.lines.map((l) => `${l.qty} × ${l.name} — ${rupees(l.price * l.qty)}`).join('\n');
+    const lines = qte.lines.map((l) => `${l.qty} × ${describe(l.name, l.note)} — ${rupees(l.price * l.qty)}`).join('\n');
     const charges = [
       `Item total: ${rupees(qte.subtotal)}`,
       `Packing: ${rupees(qte.packing)}`,
       `GST (5%): ${rupees(qte.gst)}`,
       ...(s.fulfilment === 'delivery' ? [`Delivery: ${qte.deliveryFee ? rupees(qte.deliveryFee) : 'FREE'}`] : []),
     ].join('\n');
+    const notes = s.orderNotes.length ? `\n📝 Note for kitchen: ${s.orderNotes.join('; ')}\n` : '';
     const where = s.fulfilment === 'delivery'
       ? `🛵 Delivery to: ${s.address}\nFrom: ${outlet.name}`
       : `🏃 Pickup from: ${outlet.name}\n${outlet.address}`;
-    return [buttons(`*Please confirm your order*\n\n${lines}\n\n${charges}\n*To pay: ${rupees(qte.total)}* (cash/UPI on ${s.fulfilment === 'delivery' ? 'delivery' : 'pickup'})\n\n${where}`, [
+    return [buttons(`*Please confirm your order*\n\n${lines}\n${notes}\n${charges}\n*To pay: ${rupees(qte.total)}* (cash/UPI on ${s.fulfilment === 'delivery' ? 'delivery' : 'pickup'})\n\n${where}`, [
       btn('act:place', '✅ Place order'),
       btn('act:cart', '✏️ Edit cart'),
       btn('act:cancel', '❌ Cancel'),
@@ -123,6 +158,30 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
     const o = orders.latestOrderForPhone(phone);
     if (!o) return [text("You don't have any orders yet. Send *hi* to start ordering.")];
     return [text(`📦 Order *${o.code}*: ${o.statusLabel}\nFrom ${o.outlet.name} (${o.outlet.phone})\nTotal ${rupees(o.total)}\n\nTrack: ${baseUrl}/track.html?code=${o.code}`)];
+  }
+
+  // Ask the customer to pick between variants of something they typed.
+  function choiceView(s) {
+    const c = s.choices[0];
+    s.state = 'await_choice';
+    const prompt = `Which *${c.query}* would you like?${c.qty > 1 ? ` (×${c.qty})` : ''}${c.note ? ` _(${c.note})_` : ''}`;
+    if (c.options.length <= 3) {
+      return [buttons(prompt, c.options.map((o) => btn(`pick:${o.id}`, o.name.replace(/\s*\(.*?\)/g, ''))))];
+    }
+    return [list(prompt, 'Choose', [{ title: 'Options', rows: c.options.map((o) => row(`pick:${o.id}`, o.name, `${o.veg ? '🟢 Veg' : '🔴 Non-veg'} · ${rupees(o.price)}`)) }])];
+  }
+
+  // After items are added by text or catalog: resolve questions, then location, then cart.
+  function nextStep(s, intro = []) {
+    if (s.choices.length) return [...intro, ...choiceView(s)];
+    if (!s.outletId) {
+      s.fulfilment = s.fulfilment || 'delivery';
+      if (s.fulfilment === 'pickup') { s.state = 'choose_outlet'; return [...intro, ...pickupOutlets(new Date())]; }
+      s.state = 'await_location';
+      return [...intro, ...askLocation('Where should we send it? ')];
+    }
+    s.state = 'browsing';
+    return [...intro, ...cartView(s)];
   }
 
   // ---- Actions -----------------------------------------------------------
@@ -140,7 +199,8 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
       const intro = fulfilment === 'delivery'
         ? `📍 Great news! *${a.outlet.name}* (${a.distanceKm} km away) will deliver to you in about ${etaMinutes('delivery', a.distanceKm)} min.`
         : `📍 Nearest outlet: *${a.outlet.name}* (${a.distanceKm} km). Your order will be ready in about ${etaMinutes('pickup')} min.`;
-      return categoriesList(s, intro);
+      if (!s.cart.length) return categoriesList(s, intro);
+      return [text(intro), ...dropUnavailable(s), ...nextStep(s)];
     }
     s.state = 'await_location';
     const alt = a.pickupSuggestion;
@@ -154,24 +214,69 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
     ])];
   }
 
-  function addToCart(s, qty) {
+  // The cart may have been filled before we knew the outlet; remove sold-out items.
+  function dropUnavailable(s) {
+    const menu = menuMap(s);
+    const gone = s.cart.filter((l) => !menu.get(l.id)?.available);
+    if (!gone.length) return [];
+    s.cart = s.cart.filter((l) => menu.get(l.id)?.available);
+    const names = gone.map((l) => menu.get(l.id)?.name || 'an item').join(', ');
+    return [text(`😔 Sorry, ${names} ${gone.length > 1 ? 'are' : 'is'} sold out at ${outletOf(s).name} right now, so I've removed ${gone.length > 1 ? 'them' : 'it'}.`)];
+  }
+
+  function addToCart(s, qty, note = '') {
     const item = orders.menuFor(s.outletId).find((i) => i.id === s.pendingItemId);
     s.pendingItemId = null;
     s.state = 'browsing';
     if (!item || !item.available) return [text('Sorry, that item is not available right now.'), ...categoriesList(s)];
-    const line = s.cart.find((l) => l.id === item.id);
-    if (line) line.qty = Math.min(line.qty + qty, 20);
-    else s.cart.push({ id: item.id, qty });
+    addLine(s, item.id, qty, note);
     const count = s.cart.reduce((t, l) => t + l.qty, 0);
-    return [buttons(`Added ${qty} × *${item.name}* ✅\nCart: ${count} item${count > 1 ? 's' : ''}`, [
+    return [buttons(`Added ${qty} × *${describe(item.name, note)}* ✅\nCart: ${count} item${count > 1 ? 's' : ''}\n\n_Tip: you can add instructions, e.g. reply "2 less spicy"._`, [
       btn('act:more', '➕ Add more'),
       btn('act:cart', '🛒 View cart'),
       btn('act:checkout', '✅ Checkout'),
     ])];
   }
 
+  // Free-text order: "2 chilli paneer dry less spicy, 1 veg noodles no onion".
+  function onTypedOrder(s, parsed) {
+    const menu = menuMap(s);
+    const added = [];
+    const soldOut = [];
+    for (const l of parsed.lines) {
+      const item = menu.get(l.id);
+      if (s.outletId && !item.available) { soldOut.push(item.name); continue; }
+      addLine(s, l.id, l.qty, l.note);
+      added.push(`• ${l.qty} × ${describe(item.name, l.note)}`);
+    }
+    s.choices.push(...parsed.choices.map((c) => ({ ...c, options: c.options.filter((o) => !s.outletId || o.available).map(({ id, name, price, veg }) => ({ id, name, price, veg })) }))
+      .filter((c) => c.options.length));
+    s.orderNotes.push(...parsed.orderNotes);
+    const parts = [];
+    if (added.length) parts.push(`Got it 👍\n${added.join('\n')}`);
+    if (parsed.orderNotes.length) parts.push(`📝 Noted for the kitchen: ${parsed.orderNotes.join('; ')}`);
+    if (soldOut.length) parts.push(`😔 ${soldOut.join(', ')} ${soldOut.length > 1 ? 'are' : 'is'} sold out at this outlet right now.`);
+    if (parsed.unknown.length) parts.push(`🤔 I couldn't find "${parsed.unknown.join('", "')}" on our menu. Type *menu* to see everything, or *talk to us* for something special.`);
+    return nextStep(s, parts.length ? [text(parts.join('\n\n'))] : []);
+  }
+
+  // Cart sent from the WhatsApp catalog (one catalog for all outlets).
+  function onCatalogOrder(s, msg) {
+    const menu = menuMap(s);
+    const lines = (msg.items || [])
+      .map((p) => ({ id: Number(String(p.retailerId).replace(CATALOG_PREFIX, '')), qty: Math.max(1, Math.min(Number(p.qty) || 1, MAX_QTY)) }))
+      .filter((l) => menu.has(l.id));
+    if (!lines.length) return [text("Sorry, I couldn't read that cart. Please type your order or type *menu*.")];
+    s.cart = [];
+    for (const l of lines) addLine(s, l.id, l.qty);
+    if (msg.text) s.orderNotes.push(String(msg.text).slice(0, 200));
+    const intro = [text(`🛒 Got your cart: ${lines.length} item${lines.length > 1 ? 's' : ''}.${msg.text ? `\n📝 ${msg.text}` : ''}`)];
+    if (s.outletId) intro.push(...dropUnavailable(s));
+    return nextStep(s, intro);
+  }
+
   function checkout(s) {
-    if (!s.outletId) return welcome();
+    if (!s.outletId) return s.cart.length ? nextStep(s) : welcome();
     if (!cartLines(s).length) return cartView(s);
     const qte = orders.quote({ outletId: s.outletId, items: s.cart, fulfilment: s.fulfilment, distanceKm: s.distanceKm || 0 });
     if (s.fulfilment === 'delivery' && qte.subtotal < config.pricing.minDeliveryOrder) {
@@ -201,9 +306,11 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
         lat: s.lat,
         lng: s.lng,
         outletId: s.outletId,
+        notes: s.orderNotes.join('; '),
         items: s.cart,
       }, now);
       s.cart = [];
+      s.orderNotes = [];
       s.state = 'browsing';
       return [text(`🎉 Order placed! Your order ID is *${order.code}*.\n\n${order.outlet.name} will ${order.fulfilment === 'delivery' ? `deliver in about ${order.etaMinutes} min` : `have it ready in about ${order.etaMinutes} min`}.\nPay ${rupees(order.total)} by cash/UPI on ${order.fulfilment === 'delivery' ? 'delivery' : 'pickup'}.\n\nTrack your order: ${baseUrl}/track.html?code=${order.code}\nOutlet phone: ${order.outlet.phone}\n\nWe'll message you here as your order moves along. Thank you! 🙏`)];
     } catch (e) {
@@ -213,12 +320,58 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
     }
   }
 
+  // ---- Human handoff -----------------------------------------------------
+
+  function startHandoff(s, msg, now) {
+    if (!handoffs) {
+      const o = outletOf(s);
+      return [text(`Please call us${o ? ` at ${o.name}: ${o.phone}` : ''} and our team will help you. 🙏`)];
+    }
+    let outletId = s.outletId;
+    if (!outletId && s.lat != null) outletId = assignOutlet(orders.listOutlets(), s, { fulfilment: 'pickup', now }).outlet?.id || null;
+    const { body } = cartSummary(s);
+    const context = [
+      `Started by ${msg.type === 'reply' ? 'tapping "Talk to us"' : `message: "${msg.text}"`}`,
+      s.fulfilment ? `Mode: ${s.fulfilment}` : null,
+      s.address ? `Address: ${s.address}` : null,
+      s.cart.length ? `Cart:\n${body.replace(/_/g, '')}` : null,
+    ].filter(Boolean).join('\n');
+    handoffs.open({ phone: msg.from, name: msg.name, outletId, context }, now);
+    const outlet = outletId ? orders.getOutlet(outletId) : null;
+    s.state = 'human';
+    return [text(`🙋 Connecting you to our team${outlet ? ` at *${outlet.name}*` : ''}. Tell us what you need: special requests, bulk or party orders, a problem with an order, anything. A team member will reply here shortly.\n\n(Type *bot* anytime to go back to quick ordering.)`)];
+  }
+
+  function relayToHuman(h, msg) {
+    const body = msg.type === 'text' ? msg.text
+      : msg.type === 'location' ? `📍 Shared location: https://maps.google.com/?q=${msg.location.lat},${msg.location.lng}`
+        : msg.type === 'reply' ? `[tapped ${msg.replyId}]`
+          : msg.type === 'catalog_order' ? `[sent a catalog cart with ${(msg.items || []).length} items]`
+            : '[sent an unsupported message]';
+    handoffs.addMessage(h.id, 'in', body);
+    return [];
+  }
+
   // ---- Router ------------------------------------------------------------
 
   function route(s, msg, now) {
-    const t = (msg.text || '').trim().toLowerCase();
+    const raw = (msg.text || '').trim();
+    const t = raw.toLowerCase();
+
+    // A person is handling this chat: pass messages through, stay quiet.
+    const open = handoffs && handoffs.openForPhone(msg.from);
+    if (open) {
+      if (msg.type === 'text' && BACK_TO_BOT.includes(t)) {
+        handoffs.addMessage(open.id, 'in', raw);
+        handoffs.close(open.id, now);
+        s.state = 'browsing';
+        return [text("You're back with the ordering assistant 🤖"), ...(s.outletId ? (s.cart.length ? cartView(s) : categoriesList(s)) : welcome(msg.name))];
+      }
+      return relayToHuman(open, msg);
+    }
 
     if (msg.type === 'location') return onLocation(s, msg.location, now);
+    if (msg.type === 'catalog_order') return onCatalogOrder(s, msg);
 
     if (msg.type === 'text') {
       if (['reset', 'cancel', 'restart', 'start over'].includes(t)) {
@@ -226,30 +379,50 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
         return [text('Okay, starting fresh. 👍'), ...welcome(msg.name)];
       }
       if (['track', 'status', 'order status', 'where is my order'].includes(t)) return trackView(msg.from);
-      if (t === 'cart') return s.outletId ? cartView(s) : welcome(msg.name);
+      if (t === 'cart') return s.outletId || s.cart.length ? cartView(s) : welcome(msg.name);
       if (['menu', 'order'].includes(t)) return s.outletId ? categoriesList(s) : welcome(msg.name);
-      if (['hi', 'hii', 'hello', 'hey', 'namaste', 'sat sri akal'].includes(t)) {
-        return s.outletId && s.cart.length ? [text(`Welcome back${msg.name ? ' ' + msg.name : ''}! Your cart is saved.`), ...cartView(s)] : welcome(msg.name);
+      if (s.state === 'await_qty') {
+        const m = t.match(/^(\d{1,2})\b\s*(.*)$/);
+        if (m && Number(m[1]) >= 1) return addToCart(s, Math.min(Number(m[1]), MAX_QTY), raw.slice(m[0].length - m[2].length).trim().slice(0, 120));
       }
-      if (s.state === 'await_qty' && /^\d{1,2}$/.test(t) && Number(t) >= 1) return addToCart(s, Math.min(Number(t), 20));
-      if (s.state === 'await_address' && t.length >= 5) {
-        s.address = msg.text.trim().slice(0, 300);
+      if (s.state === 'await_address') {
+        if (t.length < 5) return [text('That address looks too short. Please include house/flat no., sector/street and a landmark.')];
+        s.address = raw.slice(0, 300);
         s.state = 'confirm';
         return confirmView(s);
       }
-      if (s.state === 'await_address') return [text('That address looks too short. Please include house/flat no., sector/street and a landmark.')];
+      if (HUMAN_RE.test(t) || t === 'help') return startHandoff(s, msg, now);
+      if (s.state === 'await_choice' && s.choices.length) {
+        const pick = s.choices[0].options.find((o) => o.name.toLowerCase().includes(t));
+        if (pick) return route(s, { ...msg, type: 'reply', replyId: `pick:${pick.id}` }, now);
+      }
+
+      const parsed = parseOrderText(raw, orders.menuFor(s.outletId));
+      if (parsed.isOrder) return onTypedOrder(s, parsed);
+      if (parsed.orderNotes.length && (s.cart.length || s.outletId)) {
+        s.orderNotes.push(...parsed.orderNotes);
+        return [text(`📝 Noted: ${parsed.orderNotes.join('; ')}`), ...cartView(s)];
+      }
+      if (['hi', 'hii', 'hello', 'hey', 'namaste', 'sat sri akal'].includes(t)) {
+        return s.cart.length ? [text(`Welcome back${msg.name ? ' ' + msg.name : ''}! Your cart is saved.`), ...cartView(s)] : welcome(msg.name);
+      }
       if (s.state === 'await_location') return askLocation();
+      if (parsed.unknown.length) {
+        return [buttons(`🤔 Sorry, I couldn't find "${parsed.unknown.join('", "')}" on our menu.\n\nWant to talk to our team about it? They can help with special requests.`, [
+          btn('act:human', '💬 Talk to us'), btn('act:more', '📋 Menu'),
+        ])];
+      }
       if (!s.outletId) return welcome(msg.name);
-      return [buttons("Sorry, I didn't get that. 🙂 Use the buttons below, or type *menu*, *cart*, *track* or *reset*.", [
-        btn('act:more', '📋 Menu'), btn('act:cart', '🛒 View cart'), btn('act:track', '📦 Track order'),
+      return [buttons("Sorry, I didn't get that. 🙂 Type your order, use the buttons below, or type *track* or *reset*.", [
+        btn('act:more', '📋 Menu'), btn('act:cart', '🛒 View cart'), btn('act:human', '💬 Talk to us'),
       ])];
     }
 
     if (msg.type !== 'reply') return [text('Sorry, I can only understand text, buttons and shared locations. Type *hi* to start.')];
 
     const [kind, arg] = msg.replyId.split(/:(.*)/s);
-    const needsOutlet = ['cat', 'item', 'qty'].includes(kind) || ['more', 'cart', 'checkout', 'place', 'same_address'].includes(arg);
-    if (needsOutlet && !s.outletId) return welcome(msg.name);
+    const needsOutlet = ['cat', 'item', 'qty'].includes(kind) || ['more', 'place', 'same_address'].includes(arg);
+    if (needsOutlet && !s.outletId) return s.cart.length ? nextStep(s) : welcome(msg.name);
 
     switch (kind) {
       case 'mode':
@@ -265,7 +438,9 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
         s.outletId = o.id;
         s.distanceKm = null;
         s.state = 'browsing';
-        return categoriesList(s, `🏃 Pickup from *${o.name}*\n${o.address}`);
+        const intro = `🏃 Pickup from *${o.name}*\n${o.address}`;
+        if (!s.cart.length) return categoriesList(s, intro);
+        return [text(intro), ...dropUnavailable(s), ...nextStep(s)];
       }
       case 'cat':
         return itemsList(s, arg);
@@ -274,16 +449,24 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
         if (!item || !item.available) return [text('Sorry, that item is not available right now.'), ...categoriesList(s)];
         s.pendingItemId = item.id;
         s.state = 'await_qty';
-        return [buttons(`*${item.name}* — ${rupees(item.price)}\nHow many? (or type a number)`, [btn('qty:1', '1'), btn('qty:2', '2'), btn('qty:3', '3')])];
+        return [buttons(`*${item.name}* — ${rupees(item.price)}\nHow many? Tap below, or type a number with any instructions, e.g. _2 less spicy_.`, [btn('qty:1', '1'), btn('qty:2', '2'), btn('qty:3', '3')])];
       }
       case 'qty':
         if (!s.pendingItemId) return categoriesList(s);
-        return addToCart(s, Math.max(1, Math.min(Number(arg) || 1, 20)));
+        return addToCart(s, Math.max(1, Math.min(Number(arg) || 1, MAX_QTY)));
+      case 'pick': {
+        const c = s.choices.shift();
+        if (!c) return s.outletId ? cartView(s) : welcome(msg.name);
+        const option = c.options.find((o) => o.id === Number(arg));
+        if (!option) { s.choices.unshift(c); return choiceView(s); }
+        addLine(s, option.id, c.qty, c.note);
+        return nextStep(s, [text(`Added ${c.qty} × ${describe(option.name, c.note)} ✅`)]);
+      }
       case 'act':
         switch (arg) {
           case 'more': s.state = 'browsing'; return categoriesList(s);
           case 'cart': s.state = 'browsing'; return cartView(s);
-          case 'clear': s.cart = []; s.state = 'browsing'; return [text('Cart cleared. 🗑️'), ...categoriesList(s)];
+          case 'clear': s.cart = []; s.orderNotes = []; s.choices = []; s.state = 'browsing'; return [text('Cart cleared. 🗑️'), ...(s.outletId ? categoriesList(s) : welcome(msg.name))];
           case 'checkout': return checkout(s);
           case 'same_address':
             if (!s.address) return checkout(s);
@@ -294,6 +477,7 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
             return place(s, msg, now);
           case 'cancel': s.state = 'browsing'; return [text('No problem, your order was not placed. Your cart is still saved.'), ...cartView(s)];
           case 'track': return trackView(msg.from);
+          case 'human': return startHandoff(s, msg, now);
           default: return welcome(msg.name);
         }
       default:
@@ -303,7 +487,8 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
 
   /**
    * Handle one incoming message.
-   * msg: { from, name?, type: 'text'|'location'|'reply'|'unsupported', text?, location?: {lat, lng}, replyId? }
+   * msg: { from, name?, type: 'text'|'location'|'reply'|'catalog_order'|'unsupported',
+   *        text?, location?: {lat, lng}, replyId?, items?: [{retailerId, qty}] }
    */
   function handle(msg, now = new Date()) {
     const s = load(msg.from, now.getTime());
@@ -321,20 +506,12 @@ function createBot({ orders, sessions, baseUrl = config.publicBaseUrl }) {
   return { handle };
 }
 
-/** SQLite-backed session store. */
-function createSessionStore(db) {
-  const get = db.prepare('SELECT data, updated_at FROM wa_sessions WHERE phone = ?');
-  const put = db.prepare(`INSERT INTO wa_sessions (phone, data, updated_at) VALUES (?, ?, ?)
-    ON CONFLICT(phone) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`);
+/** Conversation state per customer, kept in the store. */
+function createSessionStore(store) {
   return {
-    get(phone) {
-      const r = get.get(phone);
-      return r && { data: JSON.parse(r.data), updatedAt: r.updated_at };
-    },
-    set(phone, data, now = new Date()) {
-      put.run(phone, JSON.stringify(data), now.toISOString());
-    },
+    get: (phone) => store.getSession(phone),
+    set: (phone, data, now = new Date()) => store.putSession(phone, data, now.toISOString()),
   };
 }
 
-module.exports = { createBot, createSessionStore };
+module.exports = { createBot, createSessionStore, CATALOG_PREFIX };

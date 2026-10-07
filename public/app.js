@@ -301,7 +301,8 @@ $('checkout').addEventListener('submit', async (e) => {
     saveCart();
     const past = store.get('orders', []);
     store.set('orders', [code, ...past].slice(0, 10));
-    location.href = `/track.html?code=${encodeURIComponent(code)}`;
+    const url = `/track.html?code=${encodeURIComponent(code)}`;
+    if (window.RC_NAVIGATE) window.RC_NAVIGATE(url); else location.href = url;
   } catch (err) {
     showCheckoutError(err.message);
     $('placeBtn').disabled = false;

@@ -58,31 +58,55 @@ function deliveryFee(subtotal, distanceKm) {
   return p.deliverySlabs.find((s) => distanceKm <= s.uptoKm).fee;
 }
 
-function createOrderService(db) {
+/**
+ * Price cart lines ({id, qty, note?}) against a menu list. Lines for the same
+ * item with different notes ("less spicy" vs none) stay separate.
+ */
+function priceCart(menuList, items, fulfilment, distanceKm) {
+  if (!Array.isArray(items) || items.length === 0) throw new ValidationError('Your cart is empty.');
+  const menu = new Map(menuList.map((i) => [i.id, i]));
+  const merged = new Map();
+  const perItem = new Map();
+  for (const line of items) {
+    const id = Number(line.id);
+    const qty = Number(line.qty);
+    const note = String(line.note || '').trim().slice(0, 120);
+    if (!Number.isInteger(qty) || qty < 1) throw new ValidationError('Invalid quantity.');
+    const key = `${id}|${note.toLowerCase()}`;
+    const m = merged.get(key) || { id, qty: 0, note };
+    m.qty += qty;
+    merged.set(key, m);
+    perItem.set(id, (perItem.get(id) || 0) + qty);
+  }
+  const lines = [];
+  for (const { id, qty, note } of merged.values()) {
+    const item = menu.get(id);
+    if (!item) throw new ValidationError('An item in your cart is no longer on the menu.');
+    if (!item.available) throw new ValidationError(`${item.name} is not available at this outlet right now.`, 'unavailable');
+    if (perItem.get(id) > MAX_QTY_PER_ITEM) throw new ValidationError(`Maximum ${MAX_QTY_PER_ITEM} of ${item.name} per order.`);
+    lines.push({ item_id: id, name: item.name, price: item.price, qty, note: note || null });
+  }
+  const p = config.pricing;
+  const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
+  const packing = p.packingPerOrder;
+  const gst = Math.round(((subtotal + packing) * p.gstPercent) / 100);
+  const fee = fulfilment === 'delivery' ? deliveryFee(subtotal, distanceKm) : 0;
+  return {
+    lines, subtotal, packing, gst, deliveryFee: fee, total: subtotal + packing + gst + fee,
+    minDeliveryOrder: p.minDeliveryOrder, freeDeliveryAbove: p.freeDeliveryAbove,
+  };
+}
+
+function createOrderService(store) {
   const events = new EventEmitter();
 
-  const q = {
-    outlets: db.prepare('SELECT * FROM outlets WHERE active = 1 ORDER BY id'),
-    outlet: db.prepare('SELECT * FROM outlets WHERE id = ?'),
-    items: db.prepare('SELECT * FROM menu_items WHERE active = 1 ORDER BY sort'),
-    unavailable: db.prepare('SELECT item_id FROM outlet_unavailable_items WHERE outlet_id = ?'),
-    insertOrder: db.prepare(`INSERT INTO orders (code, outlet_id, channel, fulfilment, customer_name, phone,
-      address, lat, lng, distance_km, notes, subtotal, packing, gst, delivery_fee, total, payment_method,
-      status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-    insertLine: db.prepare('INSERT INTO order_items (order_id, item_id, name, price, qty) VALUES (?, ?, ?, ?, ?)'),
-    byCode: db.prepare('SELECT * FROM orders WHERE code = ?'),
-    lines: db.prepare('SELECT item_id, name, price, qty FROM order_items WHERE order_id = ?'),
-    latestForPhone: db.prepare('SELECT * FROM orders WHERE phone = ? ORDER BY id DESC LIMIT 1'),
-    setStatus: db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status = ?'),
-  };
-
-  const listOutlets = () => q.outlets.all();
-  const getOutlet = (id) => q.outlet.get(id);
+  const listOutlets = () => store.outlets();
+  const getOutlet = (id) => store.outlet(id);
 
   /** Menu for an outlet, with per-outlet availability applied. */
   function menuFor(outletId) {
-    const out = new Set(outletId ? q.unavailable.all(outletId).map((r) => r.item_id) : []);
-    return q.items.all().map((i) => ({
+    const out = new Set(outletId ? store.unavailableItemIds(outletId) : []);
+    return store.menuItems().map((i) => ({
       id: i.id, category: i.category, name: i.name, description: i.description,
       price: i.price, veg: !!i.veg, available: !out.has(i.id),
     }));
@@ -125,32 +149,7 @@ function createOrderService(db) {
 
   /** Price a cart against the server-side menu. */
   function quote({ outletId, items, fulfilment, distanceKm }) {
-    if (!Array.isArray(items) || items.length === 0) throw new ValidationError('Your cart is empty.');
-    const menu = new Map(menuFor(outletId).map((i) => [i.id, i]));
-    const merged = new Map();
-    for (const line of items) {
-      const id = Number(line.id);
-      const qty = Number(line.qty);
-      if (!Number.isInteger(qty) || qty < 1) throw new ValidationError('Invalid quantity.');
-      merged.set(id, (merged.get(id) || 0) + qty);
-    }
-    const lines = [];
-    for (const [id, qty] of merged) {
-      const item = menu.get(id);
-      if (!item) throw new ValidationError('An item in your cart is no longer on the menu.');
-      if (!item.available) throw new ValidationError(`${item.name} is not available at this outlet right now.`, 'unavailable');
-      if (qty > MAX_QTY_PER_ITEM) throw new ValidationError(`Maximum ${MAX_QTY_PER_ITEM} of ${item.name} per order.`);
-      lines.push({ item_id: id, name: item.name, price: item.price, qty });
-    }
-    const p = config.pricing;
-    const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
-    const packing = p.packingPerOrder;
-    const gst = Math.round(((subtotal + packing) * p.gstPercent) / 100);
-    const fee = fulfilment === 'delivery' ? deliveryFee(subtotal, distanceKm) : 0;
-    return {
-      lines, subtotal, packing, gst, deliveryFee: fee, total: subtotal + packing + gst + fee,
-      minDeliveryOrder: p.minDeliveryOrder, freeDeliveryAbove: p.freeDeliveryAbove,
-    };
+    return priceCart(menuFor(outletId), items, fulfilment, distanceKm);
   }
 
   function newCode() {
@@ -159,13 +158,13 @@ function createOrderService(db) {
     for (;;) {
       const bytes = crypto.randomBytes(6);
       const code = 'RC' + [...bytes].map((b) => alphabet[b % alphabet.length]).join('');
-      if (!q.byCode.get(code)) return code;
+      if (!store.orderCodeExists(code)) return code;
     }
   }
 
   /**
    * Create an order. Input:
-   * { channel, fulfilment, name, phone, address?, lat?, lng?, outletId?, notes?, items: [{id, qty}] }
+   * { channel, fulfilment, name, phone, address?, lat?, lng?, outletId?, notes?, items: [{id, qty, note?}] }
    */
   function createOrder(input, now = new Date()) {
     const fulfilment = input.fulfilment === 'pickup' ? 'pickup' : 'delivery';
@@ -187,19 +186,14 @@ function createOrderService(db) {
 
     const code = newCode();
     const ts = now.toISOString();
-    db.exec('BEGIN');
-    try {
-      const res = q.insertOrder.run(code, outlet.id, input.channel === 'whatsapp' ? 'whatsapp' : 'web', fulfilment,
-        name, phone, fulfilment === 'delivery' ? address : null,
-        Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null, distanceKm, notes || null,
-        priced.subtotal, priced.packing, priced.gst, priced.deliveryFee, priced.total,
-        'cod', 'placed', ts, ts);
-      for (const l of priced.lines) q.insertLine.run(res.lastInsertRowid, l.item_id, l.name, l.price, l.qty);
-      db.exec('COMMIT');
-    } catch (e) {
-      db.exec('ROLLBACK');
-      throw e;
-    }
+    store.insertOrder({
+      code, outlet_id: outlet.id, channel: input.channel === 'whatsapp' ? 'whatsapp' : 'web', fulfilment,
+      customer_name: name, phone, address: fulfilment === 'delivery' ? address : null,
+      lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null, distance_km: distanceKm,
+      notes: notes || null, subtotal: priced.subtotal, packing: priced.packing, gst: priced.gst,
+      delivery_fee: priced.deliveryFee, total: priced.total, payment_method: 'cod', status: 'placed',
+      created_at: ts, updated_at: ts,
+    }, priced.lines);
     const order = getOrder(code);
     events.emit('created', order);
     return order;
@@ -210,7 +204,7 @@ function createOrderService(db) {
     const outlet = getOutlet(row.outlet_id);
     return {
       ...row,
-      items: q.lines.all(row.id),
+      items: store.orderLines(row.id),
       statusLabel: STATUS_LABELS[row.status],
       nextStatuses: (TRANSITIONS[row.fulfilment][row.status] || []),
       etaMinutes: etaMinutes(row.fulfilment, row.distance_km || 0),
@@ -218,23 +212,15 @@ function createOrderService(db) {
     };
   }
 
-  const getOrder = (code) => present(q.byCode.get(String(code || '').toUpperCase()));
+  const getOrder = (code) => present(store.orderByCode(String(code || '').toUpperCase()));
 
   function latestOrderForPhone(raw) {
     const phone = normalisePhone(raw);
-    return phone ? present(q.latestForPhone.get(phone)) : null;
+    return phone ? present(store.latestOrderForPhone(phone)) : null;
   }
 
   function listOrders({ outletId, statuses, limit = 100 } = {}) {
-    const where = [];
-    const args = [];
-    if (outletId) { where.push('outlet_id = ?'); args.push(outletId); }
-    if (statuses && statuses.length) {
-      where.push(`status IN (${statuses.map(() => '?').join(',')})`);
-      args.push(...statuses);
-    }
-    const sql = `SELECT * FROM orders ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT ?`;
-    return db.prepare(sql).all(...args, Math.min(Number(limit) || 100, 500)).map(present);
+    return store.listOrders({ outletId, statuses, limit: Math.min(Number(limit) || 100, 500) }).map(present);
   }
 
   function updateStatus(code, next, now = new Date()) {
@@ -243,8 +229,7 @@ function createOrderService(db) {
     if (!order.nextStatuses.includes(next)) {
       throw new ValidationError(`Cannot move order from "${order.status}" to "${next}".`, 'bad_transition');
     }
-    const res = q.setStatus.run(next, now.toISOString(), order.id, order.status);
-    if (res.changes === 0) throw new ValidationError('Order was updated by someone else. Refresh and try again.', 'conflict');
+    if (!store.setOrderStatus(order.id, order.status, next, now.toISOString())) throw new ValidationError('Order was updated by someone else. Refresh and try again.', 'conflict');
     const updated = getOrder(code);
     events.emit('status', updated);
     return updated;
@@ -256,4 +241,6 @@ function createOrderService(db) {
   };
 }
 
-module.exports = { createOrderService, ValidationError, normalisePhone, STATUSES, STATUS_LABELS, deliveryFee };
+module.exports = {
+  createOrderService, priceCart, ValidationError, normalisePhone, STATUSES, STATUS_LABELS, TRANSITIONS, deliveryFee,
+};

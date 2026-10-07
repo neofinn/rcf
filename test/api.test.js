@@ -144,3 +144,42 @@ test('dev WhatsApp simulator endpoint talks to the bot', async (t) => {
   const r = await s.call('POST', '/api/dev/whatsapp', { from: '919800000000', type: 'text', text: 'hi' });
   assert.equal(r.body[0].type, 'buttons');
 });
+
+test('catalog cart over the webhook, human handoff with staff replies, catalog feed', async (t) => {
+  const s = await start();
+  t.after(s.close);
+  const from = '919822223333';
+  const post = async (id, m) => {
+    await s.call('POST', '/webhooks/whatsapp', { entry: [{ changes: [{ value: { contacts: [{ wa_id: from, profile: { name: 'Gurpreet' } }], messages: [{ id, from, ...m }] } }] }] });
+    await new Promise((r) => setImmediate(r));
+  };
+
+  const feed = await fetch(`${s.base}/api/admin/catalog.csv`, { headers: admin });
+  const csv = await feed.text();
+  assert.match(csv, /^id,title,description,availability,condition,price,link,image_link,brand,product_type\n/);
+  const firstId = csv.split('\n')[1].split(',')[0];
+  assert.match(firstId, /^RC-\d+$/);
+
+  await post('c1', { type: 'order', order: { catalog_id: '1', text: '', product_items: [{ product_retailer_id: firstId, quantity: 3, item_price: 89, currency: 'INR' }] } });
+  assert.match(s.sent.at(-1).replies[0].text, /Got your cart/);
+  assert.equal(s.sent.at(-1).replies[1].type, 'location_request');
+
+  await post('c2', { type: 'text', text: { body: 'talk to someone please' } });
+  assert.match(s.sent.at(-1).replies[0].text, /Connecting you to our team/);
+  await post('c3', { type: 'text', text: { body: 'Can you make it without garlic?' } });
+  const before = s.sent.length;
+
+  const chats = await s.call('GET', '/api/admin/chats', undefined, admin);
+  assert.equal(chats.body.length, 1);
+  assert.equal(chats.body[0].messages.at(-1).body, 'Can you make it without garlic?');
+
+  await s.call('POST', `/api/admin/chats/${chats.body[0].id}/reply`, { text: 'Yes ji, no garlic. Please share your location.' }, admin);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(s.sent.length, before + 1);
+  assert.equal(s.sent.at(-1).replies[0].text, 'Yes ji, no garlic. Please share your location.');
+
+  await s.call('POST', `/api/admin/chats/${chats.body[0].id}/close`, {}, admin);
+  await new Promise((r) => setImmediate(r));
+  assert.match(s.sent.at(-1).replies[0].text, /closed this chat/);
+  assert.equal((await s.call('GET', '/api/admin/chats', undefined, admin)).body.length, 0);
+});

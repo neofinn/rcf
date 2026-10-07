@@ -27,10 +27,11 @@
   <header class="topbar"><div class="logo">WhatsApp simulator</div><span class="small" style="margin-left:auto;opacity:.8">dev only</span></header>
   <div class="chat" id="chat"></div>
   <div class="compose">
-    <form id="f"><input id="t" placeholder="Type a message (try: hi)" autocomplete="off"><button class="btn" style="width:auto">Send</button></form>
+    <form id="f"><input id="t" placeholder='Try: 2 chilli paneer less spicy, 1 veg noodles' autocomplete="off"><button class="btn" style="width:auto">Send</button></form>
     <div class="row">
       <select id="loc"><option value="">📍 Share a location…</option></select>
       <button class="btn secondary" type="button" id="gps">My GPS</button>
+      <button class="btn secondary" type="button" id="catalog" title="Send a cart from the WhatsApp catalog">🛍️ Catalog cart</button>
     </div>
   </div>
   <script>
@@ -38,7 +39,15 @@
   const chat = document.getElementById('chat');
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (s) => esc(s).replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/_([^_\n]+)_/g, '<i>$1</i>');
-  const from = '91' + (localStorage.getItem('sim.phone') || (() => { const p = '98' + String(Math.floor(Math.random() * 1e8)).padStart(8, '0'); localStorage.setItem('sim.phone', p); return p; })());
+  const from = '91' + (() => {
+    try {
+      const saved = localStorage.getItem('sim.phone');
+      if (saved) return saved;
+    } catch { /* storage unavailable */ }
+    const p = '98' + String(Math.floor(Math.random() * 1e8)).padStart(8, '0');
+    try { localStorage.setItem('sim.phone', p); } catch { /* storage unavailable */ }
+    return p;
+  })();
 
   function bubble(html, who) {
     const d = document.createElement('div');
@@ -55,6 +64,18 @@
     if (r.type === 'location_request') html += '<div class="opts"><button data-loc="1">📍 Send location (use picker below)</button></div>';
     bubble(html, 'bot');
   }
+
+  // Messages the business sends on its own: staff replies, order status updates.
+  let outboxSeq = null;
+  async function pollOutbox() {
+    try {
+      const r = await (await fetch(`/api/dev/whatsapp/outbox?from=${from}&after=${outboxSeq ?? 1e12}`)).json();
+      if (outboxSeq !== null) r.messages.forEach(render);
+      outboxSeq = r.last;
+    } catch { /* server restarting */ }
+    setTimeout(pollOutbox, 2500);
+  }
+  pollOutbox();
 
   async function send(msg, echo) {
     bubble(echo, 'me');
@@ -86,6 +107,12 @@
     const [lat, lng] = e.target.value.split(',').map(Number);
     send({ type: 'location', location: { lat, lng } }, '📍 ' + esc(e.target.selectedOptions[0].textContent));
     e.target.value = '';
+  });
+  document.getElementById('catalog').addEventListener('click', async () => {
+    const menu = (await (await fetch('/api/menu')).json()).flatMap((c) => c.items);
+    const pick = [menu[5], menu[17], menu[32]].filter(Boolean);
+    const items = pick.map((i, n) => ({ retailerId: 'RC-' + i.id, qty: n === 0 ? 2 : 1 }));
+    send({ type: 'catalog_order', items, text: '' }, '🛍️ Catalog cart: ' + pick.map((i, n) => `${items[n].qty} × ${esc(i.name)}`).join(', '));
   });
   document.getElementById('gps').addEventListener('click', () => navigator.geolocation?.getCurrentPosition((p) =>
     send({ type: 'location', location: { lat: p.coords.latitude, lng: p.coords.longitude } }, '📍 Current location')));

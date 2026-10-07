@@ -78,13 +78,34 @@ CREATE TABLE IF NOT EXISTS order_items (
   item_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   price INTEGER NOT NULL,
-  qty INTEGER NOT NULL
+  qty INTEGER NOT NULL,
+  note TEXT
 );
 
 CREATE TABLE IF NOT EXISTS wa_sessions (
   phone TEXT PRIMARY KEY,
   data TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+-- Conversations handed over from the bot to outlet staff.
+CREATE TABLE IF NOT EXISTS wa_handoffs (
+  id INTEGER PRIMARY KEY,
+  phone TEXT NOT NULL,
+  name TEXT,
+  outlet_id INTEGER REFERENCES outlets(id),
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS wa_handoffs_phone ON wa_handoffs(phone, status);
+
+CREATE TABLE IF NOT EXISTS wa_handoff_messages (
+  id INTEGER PRIMARY KEY,
+  handoff_id INTEGER NOT NULL REFERENCES wa_handoffs(id),
+  direction TEXT NOT NULL, -- 'in' from customer, 'out' from staff, 'bot' context
+  body TEXT NOT NULL,
+  at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS wa_processed (
@@ -98,8 +119,15 @@ function openDb(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  migrate(db);
   seedIfEmpty(db);
   return db;
+}
+
+// Additive migrations for databases created by earlier versions.
+function migrate(db) {
+  const cols = db.prepare('PRAGMA table_info(order_items)').all().map((c) => c.name);
+  if (!cols.includes('note')) db.exec('ALTER TABLE order_items ADD COLUMN note TEXT');
 }
 
 function seedIfEmpty(db) {

@@ -26,6 +26,16 @@
     .tabs { max-width: 420px; }
     table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: var(--radius); overflow: hidden; }
     td, th { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+    .chat { background: var(--card); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; }
+    .bubbles { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+    .b { padding: 6px 10px; border-radius: 10px; max-width: 85%; white-space: pre-wrap; font-size: 0.9rem; overflow-wrap: anywhere; }
+    .b.in { background: var(--bg); align-self: flex-start; }
+    .b.out { background: #d9fdd3; color: #111; align-self: flex-end; }
+    .b.bot { background: transparent; border: 1px dashed var(--line); color: var(--muted); font-size: 0.8rem; align-self: stretch; max-width: none; }
+    .chat form { display: flex; gap: 6px; }
+    .chat form input { flex: 1; }
+    .chat form button { width: auto; flex: none; }
+    #chatCount:not(:empty) { background: var(--accent); color: #111; border-radius: 999px; padding: 0 6px; font-size: 0.75rem; }
     .chip { font-size: 0.75rem; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
   </style>
 </head>
@@ -51,6 +61,7 @@
         <select id="outlet"><option value="">All outlets</option></select>
         <div class="tabs" style="margin:0">
           <button type="button" data-view="live" class="on">Live orders</button>
+          <button type="button" data-view="chats">Chats <span id="chatCount"></span></button>
           <button type="button" data-view="history">History</button>
           <button type="button" data-view="menu">Menu stock</button>
         </div>

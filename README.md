@@ -10,6 +10,8 @@ Online ordering for Raju Chinese's outlets across the Chandigarh tricity: a web 
 | Outlet dashboard | `/admin/` | Outlet staff / managers |
 | WhatsApp simulator | `/whatsapp-sim.html` | Developers/demos (disabled when `NODE_ENV=production`) |
 
+**Shareable demo:** `npm run build:demo` writes `dist/demo.html`, a single file with the web app, WhatsApp chat, outlet dashboard and a live routing map. It runs the real code from `src/` in the browser on an in-memory store, so no server is needed.
+
 ## How orders reach the right outlet
 
 1. The customer shares a location: browser GPS, picking their area from a list (25 tricity localities), or a WhatsApp location pin.
@@ -22,15 +24,27 @@ Menu stock is per outlet: staff can mark an item out of stock at their outlet on
 
 ## Ordering on WhatsApp
 
-Built on the official **WhatsApp Business Cloud API** (Meta). The conversation:
+Built on the official **WhatsApp Business Cloud API** (Meta). Customers can order in three ways and mix them freely.
+
+**1. Type it like a message to a person** (`src/whatsapp/nlu.js`)
 
 ```
-hi → [Delivery | Pickup | Track order]
-Delivery → "Send location" request → nearest outlet + ETA → menu (list)
-→ category → item → quantity [1|2|3 or type a number]
-→ [Add more | View cart | Checkout] → address (saved for next time)
-→ confirmation with full bill → [Place order] → order ID + tracking link
+"2 chilli paneer less spicy, ek veg chowmein no onion. Call before coming"
+→ Got it 👍  • 1 × Veg Hakka Noodles (no onion)
+  📝 Noted for the kitchen: call before coming
+  Which chilli paneer would you like? (×2) (less spicy)  [Dry] [Gravy] [Combo]
 ```
+
+- Understands English and Hinglish quantities (`2`, `2x`, `do`, `ek`, `teen`), common spellings (chowmein, manchuriyan, shezwan, chilly, momo…) and small typos.
+- Special instructions stay attached to the item they belong to (`less spicy`, `no onion`, `jain`, `sauce alag`, `extra crispy`…) and print on the outlet's order card. Requests for the whole order (`call before coming`, `everything less spicy`, `cutlery`) become an order note.
+- When a dish has variants ("chilli paneer", "momos"), the bot asks which one instead of guessing.
+- Items sold out at the customer's outlet are reported, not added.
+
+**2. Tap through the menu:** menu list → item → quantity (or type "2 less spicy") → cart → checkout.
+
+**3. Send a cart from the WhatsApp catalog.** There is one catalog for all outlets. The cart arrives at the webhook as an `order` message; the bot keeps it, asks for the customer's location if it doesn't have one, routes it to the nearest outlet like any other order, removes anything sold out there, and continues to checkout. Product IDs in the catalog are `RC-<menu item id>`; staff can download the full feed at `/api/admin/catalog.csv` and upload it in Meta Commerce Manager.
+
+**Talk to a person.** Typing things like "talk to someone", "party order", "complaint" or tapping **💬 Talk to us** hands the chat to staff at the customer's outlet. The dashboard's **Chats** tab shows the conversation with the customer's cart and address, staff reply from there, and the bot stays quiet until staff close the chat or the customer types `bot`. When the bot can't find something on the menu it offers this handoff too.
 
 Customers can type `menu`, `cart`, `track` or `reset` at any time. Orders from WhatsApp get status updates on WhatsApp (accepted, preparing, out for delivery / ready, completed, cancelled).
 
@@ -69,13 +83,15 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
    - Create a Meta Business account and a WhatsApp Business app at developers.facebook.com, and add and verify the business phone number.
    - Copy the permanent access token and phone number ID into `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`, and the app secret into `WHATSAPP_APP_SECRET`.
    - Set the webhook URL to `https://<your-domain>/webhooks/whatsapp` with your `WHATSAPP_VERIFY_TOKEN`, and subscribe to the `messages` field.
+   - Optional catalog: create a catalog in Meta Commerce Manager, upload `/api/admin/catalog.csv` (add real photos at the `image_link` URLs), and connect it to the WhatsApp number. Customers can then browse and send carts; routing still uses their location.
    - Put an "Order on WhatsApp" link (`https://wa.me/91XXXXXXXXXX?text=hi`) and a QR code on menus, packaging and the website.
-4. **Outlet tablets.** Open `/admin/` at each outlet, log in, select the outlet and leave it open; it refreshes every 10 s and beeps on new orders. "Accepting orders" pauses an outlet when it is overloaded.
+4. **Outlet tablets.** Open `/admin/` at each outlet, log in, select the outlet and leave it open; it refreshes every 5 s and beeps on new orders and new chat messages. "Accepting orders" pauses an outlet when it is overloaded.
 
 ## Suggested next steps
 
 - Online payments (Razorpay/PhonePe UPI) in addition to cash/UPI on delivery
 - Separate logins per outlet (today one admin token sees every outlet)
+- An LLM (e.g. Claude) behind the WhatsApp parser for messages the rule-based parser can't follow, with the current parser as the fast path
 - WhatsApp template messages so web customers also get WhatsApp status updates (Meta only allows free-form messages within 24 h of the customer's last message)
 - OTP verification of phone numbers for web orders
 - Rider assignment / third-party delivery integration
@@ -85,17 +101,22 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
 
 ```
 src/
-  server.js            start the HTTP server
-  app.js               wires everything together
-  config.js            env settings and pricing rules
-  db.js, seed.js       SQLite schema and starter data
-  geo.js               distance, opening hours, outlet assignment
-  orders.js            menu, pricing, order creation and status changes
-  routes/api.js        public API used by the web app
-  routes/admin.js      staff API (Bearer ADMIN_TOKEN)
-  whatsapp/bot.js      WhatsApp conversation
-  whatsapp/client.js   Cloud API sender
-  whatsapp/webhook.js  webhook endpoint and status notifications
-public/                web app, tracking page, dashboard, simulator
-test/                  node:test suites
+  server.js              start the HTTP server
+  app.js                 wires everything together (Express)
+  config.js              env settings and pricing rules
+  db.js, seed.js         SQLite schema and starter data
+  store/sqlite.js        data access on SQLite
+  store/memory.js        same interface in memory (browser demo)
+  geo.js                 distance, opening hours, outlet assignment
+  orders.js              menu, pricing, order creation and status changes
+  handoff.js             WhatsApp chats handed to outlet staff
+  routes/handlers.js     the HTTP API as plain functions (server + demo)
+  whatsapp/bot.js        WhatsApp conversation
+  whatsapp/nlu.js        free-text order understanding
+  whatsapp/client.js     Cloud API sender
+  whatsapp/webhook.js    webhook endpoint (signature check, dedupe)
+  whatsapp/notify.js     status updates and staff replies to customers
+public/                  web app, tracking page, dashboard, simulator
+demo/, scripts/          single-file browser demo and its build
+test/                    node:test suites
 ```

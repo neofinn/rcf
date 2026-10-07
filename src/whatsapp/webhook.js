@@ -3,7 +3,6 @@
 const crypto = require('node:crypto');
 const express = require('express');
 const config = require('../config');
-const { rupees } = require('../format');
 
 /** Turn a Cloud API webhook body into normalised messages for the bot. */
 function parseWebhook(body) {
@@ -19,6 +18,12 @@ function parseWebhook(body) {
         else if (m.type === 'interactive') {
           const id = m.interactive?.button_reply?.id || m.interactive?.list_reply?.id;
           out.push(id ? { ...base, type: 'reply', replyId: id } : { ...base, type: 'unsupported' });
+        } else if (m.type === 'order') {
+          // Cart sent from the WhatsApp Business catalog.
+          out.push({
+            ...base, type: 'catalog_order', text: m.order?.text || '',
+            items: (m.order?.product_items || []).map((p) => ({ retailerId: p.product_retailer_id, qty: Number(p.quantity) || 1 })),
+          });
         } else if (m.type === 'button') out.push({ ...base, type: 'text', text: m.button?.payload || m.button?.text || '' });
         else out.push({ ...base, type: 'unsupported' });
       }
@@ -68,24 +73,4 @@ function createWebhookRouter({ db, bot, client, log = console }) {
   return router;
 }
 
-/** Message WhatsApp customers when their order status changes. */
-function notifyOnStatusChange({ orders, client, log = console }) {
-  const messages = {
-    accepted: (o) => `✅ ${o.outlet.name} has accepted your order *${o.code}*.`,
-    preparing: (o) => `👨‍🍳 Your order *${o.code}* is being prepared.`,
-    out_for_delivery: (o) => `🛵 Your order *${o.code}* is out for delivery! Please keep ${rupees(o.total)} ready (cash/UPI).`,
-    ready: (o) => `🥡 Your order *${o.code}* is ready for pickup at ${o.outlet.name}, ${o.outlet.address}.`,
-    completed: (o) => `🙏 Thank you for ordering from Raju Chinese! Hope you enjoyed order *${o.code}*. Send *hi* to order again.`,
-    cancelled: (o) => `❌ Sorry, your order *${o.code}* was cancelled by the outlet. Please call ${o.outlet.phone} for help.`,
-  };
-  orders.events.on('status', (o) => {
-    // Free-form messages are only allowed inside WhatsApp's 24h customer
-    // service window, which WhatsApp orders are. Web orders would need an
-    // approved template message.
-    if (o.channel !== 'whatsapp' || !messages[o.status]) return;
-    const to = o.phone.replace(/^\+/, '');
-    client.send(to, [{ type: 'text', text: messages[o.status](o) }]).catch((e) => log.error('[whatsapp] notify failed', e));
-  });
-}
-
-module.exports = { createWebhookRouter, parseWebhook, validSignature, notifyOnStatusChange };
+module.exports = { createWebhookRouter, parseWebhook, validSignature };

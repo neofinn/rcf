@@ -13,7 +13,7 @@ const NEXT_LABEL = {
   completed: 'Complete', cancelled: 'Cancel',
 };
 
-const state = { token: store.get('token', ''), outletId: store.get('outlet', ''), view: 'live', outlets: [], seen: new Set(), firstLoad: true };
+const state = { token: store.get('token', '') || (window.RC_DEMO ? 'demo' : ''), outletId: store.get('outlet', ''), view: 'live', outlets: [], seen: new Set(), firstLoad: true, chatSeen: new Map(), chatsLoaded: false };
 
 async function api(path, opts = {}) {
   const res = await fetch('/api/admin' + path, {
@@ -64,7 +64,7 @@ function orderCard(o) {
   return `<div class="order ${o.status}">
     <h4><span>${esc(o.code)}</span><span class="chip">${o.fulfilment === 'delivery' ? '🛵 Delivery' : '🏃 Pickup'} · ${o.channel === 'whatsapp' ? 'WhatsApp' : 'Web'}</span></h4>
     <div class="small muted">${ago(o.created_at)} · ${esc(o.statusLabel)}${state.outletId ? '' : ' · ' + esc(o.outlet.name.replace('Raju Chinese - ', ''))}</div>
-    <ul>${o.items.map((i) => `<li>${i.qty} × ${esc(i.name)}</li>`).join('')}</ul>
+    <ul>${o.items.map((i) => `<li>${i.qty} × ${esc(i.name)}${i.note ? ` <b style="color:var(--brand)">(${esc(i.note)})</b>` : ''}</li>`).join('')}</ul>
     ${o.notes ? `<div class="small"><b>Note:</b> ${esc(o.notes)}</div>` : ''}
     <div class="small"><b>${esc(o.customer_name)}</b> · <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></div>
     ${o.address ? `<div class="small">${esc(o.address)}${o.distance_km != null ? ` (${o.distance_km} km)` : ''}${map}</div>` : ''}
@@ -87,6 +87,40 @@ async function renderOrders() {
   $('view').innerHTML = orders.length ? `<div class="grid">${orders.map(orderCard).join('')}</div>` : '<p class="muted">No orders here yet.</p>';
 }
 
+function chatCard(h) {
+  const outlet = state.outlets.find((o) => o.id === h.outlet_id);
+  return `<div class="chat">
+    <h4 style="margin:0;display:flex;justify-content:space-between;gap:8px"><span>💬 ${esc(h.name || 'Customer')} · <a href="tel:+${esc(h.phone)}">+${esc(h.phone)}</a></span>
+      <span class="chip">${outlet ? esc(outlet.name.replace('Raju Chinese - ', '')) : 'No outlet yet'}</span></h4>
+    <div class="small muted">Opened ${ago(h.created_at)}</div>
+    <div class="bubbles">${h.messages.map((m) => `<div class="b ${m.direction}">${esc(m.body)}</div>`).join('')}</div>
+    <form data-chat="${h.id}"><input name="text" placeholder="Reply on WhatsApp…" autocomplete="off" required><button class="btn">Send</button></form>
+    <button type="button" class="btn secondary" data-close-chat="${h.id}">Close chat & hand back to bot</button>
+  </div>`;
+}
+
+async function loadChats() {
+  const chats = await api('/chats' + (state.outletId ? `?outletId=${state.outletId}` : ''));
+  // Alert on new customer messages.
+  let fresh = false;
+  for (const h of chats) {
+    const lastIn = h.messages.filter((m) => m.direction === 'in').length;
+    if (state.chatsLoaded && lastIn > (state.chatSeen.get(h.id) ?? -1)) fresh = true;
+    state.chatSeen.set(h.id, lastIn);
+  }
+  if (fresh) beep();
+  state.chatsLoaded = true;
+  $('chatCount').textContent = chats.length || '';
+  return chats;
+}
+
+async function renderChats(chats) {
+  // Don't wipe a reply someone is typing.
+  if (document.activeElement?.closest?.('[data-chat]')) return;
+  $('view').innerHTML = chats.length ? `<div class="grid">${chats.map(chatCard).join('')}</div>` : '<p class="muted">No open chats. Customers reach staff by typing "talk to us" on WhatsApp.</p>';
+  $('view').querySelectorAll('.bubbles').forEach((b) => { b.scrollTop = b.scrollHeight; });
+}
+
 async function renderMenu() {
   if (!state.outletId) { $('view').innerHTML = '<p class="muted">Choose an outlet to manage its stock.</p>'; return; }
   const items = await api(`/outlets/${state.outletId}/menu`);
@@ -107,7 +141,9 @@ async function renderStats() {
 
 async function refresh() {
   try {
-    await Promise.all([state.view === 'menu' ? renderMenu() : renderOrders(), renderStats()]);
+    const chats = await loadChats();
+    const view = state.view === 'menu' ? renderMenu() : state.view === 'chats' ? renderChats(chats) : renderOrders();
+    await Promise.all([view, renderStats()]);
   } catch (e) {
     if (e.message !== 'unauthorized') console.error(e);
   }
@@ -121,12 +157,30 @@ document.addEventListener('click', async (e) => {
     try { await api(`/orders/${b.dataset.code}/status`, { method: 'POST', body: { status: b.dataset.status } }); } catch (err) { alert(err.message); }
     refresh();
   }
+  const c = e.target.closest('[data-close-chat]');
+  if (c) {
+    try { await api(`/chats/${c.dataset.closeChat}/close`, { method: 'POST' }); } catch (err) { alert(err.message); }
+    refresh();
+  }
   const v = e.target.closest('[data-view]');
   if (v) {
     state.view = v.dataset.view;
     document.querySelectorAll('[data-view]').forEach((x) => x.classList.toggle('on', x === v));
     refresh();
   }
+});
+
+document.addEventListener('submit', async (e) => {
+  const f = e.target.closest('[data-chat]');
+  if (!f) return;
+  e.preventDefault();
+  const input = f.elements.text;
+  try {
+    await api(`/chats/${f.dataset.chat}/reply`, { method: 'POST', body: { text: input.value } });
+    input.value = '';
+    input.blur();
+  } catch (err) { alert(err.message); }
+  refresh();
 });
 
 document.addEventListener('change', async (e) => {
@@ -168,7 +222,7 @@ async function start() {
   syncAccepting();
   refresh();
   clearInterval(poll);
-  poll = setInterval(() => { if (state.view !== 'menu') refresh(); }, 10000);
+  poll = setInterval(() => { if (state.view !== 'menu') refresh(); }, 5000);
 }
 
 start();

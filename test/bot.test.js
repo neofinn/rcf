@@ -3,15 +3,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createBot, createSessionStore } = require('../src/whatsapp/bot');
+const { createHandoffService } = require('../src/handoff');
 const { toPayload } = require('../src/whatsapp/client');
 const { setup, LUNCH, PLACES } = require('./helpers');
 
 function chat() {
-  const { db, orders } = setup();
-  const bot = createBot({ orders, sessions: createSessionStore(db), baseUrl: 'https://order.example' });
+  const { db, store, orders } = setup();
+  const handoffs = createHandoffService(store);
+  const bot = createBot({ orders, handoffs, sessions: createSessionStore(store), baseUrl: 'https://order.example' });
   const from = '919876543210';
   const say = (msg) => bot.handle({ from, name: 'Aman', ...msg }, LUNCH);
-  return { db, orders, say, text: (t) => say({ type: 'text', text: t }), tap: (id) => say({ type: 'reply', replyId: id }) };
+  return { db, orders, handoffs, say, text: (t) => say({ type: 'text', text: t }), tap: (id) => say({ type: 'reply', replyId: id }) };
 }
 
 const allIds = (replies) => replies.flatMap((r) => [...(r.buttons || []), ...(r.sections || []).flatMap((s) => s.rows)].map((x) => x.id));
@@ -19,7 +21,7 @@ const allIds = (replies) => replies.flatMap((r) => [...(r.buttons || []), ...(r.
 test('full delivery order over WhatsApp', () => {
   const c = chat();
   let r = c.text('hi');
-  assert.deepEqual(allIds(r), ['mode:delivery', 'mode:pickup', 'act:track']);
+  assert.deepEqual(allIds(r), ['mode:delivery', 'mode:pickup', 'act:human']);
 
   r = c.tap('mode:delivery');
   assert.equal(r[0].type, 'location_request');
@@ -106,7 +108,7 @@ test('reset clears the session and track reports the latest order', () => {
   c.say({ type: 'location', location: PLACES.sector22 });
   const r = c.text('reset');
   assert.match(r[0].text, /starting fresh/);
-  assert.deepEqual(allIds(c.text('menu')), ['mode:delivery', 'mode:pickup', 'act:track']);
+  assert.deepEqual(allIds(c.text('menu')), ['mode:delivery', 'mode:pickup', 'act:human']);
 });
 
 test('every interactive message respects WhatsApp size limits', () => {
@@ -130,4 +132,92 @@ test('every interactive message respects WhatsApp size limits', () => {
     assert.ok(r.text.length <= 1024, 'interactive body too long');
     toPayload('919876543210', r); // must not throw
   }
+});
+
+const idOf = (orders, name) => orders.menuFor(null).find((i) => i.name === name).id;
+
+test('typed order with special instructions, a follow-up question and location', () => {
+  const c = chat();
+  let r = c.text('2 chilli paneer less spicy, ek veg chowmein no onion. Call before coming');
+  assert.match(r[0].text, /1 × Veg Hakka Noodles _\(no onion\)_/);
+  assert.match(r[0].text, /Noted for the kitchen: call before coming/);
+  // "chilli paneer" is ambiguous: dry or gravy?
+  assert.match(r[1].text, /Which \*chilli paneer\*/);
+  r = c.tap(`pick:${idOf(c.orders, 'Chilli Paneer Dry')}`);
+  assert.match(r[0].text, /Added 2 × Chilli Paneer Dry _\(less spicy\)_/);
+  // No location yet, so ask for it before showing the cart.
+  assert.equal(r[1].type, 'location_request');
+  r = c.say({ type: 'location', location: PLACES.phase7 });
+  assert.match(r[0].text, /Phase 7 Mohali/);
+  assert.match(r[1].text, /Your cart/);
+  c.tap('act:checkout');
+  r = c.text('Flat 3, Phase 7, near market');
+  assert.match(r[0].text, /Note for kitchen: call before coming/);
+  c.tap('act:place');
+  const o = c.orders.latestOrderForPhone('919876543210');
+  assert.equal(o.outlet.name, 'Raju Chinese - Phase 7 Mohali');
+  assert.equal(o.notes, 'call before coming');
+  assert.deepEqual(o.items.map((i) => [i.name, i.qty, i.note]).sort(), [
+    ['Chilli Paneer Dry', 2, 'less spicy'],
+    ['Veg Hakka Noodles', 1, 'no onion'],
+  ]);
+});
+
+test('quantity reply can carry instructions', () => {
+  const c = chat();
+  c.say({ type: 'location', location: PLACES.sector22 });
+  c.tap(`item:${idOf(c.orders, 'Honey Chilli Potato')}`);
+  const r = c.text('3 extra crispy, sauce separate');
+  assert.match(r[0].text, /Added 3 × \*Honey Chilli Potato _\(extra crispy, sauce separate\)_\*/);
+});
+
+test('typed items sold out at the assigned outlet are reported, not added', () => {
+  const c = chat();
+  c.db.prepare('INSERT INTO outlet_unavailable_items VALUES (1, ?)').run(idOf(c.orders, 'Crispy Corn'));
+  c.say({ type: 'location', location: PLACES.sector22 });
+  const r = c.text('2 crispy corn and 1 veg fried rice');
+  assert.match(r[0].text, /Crispy Corn is sold out/);
+  assert.match(r[0].text, /1 × Veg Fried Rice/);
+});
+
+test('catalog cart is routed to the nearest outlet after location', () => {
+  const c = chat();
+  const combo = idOf(c.orders, 'Noodles + Manchurian Combo');
+  let r = c.say({ type: 'catalog_order', text: 'extra spicy please', items: [{ retailerId: `RC-${combo}`, qty: 2 }] });
+  assert.match(r[0].text, /Got your cart: 1 item/);
+  assert.equal(r[1].type, 'location_request');
+  r = c.say({ type: 'location', location: PLACES.panchkula5 });
+  assert.match(r[0].text, /Sector 11 Panchkula/);
+  assert.match(r[1].text, /2 × Noodles \+ Manchurian Combo/);
+});
+
+test('unknown requests offer a person; handoff relays messages and staff can hand back', () => {
+  const c = chat();
+  let r = c.text('2 pizza');
+  assert.ok(allIds(r).includes('act:human'));
+
+  c.say({ type: 'location', location: PLACES.sector22 });
+  c.text('1 veg fried rice');
+  r = c.text('I need a party order for 40 people, can I talk to someone');
+  assert.match(r[0].text, /Connecting you to our team at \*Raju Chinese - Sector 17\*/);
+  const h = c.handoffs.openForPhone('919876543210');
+  assert.equal(h.outlet_id, 1);
+  assert.match(h.messages[0].body, /Cart:\n1 × Veg Fried Rice/);
+
+  // While a person is on the chat the bot stays quiet and records messages.
+  assert.deepEqual(c.text('Also can you do it jain?'), []);
+  assert.equal(c.handoffs.get(h.id).messages.at(-1).body, 'Also can you do it jain?');
+
+  r = c.text('bot');
+  assert.match(r[0].text, /back with the ordering assistant/);
+  assert.equal(c.handoffs.openForPhone('919876543210'), null);
+});
+
+test('address step is not hijacked by handoff keywords', () => {
+  const c = chat();
+  c.say({ type: 'location', location: PLACES.sector22 });
+  c.text('2 veg fried rice');
+  c.tap('act:checkout');
+  const r = c.text('House 4, near staff quarters, Sector 22');
+  assert.match(r[0].text, /Please confirm/);
 });
