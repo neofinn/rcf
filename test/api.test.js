@@ -12,7 +12,7 @@ const silent = { info() {}, error() {} };
 async function start() {
   const sent = [];
   const waClient = { enabled: true, send: async (to, replies) => { sent.push({ to, replies }); } };
-  const ctx = createApp({ dbPath: ':memory:', waClient, enableDevTools: true, log: silent, deliveryPartner: null });
+  const ctx = createApp({ dbPath: ':memory:', seed: require('./fixtures/seed'), waClient, enableDevTools: true, log: silent, deliveryPartner: null });
   // Open 24h so tests don't depend on the wall clock.
   ctx.db.exec("UPDATE outlets SET opens = '00:00', closes = '00:00'");
   const server = ctx.app.listen(0);
@@ -232,4 +232,25 @@ test('Shadowfax: staff book from the dashboard; callbacks need the shared token'
   t.after(() => { config.shadowfax.callbackToken = prev; });
   assert.equal((await s.call('POST', '/webhooks/shadowfax', { sfx_order_id: 'x', order_status: 'DELIVERED' })).status, 401);
   assert.equal((await s.call('PUT', '/webhooks/shadowfax', { sfx_order_id: 'x', order_status: 'DELIVERED' }, { 'X-Callback-Token': 'cb-secret' })).status, 200);
+});
+
+test('web start flow helpers: typed address to area, loyalty points by WhatsApp number', async (t) => {
+  const s = await start();
+  t.after(s.close);
+  const g = await s.call('POST', '/api/geocode', { address: 'House 12, sec 22-B, Chandigarh' });
+  assert.equal(g.body.place.name, 'Sector 22');
+  assert.equal((await s.call('POST', '/api/geocode', { address: 'Green Valley Apartments' })).body.place, null);
+
+  assert.equal((await s.call('GET', '/api/loyalty?phone=12')).status, 400);
+  assert.equal((await s.call('GET', '/api/loyalty?phone=9876501234')).body.points, 0);
+  const menu = (await s.call('GET', '/api/menu?outletId=1')).body.flatMap((c) => c.items);
+  const items = [{ id: menu.find((i) => i.name === 'Chicken Fried Rice').id, qty: 4 }];
+  const { code } = (await s.call('POST', '/api/orders', { fulfilment: 'pickup', outletId: 1, items, name: 'Kiran', phone: '9876501234', marketingOptIn: true })).body;
+  for (const st of ['accepted', 'preparing', 'ready', 'completed']) await s.call('POST', `/api/admin/orders/${code}/status`, { status: st }, admin);
+  const pts = (await s.call('GET', '/api/loyalty?phone=+91 98765 01234')).body.points;
+  assert.ok(pts >= 6, `got ${pts}`);
+  const track = (await s.call('GET', `/api/orders/${code}`)).body;
+  assert.deepEqual(track.loyalty, { points: pts, earned: true });
+  const crm = (await s.call('GET', '/api/admin/customers?optIn=1', undefined, admin)).body;
+  assert.equal(crm.customers[0].phone, '+919876501234');
 });

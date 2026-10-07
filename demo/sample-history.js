@@ -95,6 +95,43 @@ function seedSampleHistory(store, { days = 90, now = new Date() } = {}) {
         payment_method: upi ? 'upi' : 'cod', payment_status: upi ? (cancelled ? 'pending' : 'paid') : 'cod',
         status: cancelled ? 'cancelled' : 'completed', created_at: iso, updated_at: iso,
       }, priced.lines);
+      // Status times: slower kitchens in the evening rush.
+      const hourIst = new Date(at.getTime() + IST).getUTCHours();
+      const rushy = hourIst >= 19 && hourIst <= 21 ? 1.45 : hourIst >= 12 && hourIst <= 14 ? 1.2 : 1;
+      const step = (min) => new Date(at.getTime() + min * 60000).toISOString();
+      const accept = 1 + rand() * 3;
+      const ready = accept + (11 + rand() * 9) * rushy;
+      store.addOrderEvent(id, 'placed', iso);
+      if (cancelled) store.addOrderEvent(id, 'cancelled', step(accept));
+      else {
+        store.addOrderEvent(id, 'accepted', step(accept));
+        store.addOrderEvent(id, 'preparing', step(accept + 1));
+        if (fulfilment === 'delivery') {
+          const out = ready + 3 + rand() * 6;
+          store.addOrderEvent(id, 'out_for_delivery', step(out));
+          store.addOrderEvent(id, 'completed', step(out + 4 + distanceKm * 3.2 + rand() * 5));
+        } else {
+          store.addOrderEvent(id, 'ready', step(ready));
+          store.addOrderEvent(id, 'completed', step(ready + 3 + rand() * 12));
+        }
+      }
+      // About a third of customers rate their order after delivery.
+      if (!cancelled && rand() < 0.35) {
+        const quality = (it) => (/Momos|Honey Chilli|Chilli Paneer Dry|Manchurian/.test(it.name) ? 4.5 : /Soup|Coke/.test(it.name) ? 4.0 : 4.2) - (rushy > 1.3 ? 0.4 : 0);
+        const dishStars = priced.lines.map((l) => {
+          const it = menu.find((m) => m.id === l.item_id);
+          return { id: l.item_id, name: l.name, stars: Math.max(1, Math.min(5, Math.round(quality(it) + (rand() - 0.5) * 2.2))) };
+        });
+        const overall = Math.max(1, Math.min(5, Math.round(dishStars.reduce((t, d) => t + d.stars, 0) / dishStars.length + (rand() - 0.6))));
+        const rAt = new Date(at.getTime() + 90 * 60000).toISOString();
+        store.addRating({ orderId: id, itemId: 0, name: 'Whole order', stars: overall, outletId: outlet.id, phone: c.phone, at: rAt });
+        for (const d of dishStars) store.addRating({ orderId: id, itemId: d.id, name: d.name, stars: d.stars, outletId: outlet.id, phone: c.phone, at: rAt });
+        if (rand() < 0.25) {
+          const good = ['Loved the momos, perfect spice', 'Fast delivery and still hot', 'Best noodles in the tricity', 'Generous portion, will order again', 'Gravy was spot on'];
+          const bad = ['Food arrived cold', 'Too oily this time', 'Took too long in the rush', 'Less quantity than usual', 'Too spicy for kids'];
+          store.addReviewComment(id, overall >= 4 ? pick(good) : pick(bad), rAt);
+        }
+      }
       const cur = store.customer(c.phone);
       store.upsertCustomer({
         phone: c.phone, name: c.name, first_seen_at: cur?.first_seen_at || iso, last_seen_at: iso, first_channel: cur?.first_channel || c.channel,

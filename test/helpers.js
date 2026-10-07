@@ -16,8 +16,11 @@ const PLACES = {
   ludhiana: { lat: 30.9010, lng: 75.8573 }, // far outside tricity
 };
 
-function setup() {
-  const db = openDb(':memory:');
+const fixtureSeed = require('./fixtures/seed');
+
+// Tests run against the fixture outlets unless a test asks for the real seed.
+function setup({ seed = fixtureSeed } = {}) {
+  const db = openDb(':memory:', { seed });
   const store = createSqliteStore(db);
   const orders = createOrderService(store);
   return { db, store, orders };

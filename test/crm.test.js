@@ -149,3 +149,30 @@ test('analytics: KPIs, comparison, outlet/item/category, heatmap, splits', () =>
   assert.equal(later.summary.orders, 1);
   assert.equal(later.summary.returningCustomers, 1);
 });
+
+test('analytics: rush hours, kitchen/delivery speed from status times, dish combinations', () => {
+  const w = world();
+  const at = (h, m = 0) => new Date(Date.UTC(2026, 9, 2, h - 6, 30 + m)); // h:mm IST on Fri 2 Oct
+  const both = [{ id: itemId(w.orders, 'Veg Hakka Noodles'), qty: 1 }, { id: itemId(w.orders, 'Veg Manchurian Gravy'), qty: 1 }];
+  const a = w.order({ items: both }, at(20));
+  const b = w.order({ items: both, phone: '9811100003' }, at(20, 10));
+  w.order({}, at(13));
+  // a: accepted after 2 min, ready after 15 more, collected 10 min later.
+  w.orders.updateStatus(a.code, 'accepted', at(20, 2));
+  w.orders.updateStatus(a.code, 'preparing', at(20, 3));
+  w.orders.updateStatus(a.code, 'ready', at(20, 17));
+  w.orders.updateStatus(a.code, 'completed', at(20, 27));
+  void b;
+
+  const r = computeAnalytics(w.store, { from: '2026-10-01', to: '2026-10-07' }, at(23));
+  assert.equal(r.rush.hourly[20].orders, 2);
+  assert.deepEqual(r.rush.busiestSlots[0], { day: 'Fri', hour: 20, orders: 2 });
+  assert.equal(r.rush.outletPeaks.find((p) => p.outletId === 1).peakHour, 20);
+  assert.equal(r.speed.acceptMin, 2);
+  assert.equal(r.speed.prepMin, 15);
+  assert.equal(r.speed.byHour[20].prepMin, 15);
+  const combo = r.combinations[0];
+  assert.deepEqual(combo.items, ['Veg Hakka Noodles', 'Veg Manchurian Gravy']);
+  assert.equal(combo.orders, 2);
+  assert.equal(combo.withA, 1);
+});

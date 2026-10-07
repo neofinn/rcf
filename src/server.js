@@ -8,7 +8,9 @@ if (config.production && config.adminToken === 'change-me') {
   process.exit(1);
 }
 
-const { app } = createApp();
+const { app, reviews } = createApp();
+// Sends review requests (30 min after delivery) and other scheduled jobs.
+reviews.startTicker(60 * 1000);
 app.listen(config.port, () => {
   console.log(`Raju Chinese ordering running on http://localhost:${config.port}`);
   console.log(`  Customer app:       ${config.publicBaseUrl}/`);

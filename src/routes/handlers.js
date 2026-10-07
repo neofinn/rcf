@@ -12,6 +12,8 @@ const config = require('../config');
 const { assignOutlet, isOpen, etaMinutes, rangeKm } = require('../geo');
 const { deliveryCharge } = require('../orders');
 const { computeAnalytics } = require('../analytics');
+const { placeAddress } = require('../geocode');
+const { normalisePhone } = require('../orders');
 const { qrSvg } = require('../payments');
 
 const ACTIVE = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
@@ -77,6 +79,23 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
           pickupSuggestion: a.pickupSuggestion && { outlet: publicOutlet(a.pickupSuggestion.outlet, now), distanceKm: a.pickupSuggestion.distanceKm },
           nearby: a.ranked.slice(0, 3).map((r) => ({ outlet: publicOutlet(r.outlet, now), distanceKm: r.distanceKm, inRange: r.inRange })),
         };
+      },
+    },
+    {
+      // Typed delivery address -> known area (same matching as WhatsApp).
+      method: 'POST', path: '/api/geocode',
+      handle: ({ body }) => {
+        const r = placeAddress(String(body.address || '').slice(0, 300), store.localities());
+        return { place: r.place || null, candidates: r.candidates || null };
+      },
+    },
+    {
+      // Points saved on a WhatsApp number (only the count; no personal details).
+      method: 'GET', path: '/api/loyalty',
+      handle: ({ query }) => {
+        const phone = normalisePhone(query.phone);
+        if (!phone) return { httpStatus: 400, body: { error: 'Enter a valid 10-digit number' } };
+        return { points: crm ? crm.balance(phone) : 0, rupeesPerPoint: config.loyalty.rupeesPerPoint };
       },
     },
     {

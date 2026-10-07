@@ -53,12 +53,12 @@ function showLocError(msg) {
   $('locError').classList.toggle('hidden', !msg);
 }
 
-async function locate(lat, lng, label) {
+async function locate(lat, lng, label, address = $('startAddress').value.trim()) {
   showLocError('');
   state.lastCoords = { lat, lng };
   const r = await api('/locate', { method: 'POST', body: { lat, lng, fulfilment: 'delivery' } });
   if (r.outlet) {
-    setLocation({ fulfilment: 'delivery', lat, lng, label, outlet: r.outlet, distanceKm: r.distanceKm, etaMinutes: r.etaMinutes, deliveryCharge: r.deliveryCharge });
+    setLocation({ fulfilment: 'delivery', lat, lng, label, address, outlet: r.outlet, distanceKm: r.distanceKm, etaMinutes: r.etaMinutes, deliveryCharge: r.deliveryCharge });
     closeModal('locModal');
     return;
   }
@@ -88,6 +88,38 @@ $('useGps').addEventListener('click', () => {
   );
 });
 
+// Typed address: place it from known areas; ask which city if a sector exists in two.
+async function findByAddress() {
+  const address = $('startAddress').value.trim();
+  $('areaChoices').innerHTML = '';
+  if (address.length < 6) return showLocError('Please type your full address (house/flat no., street, sector/phase, city).');
+  showLocError('');
+  const r = await api('/geocode', { method: 'POST', body: { address } });
+  if (r.place) return locate(r.place.lat, r.place.lng, `${r.place.name}, ${r.place.city}`, address);
+  if (r.candidates) {
+    $('areaChoices').innerHTML = '<p class="small" style="width:100%;margin:0">Which area is it in?</p>' + r.candidates.map((c, i) => `<button type="button" class="btn secondary" data-area="${i}">${esc(c.name)}, ${esc(c.city)}</button>`).join('');
+    $('areaChoices').querySelectorAll('[data-area]').forEach((b) => b.addEventListener('click', () => {
+      const c = r.candidates[Number(b.dataset.area)];
+      locate(c.lat, c.lng, `${c.name}, ${c.city}`, address).catch((e) => showLocError(e.message));
+    }));
+    return;
+  }
+  showLocError("We couldn't place that address on the map. Tap \"Use my current location\" or choose your area below. Your address is kept for the rider.");
+}
+$('findAddress').addEventListener('click', () => findByAddress().catch((e) => showLocError(e.message)));
+$('startAddress').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); findByAddress().catch((err) => showLocError(err.message)); } });
+
+$('nearestPickup').addEventListener('click', () => {
+  if (!navigator.geolocation) return;
+  const btn = $('nearestPickup');
+  btn.textContent = 'Finding you…';
+  navigator.geolocation.getCurrentPosition((pos) => {
+    state.lastCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    btn.textContent = '📍 Show the nearest outlet';
+    renderOutletList();
+  }, () => { btn.textContent = '📍 Show the nearest outlet'; }, { timeout: 15000 });
+});
+
 $('locality').addEventListener('change', (e) => {
   const opt = e.target.selectedOptions[0];
   if (!opt.value) return;
@@ -98,12 +130,18 @@ let outletsCache = null;
 async function renderOutletList() {
   outletsCache = await api('/outlets');
   const at = state.lastCoords || (state.location?.lat != null ? state.location : null);
-  const near = at ? (o) => Math.hypot(o.lat - at.lat, o.lng - at.lng) : () => 0;
-  const list = [...outletsCache].sort((a, b) => near(a) - near(b));
+  // Road distance estimate, as the server uses (straight line × 1.3).
+  const km = (o) => {
+    const R = 6371; const r = (d) => (d * Math.PI) / 180;
+    const h = Math.sin(r(o.lat - at.lat) / 2) ** 2 + Math.cos(r(at.lat)) * Math.cos(r(o.lat)) * Math.sin(r(o.lng - at.lng) / 2) ** 2;
+    return Math.round(2 * R * Math.asin(Math.sqrt(h)) * 1.3 * 10) / 10;
+  };
+  const list = [...outletsCache].sort((a, b) => (at ? km(a) - km(b) : 0));
+  const nearest = at ? list.find((o) => o.open) : null;
   $('outletList').innerHTML = list.map((o) => `
     <button type="button" class="outlet-opt" data-outlet="${o.id}" ${o.open ? '' : 'disabled'}>
-      <span><b>${esc(o.name.replace('Raju Chinese - ', ''))}</b><br><span class="small muted">${esc(o.address)} · ${o.opens}–${o.closes}</span></span>
-      <span class="pill ${o.open ? 'open' : 'closed'}">${o.open ? 'Open' : 'Closed'}</span>
+      <span><b>${esc(o.name.replace('Raju Chinese - ', ''))}</b>${at ? ` <span class="small muted">· ${km(o)} km</span>` : ''}<br><span class="small muted">${esc(o.address)} · ${o.opens}–${o.closes}</span></span>
+      <span class="pill ${o === nearest ? 'near' : o.open ? 'open' : 'closed'}">${o === nearest ? 'Nearest' : o.open ? 'Open' : 'Closed'}</span>
     </button>`).join('');
   $('outletList').querySelectorAll('[data-outlet]').forEach((b) => b.addEventListener('click', () => {
     const o = outletsCache.find((x) => x.id === Number(b.dataset.outlet));
@@ -148,7 +186,7 @@ function renderHeader() {
     $('locTitle').textContent = 'Set location';
     $('locSub').textContent = 'or add dishes first';
     $('banner').classList.remove('hidden', 'warn');
-    $('banner').textContent = `👋 Add what you'd like. We'll ask where to deliver at checkout and send it from your nearest Raju Chinese. ${rateCardText()}`;
+      $('banner').textContent = `👋 Choose delivery or pickup to see the menu from your nearest Raju Chinese. ${rateCardText()}`;
     return;
   }
   const short = l.outlet.name.replace('Raju Chinese - ', '');
@@ -188,7 +226,24 @@ function qtyControl(item) {
     : `<button type="button" class="add" data-inc="${item.id}">ADD</button>`;
 }
 
+// Same order as WhatsApp: delivery/pickup and outlet first, then the menu.
+function startCard() {
+  return `<div class="start-card"><h2>How would you like your order?</h2>
+    <p class="muted small">We'll find your nearest Raju Chinese, show its menu, and tell you the delivery charge before you order.</p>
+    <div class="row"><button type="button" class="btn" data-start="delivery">🛵 Delivery</button><button type="button" class="btn secondary" data-start="pickup">🏃 Pickup</button></div></div>`;
+}
+document.addEventListener('click', (e) => {
+  const s = e.target.closest('[data-start]');
+  if (s) { setModeTab(s.dataset.start); openModal('locModal'); }
+});
+
 function renderMenu() {
+  if (!state.location) {
+    $('cats').innerHTML = '';
+    $('menu').innerHTML = startCard();
+    renderCartBar();
+    return;
+  }
   const cats = state.menu
     .map((c) => ({ ...c, items: c.items.filter((i) => !state.vegOnly || i.veg) }))
     .filter((c) => c.items.length);
@@ -213,6 +268,7 @@ $('vegOnly').checked = state.vegOnly;
 $('vegOnly').addEventListener('change', (e) => { state.vegOnly = e.target.checked; store.set('vegOnly', state.vegOnly); renderMenu(); });
 
 function changeQty(id, delta) {
+  if (!state.location) { openModal('locModal'); return; }
   const q = Math.max(0, Math.min(20, (state.cart[id] || 0) + delta));
   if (q) state.cart[id] = q; else delete state.cart[id];
   saveCart();
@@ -301,9 +357,6 @@ function showCheckoutError(msg) {
 
 $('openCart').addEventListener('click', () => {
   if (!state.location) {
-    // First time we need the location: at checkout, not while browsing.
-    state.checkoutAfterLocation = true;
-    $('locHeading').textContent = 'Where should we deliver?';
     setModeTab('delivery');
     openModal('locModal');
     return;
@@ -314,9 +367,26 @@ $('openCart').addEventListener('click', () => {
 function openCartSheet() {
   const saved = store.get('customer', {});
   for (const k of ['name', 'phone', 'address']) if (saved[k] && !$(k).value) $(k).value = saved[k];
+  // Address typed when choosing delivery goes straight into the form.
+  if (state.location?.address && !$('address').value) $('address').value = state.location.address;
+  showPoints();
   openModal('cartModal');
   renderCart();
 }
+
+// Loyalty points saved on this WhatsApp number.
+let pointsTimer;
+async function showPoints() {
+  const digits = $('phone').value.replace(/\D/g, '').slice(-10);
+  if (!/^[6-9]\d{9}$/.test(digits)) { $('pointsLine').textContent = ''; return; }
+  try {
+    const r = await api(`/loyalty?phone=${digits}`);
+    $('pointsLine').textContent = r.points > 0
+      ? `⭐ You have ${r.points} loyalty points saved. This order adds more.`
+      : `⭐ New here? Earn 1 loyalty point for every ₹${r.rupeesPerPoint} you spend.`;
+  } catch { $('pointsLine').textContent = ''; }
+}
+$('phone').addEventListener('input', () => { clearTimeout(pointsTimer); pointsTimer = setTimeout(showPoints, 400); });
 
 $('checkout').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -363,6 +433,7 @@ $('checkout').addEventListener('submit', async (e) => {
     }
   } else {
     renderHeader();
+    openModal('locModal');
   }
   await loadMenu();
 })();

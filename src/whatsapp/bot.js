@@ -52,7 +52,7 @@ function freshSession() {
   };
 }
 
-function createBot({ orders, sessions, handoffs = null, crm = null, places = () => [], baseUrl = config.publicBaseUrl }) {
+function createBot({ orders, sessions, handoffs = null, crm = null, reviews = null, places = () => [], baseUrl = config.publicBaseUrl }) {
   function load(phone, now) {
     const s = sessions.get(phone);
     if (!s || now - new Date(s.updatedAt).getTime() > SESSION_TTL_MS) return freshSession();
@@ -574,6 +574,14 @@ function createBot({ orders, sessions, handoffs = null, crm = null, places = () 
       }
       if (['track', 'status', 'order status', 'where is my order'].includes(t)) return trackView(msg.from);
       if (['points', 'my points', 'loyalty', 'rewards'].includes(t)) return pointsView(msg.from);
+      // Review template button (web orders) or typed "review RCXXXX".
+      const rv = t.match(/^review[: ]\s*(rc[2-9a-z]{6})$/i);
+      if (rv && reviews) return reviews.start(rv[1].toUpperCase(), msg.from) || [text("I couldn't find that order to review.")];
+      if (s.state === 'await_review_comment' && reviews && !HUMAN_RE.test(t)) {
+        reviews.comment(s.reviewCode, raw, msg.from, now);
+        s.state = 'browsing';
+        return reviews.thanks();
+      }
       if (['stop offers', 'stop', 'unsubscribe'].includes(t) && crm) {
         crm.update(msg.from, { optIn: false });
         return [text("👍 Done. We won't send you offers. You'll still get updates about your orders.")];
@@ -692,6 +700,17 @@ function createBot({ orders, sessions, handoffs = null, crm = null, places = () 
       case 'qty':
         if (!s.pendingItemId) return categoriesList(s);
         return addToCart(s, Math.max(1, Math.min(Number(arg) || 1, MAX_QTY)));
+      case 'rate': {
+        // rate:<code>:<itemId|0>:<stars>
+        const [code, itemId, stars] = arg.split(':');
+        const r = reviews && reviews.rate(code, itemId, stars, msg.from, now);
+        if (!r) return [text('Thanks! This order was already reviewed or is not yours to review.')];
+        if (r.askComment) { s.state = 'await_review_comment'; s.reviewCode = code; }
+        return r.replies;
+      }
+      case 'rev_skip':
+        s.state = 'browsing';
+        return reviews ? reviews.thanks() : [];
       case 'pick': {
         const c = s.choices.shift();
         if (!c) return s.outletId ? cartView(s) : welcome(msg.name);

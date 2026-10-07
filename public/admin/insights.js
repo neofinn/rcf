@@ -112,35 +112,78 @@
     </div>`;
   }
 
-  // Daily gross sales as columns on one axis.
-  function trendChart(daily) {
+  // Columns on one axis: rows [{ value, label, tick, tipTitle, tip }].
+  function columns(rows, { aria, fmt = kRupees, everyLabel }) {
     const W = 760; const H = 240; const L = 56; const R = 12; const T = 14; const B = 30;
-    const max = Math.max(1, ...daily.map((d) => d.sales));
-    const step = 10 ** Math.floor(Math.log10(max / 100 / 4 || 1));
-    const nice = [1, 2, 2.5, 5, 10].map((m) => m * step).find((s) => (max / 100) / s <= 4) || step * 10;
-    const top = Math.ceil((max / 100) / nice) * nice * 100;
+    const max = Math.max(1, ...rows.map((r) => r.value));
+    const raw = fmt === kRupees ? max / 100 : max;
+    const step = 10 ** Math.floor(Math.log10(raw / 4 || 1));
+    const nice = [1, 2, 2.5, 5, 10].map((m) => m * step).find((s) => raw / s <= 4) || step * 10;
+    const unit = fmt === kRupees ? 100 : 1;
+    const top = Math.max(nice, Math.ceil(raw / nice) * nice) * unit;
     const y = (v) => T + (H - T - B) * (1 - v / top);
-    const bw = (W - L - R) / daily.length;
+    const bw = (W - L - R) / rows.length;
     const ticks = [];
-    for (let v = 0; v <= top; v += nice * 100) ticks.push(v);
-    const every = Math.ceil(daily.length / 8);
-    return `<svg class="trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily gross sales">
-      ${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="${v ? 'grid' : 'base'}"/><text x="${L - 8}" y="${y(v) + 4}" class="tick" text-anchor="end">${kRupees(v)}</text>`).join('')}
-      ${daily.map((d, i) => {
-        const h = Math.max(d.sales ? 2 : 0, y(0) - y(d.sales));
+    for (let v = 0; v <= top + 1e-9; v += nice * unit) ticks.push(v);
+    const every = everyLabel || Math.ceil(rows.length / 8);
+    return `<svg class="trend" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">
+      ${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="${v ? 'grid' : 'base'}"/><text x="${L - 8}" y="${y(v) + 4}" class="tick" text-anchor="end">${fmt === kRupees ? kRupees(v) : num(Math.round(v))}</text>`).join('')}
+      ${rows.map((d, i) => {
+        const h = Math.max(d.value ? 2 : 0, y(0) - y(d.value));
         const x = L + i * bw + 1;
         const w = Math.max(1, bw - 2);
         const r = Math.min(4, w / 2, h);
-        // Rounded top, square baseline.
         const path = h ? `M${x} ${y(0)}V${y(0) - h + r}Q${x} ${y(0) - h} ${x + r} ${y(0) - h}H${x + w - r}Q${x + w} ${y(0) - h} ${x + w} ${y(0) - h + r}V${y(0)}Z` : '';
-        const label = new Date(`${d.date}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', weekday: 'short', timeZone: 'UTC' });
-        return `<g class="col" tabindex="0" data-tip="${esc(rupees(d.sales))} · ${d.orders} orders" data-tip-title="${esc(label)}">
+        return `<g class="col" tabindex="0" data-tip="${esc(d.tip)}" data-tip-title="${esc(d.tipTitle)}">
           <rect x="${L + i * bw}" y="${T}" width="${bw}" height="${H - T - B}" class="hit"/>
-          ${path ? `<path d="${path}" class="bar"/>` : ''}
-          ${i % every === 0 ? `<text x="${x + w / 2}" y="${H - 10}" class="tick" text-anchor="middle">${esc(dateFmt(`${d.date}T06:30:00Z`))}</text>` : ''}
+          ${path ? `<path d="${path}" class="bar${d.peak ? ' peak' : ''}"/>` : ''}
+          ${i % every === 0 ? `<text x="${x + w / 2}" y="${H - 10}" class="tick" text-anchor="middle">${esc(d.tick)}</text>` : ''}
         </g>`;
       }).join('')}
     </svg>`;
+  }
+
+  function trendChart(daily) {
+    return columns(daily.map((d) => ({
+      value: d.sales, tick: dateFmt(`${d.date}T06:30:00Z`), tip: `${rupees(d.sales)} · ${d.orders} orders`,
+      tipTitle: new Date(`${d.date}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', weekday: 'short', timeZone: 'UTC' }),
+    })), { aria: 'Daily gross sales' });
+  }
+
+  const hh = (h) => `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`;
+  function rushChart(hourly) {
+    const peak = Math.max(...hourly.map((h) => h.orders));
+    return columns(hourly.map((h) => ({
+      value: h.orders, peak: peak && h.orders === peak, tick: hh(h.hour), tip: `${num(h.orders)} orders · ${rupees(h.sales)}`, tipTitle: `${hh(h.hour)}–${hh((h.hour + 1) % 24)}`,
+    })), { aria: 'Orders by hour of day', fmt: num, everyLabel: 3 });
+  }
+
+  const minFmt = (m) => (m == null ? '—' : `${Math.round(m)} min`);
+  const starText = (avg, n) => (avg == null ? '<span class="muted">—</span>' : `★ ${avg.toFixed(1)} <span class="small muted">(${num(n)})</span>`);
+
+  // Star ratings collected on WhatsApp after delivery.
+  function reviewsSection(r) {
+    const dist = barList(r.distribution, { value: (x) => x.count, label: (x) => `${x.stars} star${x.stars > 1 ? 's' : ''}`, fmt: (v) => num(v), tipTitle: (x) => `${x.stars}-star reviews` });
+    return `<section class="card"><header><h3>Reviews</h3><span class="muted small">Asked on WhatsApp 30 min after delivery · 1–5 stars</span><button type="button" class="link" data-csv="ratings">Export CSV</button></header>
+      <div class="tiles">
+        <div class="tile"><span class="t-label">Average rating</span><span class="t-value">${r.average == null ? '—' : `★ ${r.average.toFixed(2)}`}</span><span class="t-foot muted">whole order</span></div>
+        <div class="tile"><span class="t-label">Reviews</span><span class="t-value">${num(r.count)}</span><span class="t-foot muted">${pct(r.responseRate)} of completed orders</span></div>
+      </div>
+      <div class="two">
+        <div><h4>Rating spread</h4>${dist}</div>
+        <div><h4>By outlet</h4><div class="table-wrap"><table class="data"><tbody>
+          ${r.byOutlet.map((o) => `<tr><td>${esc(short(o.name))}</td><td class="n">${starText(o.average, o.count)}</td></tr>`).join('')}
+        </tbody></table></div></div>
+      </div>
+      <h4>Dish ratings</h4>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Dish</th><th class="n">Average</th><th class="n">Ratings</th><th class="n">1–2 stars</th></tr></thead><tbody>
+        ${r.byItem.map((i) => `<tr><td>${esc(i.name)}</td><td class="n">★ ${i.average.toFixed(2)}</td><td class="n">${num(i.count)}</td><td class="n">${i.low ? `<b class="delta bad">${num(i.low)}</b>` : '0'}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No dish ratings yet.</td></tr>'}
+      </tbody></table></div>
+      <h4>What customers said</h4>
+      <div class="table-wrap"><table class="data"><tbody>
+        ${r.comments.map((c) => `<tr><td>${c.stars != null ? `★ ${c.stars} · ` : ''}${esc(c.comment)}<br><span class="small muted">${esc(c.name || '')} · ${esc(c.code || '')} · ${esc(outletName(c.outletId))} · ${esc(dateFmt(c.at))}</span></td></tr>`).join('') || '<tr><td class="muted">No comments yet.</td></tr>'}
+      </tbody></table></div>
+    </section>`;
   }
 
   function heatmap(m) {
@@ -148,7 +191,6 @@
     const max = Math.max(1, ...m.flat());
     const level = (n) => (n ? Math.min(7, 1 + Math.floor((n / max) * 6.999)) : 0);
     const hours = [...Array(24).keys()];
-    const hh = (h) => `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`;
     return `<div class="heat" role="table" aria-label="Orders by weekday and hour">
       <span></span>${hours.map((h) => `<span class="hh">${h % 3 === 0 ? hh(h) : ''}</span>`).join('')}
       ${m.map((row, d) => `<span class="hd">${days[d]}</span>${row.map((n, h) => `<span class="cell l${level(n)}" tabindex="0" data-tip="${n} order${n === 1 ? '' : 's'}" data-tip-title="${days[d]} ${hh(h)}–${hh((h + 1) % 24)}"></span>`).join('')}`).join('')}
@@ -200,7 +242,40 @@
       <section class="card"><header><h3>Most popular dishes</h3><span class="muted small">Top 10 by revenue</span></header>
         ${barList(d.items.slice(0, 10), { value: (i) => i.revenue, label: (i) => `${i.rank}. ${i.name}`, sub: (i) => `${num(i.qty)} sold · in ${pct(i.attachRate)} of orders`, fmt: rupees })}
       </section>
+      <section class="card"><header><h3>Rush hours</h3><span class="muted small">Orders by hour of day (IST); the busiest hour is darker</span></header>
+        ${rushChart(d.rush.hourly)}
+        <div class="two" style="margin-top:12px">
+          <div><h4>Busiest slots</h4><div class="table-wrap"><table class="data"><tbody>
+            ${d.rush.busiestSlots.map((x, i) => `<tr><td>${i + 1}. ${esc(x.day)} ${hh(x.hour)}–${hh((x.hour + 1) % 24)}</td><td class="n">${num(x.orders)} orders</td></tr>`).join('') || '<tr><td class="muted">No orders.</td></tr>'}
+          </tbody></table></div></div>
+          <div><h4>Peak hour by outlet</h4><div class="table-wrap"><table class="data"><tbody>
+            ${d.rush.outletPeaks.map((p) => `<tr><td>${esc(short(p.name))}</td><td class="n">${p.peakHour == null ? '—' : `${hh(p.peakHour)} · ${num(p.peakOrders)} orders`}</td></tr>`).join('')}
+          </tbody></table></div></div>
+        </div>
+      </section>
+      <section class="card"><header><h3>Kitchen and delivery speed</h3><span class="muted small">From order status times · ${num(d.speed.measured)} orders measured</span></header>
+        <div class="tiles">
+          <div class="tile"><span class="t-label">Time to accept</span><span class="t-value">${minFmt(d.speed.acceptMin)}</span></div>
+          <div class="tile"><span class="t-label">Kitchen prep</span><span class="t-value">${minFmt(d.speed.prepMin)}</span><span class="t-foot muted">accepted → ready / rider picks up</span></div>
+          <div class="tile"><span class="t-label">Delivery ride</span><span class="t-value">${minFmt(d.speed.rideMin)}</span></div>
+          <div class="tile"><span class="t-label">Order to doorstep</span><span class="t-value">${minFmt(d.speed.totalDeliveryMin)}</span></div>
+        </div>
+        <div class="two">
+          <div><h4>By hour: does the rush slow us down?</h4><div class="table-wrap"><table class="data"><thead><tr><th>Hour</th><th class="n">Orders</th><th class="n">Prep</th><th class="n">Order to door</th></tr></thead><tbody>
+            ${d.speed.byHour.filter((h) => h.orders).map((h) => `<tr><td>${hh(h.hour)}</td><td class="n">${num(h.orders)}</td><td class="n">${minFmt(h.prepMin)}</td><td class="n">${minFmt(h.totalMin)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No orders.</td></tr>'}
+          </tbody></table></div></div>
+          <div><h4>By outlet</h4><div class="table-wrap"><table class="data"><thead><tr><th>Outlet</th><th class="n">Prep</th><th class="n">Order to door</th></tr></thead><tbody>
+            ${d.speed.byOutlet.map((o) => `<tr><td>${esc(short(o.name))}</td><td class="n">${minFmt(o.prepMin)}</td><td class="n">${minFmt(o.totalMin)}</td></tr>`).join('')}
+          </tbody></table></div></div>
+        </div>
+      </section>
       <section class="card"><header><h3>When orders come in</h3><span class="muted small">Orders by weekday and hour (IST)</span></header>${heatmap(d.heatmap)}</section>
+      ${reviewsSection(d.reviews)}
+      <section class="card"><header><h3>Ordered together</h3><span class="muted small">Dish pairs in the same order: ideas for combos and offers</span><button type="button" class="link" data-csv="combos">Export CSV</button></header>
+        <div class="table-wrap"><table class="data"><thead><tr><th>Combination</th><th class="n">Orders</th><th class="n">% of all orders</th><th class="n">Takers of 1st also take 2nd</th><th class="n">Revenue</th><th class="n">Order rating</th></tr></thead><tbody>
+          ${d.combinations.map((c) => `<tr><td>${esc(c.items[0])} <b>+</b> ${esc(c.items[1])}</td><td class="n">${num(c.orders)}</td><td class="n">${pct(c.share, 1)}</td><td class="n">${pct(c.withA)}</td><td class="n">${rupees(c.revenue)}</td><td class="n">${starText(c.rating, c.ratings)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Not enough orders with two or more dishes yet.</td></tr>'}
+        </tbody></table></div>
+      </section>
       <div class="three">
         ${[['Channel', d.channels], ['Payment', d.payments], ['Order type', d.fulfilment]].map(([t, rows]) => `<section class="card"><header><h3>${t}</h3></header>
           ${rows.length ? barList(rows, { value: (x) => x.sales, label: (x) => x.label, sub: (x) => `${num(x.orders)} orders`, fmt: rupees }) : '<p class="muted">No orders.</p>'}</section>`).join('')}
@@ -376,6 +451,16 @@
     if (p) { A.preset = p.dataset.preset; if (A.preset === 'custom') { const r = range(); A.from = A.from || r.from; A.to = A.to || r.to; } return rerender(); }
     const csvBtn = t.closest('[data-csv]');
     if (csvBtn && A.data) {
+      if (csvBtn.dataset.csv === 'ratings') {
+        download(`dish-ratings-${A.data.range.from}-to-${A.data.range.to}.csv`, csv([['dish', 'average_stars', 'ratings', 'one_or_two_stars'],
+          ...A.data.reviews.byItem.map((i) => [i.name, i.average, i.count, i.low])]));
+        return;
+      }
+      if (csvBtn.dataset.csv === 'combos') {
+        download(`combinations-${A.data.range.from}-to-${A.data.range.to}.csv`, csv([['dish_1', 'dish_2', 'orders', 'pct_of_orders', 'dish1_takers_also_take_dish2', 'revenue_rs'],
+          ...A.data.combinations.map((c) => [c.items[0], c.items[1], c.orders, (c.share * 100).toFixed(1), (c.withA * 100).toFixed(0), (c.revenue / 100).toFixed(2)])]));
+        return;
+      }
       if (csvBtn.dataset.csv === 'items') {
         download(`item-sales-${A.data.range.from}-to-${A.data.range.to}.csv`, csv([['rank', 'dish', 'category', 'qty', 'revenue_rs', 'share', 'orders', 'in_pct_of_orders'],
           ...A.data.items.map((i) => [i.rank, i.name, i.category, i.qty, (i.revenue / 100).toFixed(2), (i.share * 100).toFixed(1), i.orders, (i.attachRate * 100).toFixed(1)])]));

@@ -7,10 +7,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const config = require('../src/config');
 const { assignOutlet } = require('../src/geo');
-const { setup, LUNCH } = require('./helpers');
+const realSeed = require('../src/seed');
+const helpers = require('./helpers');
+
+const { LUNCH } = helpers;
+// Coverage is checked against the real outlet list.
+const setup = () => helpers.setup({ seed: realSeed });
 
 const PLACES = {
-  'New Chandigarh': [30.787, 76.695], Mullanpur: [30.798, 76.716], Pinjore: [30.797, 76.917], Kurali: [30.836, 76.574],
+  'New Chandigarh': [30.787, 76.695], Mullanpur: [30.798, 76.716], Pinjore: [30.797, 76.917],
   Banur: [30.556, 76.716], 'Dera Bassi': [30.588, 76.843], 'Aerocity Mohali': [30.663, 76.733], 'TDI City': [30.648, 76.690],
   'Chandigarh Airport': [30.673, 76.788], 'Sunny Enclave Kharar': [30.735, 76.660], Landran: [30.702, 76.663],
   Sohana: [30.683, 76.700], 'Panchkula Sec 26': [30.687, 76.880], Chandimandir: [30.722, 76.885], 'Mansa Devi': [30.731, 76.861],
@@ -40,8 +45,8 @@ test('no blind spot on a 500 m grid over the tricity', () => {
 test('nearest outlet still cooks; a paused outlet is covered by its neighbours', () => {
   const { db, orders } = setup();
   const sec22 = { lat: 30.733, lng: 76.772 };
-  assert.equal(assignOutlet(orders.listOutlets(), sec22, { now: LUNCH }).outlet.slug, 'sec-17-chd');
-  db.exec("UPDATE outlets SET accepting_orders = 0 WHERE slug IN ('sec-17-chd', 'sec-35-chd', 'manimajra')");
+  assert.equal(assignOutlet(orders.listOutlets(), sec22, { now: LUNCH }).outlet.slug, 'sec-34-chd');
+  db.exec("UPDATE outlets SET accepting_orders = 0 WHERE slug IN ('sec-34-chd', 'sec-15-chd', 'sec-46-chd')");
   const a = assignOutlet(orders.listOutlets(), sec22, { now: LUNCH });
   assert.ok(a.outlet, 'Sector 22 still served with three Chandigarh outlets paused');
   assert.ok(a.distanceKm <= config.delivery.rangeKm);

@@ -41,6 +41,15 @@ module.exports = {
     rupeesPerPoint: num(env.LOYALTY_RUPEES_PER_POINT, 100),
   },
 
+  // Reviews: ask for star ratings on WhatsApp this long after delivery/pickup.
+  reviews: {
+    delayMinutes: num(env.REVIEW_DELAY_MINUTES, 30),
+    // Web orders: the customer hasn't messaged us, so WhatsApp needs an
+    // approved template to start the chat. Name of that template (optional).
+    webTemplate: env.WHATSAPP_REVIEW_TEMPLATE || '',
+    templateLanguage: env.WHATSAPP_REVIEW_TEMPLATE_LANG || 'en',
+  },
+
   delivery: {
     // Every outlet delivers up to this road distance; the nearest open outlet
     // cooks. 20 km leaves no blind spot across Chandigarh, Mohali, Panchkula,

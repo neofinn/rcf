@@ -1,18 +1,25 @@
 'use strict';
 
-// Starter data. Outlet addresses, coordinates, phone numbers, UPI IDs and
-// prices are PLACEHOLDERS: replace them with the real values before going live
-// (or edit them in the database after the first run). The "@example" UPI IDs
-// are deliberately invalid so no test payment can reach a real account.
+// Starter data.
+//
+// Outlets: the 7 Raju Chinese Food outlets found in public listings (Zomato,
+// Justdial, magicpin, Shoutlo, Mappls; Oct 2026). Sector 15, 34, 46, Phase 3B2
+// and VIP Road Zirakpur are confirmed by several sources; Khuda Lahora (PGI) and
+// Peer Muchalla by fewer, and Peer Muchalla's map point is estimated. Confirm
+// addresses, map pins, phone numbers and hours with each outlet before launch.
+//
+// Still PLACEHOLDERS: menu prices, UPI IDs ("@example" is deliberately invalid
+// so no test payment can reach a real account) and WhatsApp payment
+// configuration names.
 
 const outlets = [
-  { slug: 'sec-17-chd', upiId: 'rc-sec-17-chd@example', waPaymentConfig: 'rc-sec-17-chd', name: 'Raju Chinese - Sector 17', city: 'Chandigarh', address: 'SCO 00, Sector 17-C, Chandigarh', lat: 30.7410, lng: 76.7790, phone: '+910000000001', radiusKm: 20, opens: '11:00', closes: '23:00' },
-  { slug: 'sec-35-chd', upiId: 'rc-sec-35-chd@example', waPaymentConfig: 'rc-sec-35-chd', name: 'Raju Chinese - Sector 35', city: 'Chandigarh', address: 'SCO 00, Sector 35-C, Chandigarh', lat: 30.7225, lng: 76.7570, phone: '+910000000002', radiusKm: 20, opens: '11:00', closes: '23:00' },
-  { slug: 'manimajra', upiId: 'rc-manimajra@example', waPaymentConfig: 'rc-manimajra', name: 'Raju Chinese - Manimajra', city: 'Chandigarh', address: 'Main Market, Manimajra, Chandigarh', lat: 30.7290, lng: 76.8380, phone: '+910000000003', radiusKm: 20, opens: '11:00', closes: '23:00' },
-  { slug: 'phase-7-mohali', upiId: 'rc-phase-7-mohali@example', waPaymentConfig: 'rc-phase-7-mohali', name: 'Raju Chinese - Phase 7 Mohali', city: 'Mohali', address: 'SCO 00, Phase 7, SAS Nagar, Mohali', lat: 30.7085, lng: 76.7195, phone: '+910000000004', radiusKm: 20, opens: '11:00', closes: '23:00' },
-  { slug: 'kharar', upiId: 'rc-kharar@example', waPaymentConfig: 'rc-kharar', name: 'Raju Chinese - Kharar', city: 'Kharar', address: 'Landran Road, Kharar', lat: 30.7460, lng: 76.6450, phone: '+910000000005', radiusKm: 20, opens: '11:00', closes: '23:00' },
-  { slug: 'zirakpur', upiId: 'rc-zirakpur@example', waPaymentConfig: 'rc-zirakpur', name: 'Raju Chinese - Zirakpur', city: 'Zirakpur', address: 'VIP Road, Zirakpur', lat: 30.6420, lng: 76.8170, phone: '+910000000006', radiusKm: 20, opens: '11:00', closes: '23:00' },
-  { slug: 'sec-11-pkl', upiId: 'rc-sec-11-pkl@example', waPaymentConfig: 'rc-sec-11-pkl', name: 'Raju Chinese - Sector 11 Panchkula', city: 'Panchkula', address: 'SCO 00, Sector 11, Panchkula', lat: 30.6960, lng: 76.8480, phone: '+910000000007', radiusKm: 20, opens: '11:00', closes: '23:00' },
+  { slug: 'sec-15-chd', upiId: 'rc-sec-15-chd@example', waPaymentConfig: 'rc-sec-15-chd', name: 'Raju Chinese - Sector 15', city: 'Chandigarh', address: 'Booth 225, Patel Market, Sector 15-D, Chandigarh 160015', lat: 30.75266, lng: 76.77114, phone: '+917696295218', radiusKm: 20, opens: '11:00', closes: '22:00' },
+  { slug: 'sec-34-chd', upiId: 'rc-sec-34-chd@example', waPaymentConfig: 'rc-sec-34-chd', name: 'Raju Chinese - Sector 34', city: 'Chandigarh', address: 'Himalaya Marg, Sector 34-C, Chandigarh', lat: 30.71998, lng: 76.76560, phone: '+919041234440', radiusKm: 20, opens: '11:00', closes: '23:00' },
+  { slug: 'sec-46-chd', upiId: 'rc-sec-46-chd@example', waPaymentConfig: 'rc-sec-46-chd', name: 'Raju Chinese - Sector 46', city: 'Chandigarh', address: 'Booth 43, Sector 46-C, Chandigarh', lat: 30.70053, lng: 76.76582, phone: '+918557880159', radiusKm: 20, opens: '12:00', closes: '23:00' },
+  { slug: 'phase-3b2-mohali', upiId: 'rc-phase-3b2-mohali@example', waPaymentConfig: 'rc-phase-3b2-mohali', name: 'Raju Chinese - Phase 3B2 Mohali', city: 'Mohali', address: 'Booth 15, Sector 60 (Phase 3B2), near Mohali Stadium Road, SAS Nagar', lat: 30.71221, lng: 76.71924, phone: '+917710767710', radiusKm: 20, opens: '11:00', closes: '23:00' },
+  { slug: 'vip-road-zirakpur', upiId: 'rc-vip-road-zirakpur@example', waPaymentConfig: 'rc-vip-road-zirakpur', name: 'Raju Chinese - VIP Road Zirakpur', city: 'Zirakpur', address: 'Amcare Plaza, VIP Road, Zirakpur 140603', lat: 30.63884, lng: 76.81542, phone: '+919779020477', radiusKm: 20, opens: '11:00', closes: '22:00' },
+  { slug: 'khuda-lahora', upiId: 'rc-khuda-lahora@example', waPaymentConfig: 'rc-khuda-lahora', name: 'Raju Chinese - Khuda Lahora (PGI)', city: 'Chandigarh', address: 'Shop 149, Khuda Lahora, near PGI, Chandigarh 160014', lat: 30.77347, lng: 76.77089, phone: '+919876767891', radiusKm: 20, opens: '11:00', closes: '23:00' },
+  { slug: 'peer-muchalla', upiId: 'rc-peer-muchalla@example', waPaymentConfig: 'rc-peer-muchalla', name: 'Raju Chinese - Peer Muchalla', city: 'Zirakpur', address: 'SCO 5, near Dargah, Peer Muchalla', lat: 30.665, lng: 76.835, phone: '+919780292999', radiusKm: 20, opens: '11:00', closes: '23:00' },
 ];
 
 // Prices in rupees. Keep every category at 10 items or fewer: WhatsApp list

@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
-const seed = require('./seed');
+const defaultSeed = require('./seed');
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS outlets (
@@ -129,6 +129,15 @@ CREATE TABLE IF NOT EXISTS wa_handoff_messages (
   at TEXT NOT NULL
 );
 
+-- Every status change with its time, for rush and speed reports.
+CREATE TABLE IF NOT EXISTS order_events (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id),
+  status TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS order_events_order ON order_events(order_id);
+
 -- CRM: one row per customer (by phone), saved automatically from every order.
 CREATE TABLE IF NOT EXISTS customers (
   phone TEXT PRIMARY KEY,
@@ -158,6 +167,33 @@ CREATE TABLE IF NOT EXISTS loyalty_ledger (
 CREATE INDEX IF NOT EXISTS loyalty_phone ON loyalty_ledger(phone);
 CREATE UNIQUE INDEX IF NOT EXISTS loyalty_earn_once ON loyalty_ledger(order_id) WHERE kind = 'earn';
 
+-- Star ratings collected on WhatsApp after delivery. item_id 0 = the whole order.
+CREATE TABLE IF NOT EXISTS ratings (
+  order_id INTEGER NOT NULL REFERENCES orders(id),
+  item_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  stars INTEGER NOT NULL,
+  outlet_id INTEGER NOT NULL,
+  phone TEXT NOT NULL,
+  at TEXT NOT NULL,
+  PRIMARY KEY (order_id, item_id)
+);
+CREATE TABLE IF NOT EXISTS review_comments (
+  order_id INTEGER PRIMARY KEY REFERENCES orders(id),
+  comment TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+
+-- Jobs to run later (e.g. ask for a review 30 minutes after delivery).
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+  id INTEGER PRIMARY KEY,
+  run_at TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  done_at TEXT
+);
+CREATE INDEX IF NOT EXISTS scheduled_jobs_due ON scheduled_jobs(done_at, run_at);
+
 -- Menu price changes, so a bulk change can be undone.
 CREATE TABLE IF NOT EXISTS price_history (
   id INTEGER PRIMARY KEY,
@@ -175,18 +211,18 @@ CREATE TABLE IF NOT EXISTS wa_processed (
 );
 `;
 
-function openDb(file) {
+function openDb(file, { seed = defaultSeed } = {}) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
-  migrate(db);
-  seedIfEmpty(db);
+  migrate(db, seed);
+  seedIfEmpty(db, seed);
   return db;
 }
 
 // Additive migrations for databases created by earlier versions.
-function migrate(db) {
+function migrate(db, seed) {
   const cols = db.prepare('PRAGMA table_info(order_items)').all().map((c) => c.name);
   if (!cols.includes('note')) db.exec('ALTER TABLE order_items ADD COLUMN note TEXT');
   const outletCols = db.prepare('PRAGMA table_info(outlets)').all().map((c) => c.name);
@@ -207,7 +243,7 @@ function migrate(db) {
   if (!orderCols.includes('payment_status')) db.exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'cod'");
 }
 
-function seedIfEmpty(db) {
+function seedIfEmpty(db, seed) {
   if (db.prepare('SELECT COUNT(*) AS n FROM outlets').get().n > 0) return;
   db.exec('BEGIN');
   try {

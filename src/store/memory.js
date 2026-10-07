@@ -24,6 +24,11 @@ function createMemoryStore(seed) {
   const customers = new Map();
   const ledger = [];
   const priceHistory = [];
+  const events = [];
+  const ratings = new Map();
+  const comments = new Map();
+  const jobs = [];
+  const inRange = (fromIso, toIso) => new Set(orders.filter((o) => o.created_at >= fromIso && o.created_at < toIso).map((o) => o.id));
   const copy = (x) => (x ? { ...x } : null);
   const byNewest = (a, b) => b.id - a.id;
 
@@ -143,6 +148,19 @@ function createMemoryStore(seed) {
       return m;
     },
     pointsEarnedFor: (orderId) => ledger.find((l) => l.kind === 'earn' && l.order_id === orderId)?.points ?? null,
+    addRating(r) { ratings.set(`${r.orderId}|${r.itemId}`, { order_id: r.orderId, item_id: r.itemId, name: r.name, stars: r.stars, outlet_id: r.outletId, phone: r.phone, at: r.at }); },
+    ratingsForOrder: (orderId) => [...ratings.values()].filter((r) => r.order_id === orderId).map(copy),
+    ratingsBetween(fromIso, toIso) { const ids = inRange(fromIso, toIso); return [...ratings.values()].filter((r) => ids.has(r.order_id)).map(copy); },
+    addReviewComment(orderId, comment, at) { comments.set(orderId, { order_id: orderId, comment, at }); },
+    commentsBetween(fromIso, toIso) { const ids = inRange(fromIso, toIso); return [...comments.values()].filter((c) => ids.has(c.order_id)).map(copy); },
+    addJob(runAt, kind, payload) { jobs.push({ id: jobs.length + 1, run_at: runAt, kind, payload: JSON.parse(JSON.stringify(payload)), done_at: null }); return jobs.length; },
+    dueJobs: (nowIso) => jobs.filter((j) => !j.done_at && j.run_at <= nowIso).map(copy),
+    markJobDone(id, at) { const j = jobs.find((x) => x.id === id && !x.done_at); if (!j) return false; j.done_at = at; return true; },
+    addOrderEvent(orderId, status, at) { events.push({ order_id: orderId, status, at }); },
+    orderEventsBetween(fromIso, toIso) {
+      const ids = new Set(orders.filter((o) => o.created_at >= fromIso && o.created_at < toIso).map((o) => o.id));
+      return events.filter((e) => ids.has(e.order_id)).map(copy);
+    },
     ordersForPhone: (phone) => [...orders].sort(byNewest).filter((o) => o.phone === phone).map(copy),
     ordersBetween: (fromIso, toIso) => orders.filter((o) => o.created_at >= fromIso && o.created_at < toIso)
       .sort((a, b) => (a.created_at < b.created_at ? -1 : 1)).map(copy),

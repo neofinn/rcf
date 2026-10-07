@@ -12,6 +12,7 @@ const { createRoutes, recordOutbox, matchPath } = require('../src/routes/handler
 const { createCrm } = require('../src/crm');
 const { createMenuAdmin } = require('../src/menu-admin');
 const { seedSampleHistory } = require('./sample-history');
+const { createReviews } = require('../src/reviews');
 const { createBot, createSessionStore } = require('../src/whatsapp/bot');
 const { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment, notifyOnDelivery } = require('../src/whatsapp/notify');
 const { createDispatcher } = require('../src/delivery/dispatcher');
@@ -28,7 +29,9 @@ function createDemoBackend() {
   const handoffs = createHandoffService(store);
   const crm = createCrm({ store, orders });
   const menuAdmin = createMenuAdmin({ store });
-  const bot = createBot({ orders, handoffs, crm, sessions: createSessionStore(store), places: () => store.localities(), baseUrl: 'https://order.rajuchinese.example' });
+  const reviewClient = { send: async (to, replies) => client.send(to, replies) };
+  const reviews = createReviews({ store, orders, client: reviewClient, log: { error: () => {}, info: () => {} } });
+  const bot = createBot({ orders, handoffs, crm, reviews, sessions: createSessionStore(store), places: () => store.localities(), baseUrl: 'https://order.rajuchinese.example' });
   const outbox = [];
   const client = recordOutbox({ send: async () => {} }, outbox);
   const quiet = { error: () => {}, info: () => {} };
@@ -40,6 +43,8 @@ function createDemoBackend() {
   const shadowfax = createSimulatedShadowfax({ onCallback: (p) => dispatcher.handleCallback(p) });
   dispatcher = createDispatcher({ orders, store, provider: shadowfax, log: quiet });
   notifyOnDelivery({ dispatcher, client, log: quiet });
+  // Demo: check for due review requests every 5 seconds (asked 20 s after delivery).
+  reviews.startTicker(5000);
   const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin });
 
   /** Serve one API request. Resolves to { status, body }. */

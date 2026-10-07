@@ -40,6 +40,19 @@ function createSqliteStore(db) {
     closeHandoff: db.prepare("UPDATE wa_handoffs SET status = 'closed', updated_at = ? WHERE id = ? AND status = 'open'"),
 
     allItems: db.prepare('SELECT * FROM menu_items ORDER BY sort, id'),
+    rate: db.prepare(`INSERT INTO ratings (order_id, item_id, name, stars, outlet_id, phone, at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(order_id, item_id) DO UPDATE SET stars = excluded.stars, at = excluded.at`),
+    ratingsFor: db.prepare('SELECT * FROM ratings WHERE order_id = ?'),
+    ratingsBetween: db.prepare(`SELECT r.* FROM ratings r JOIN orders o ON o.id = r.order_id WHERE o.created_at >= ? AND o.created_at < ?`),
+    comment: db.prepare(`INSERT INTO review_comments (order_id, comment, at) VALUES (?, ?, ?)
+      ON CONFLICT(order_id) DO UPDATE SET comment = excluded.comment, at = excluded.at`),
+    commentsBetween: db.prepare(`SELECT c.* FROM review_comments c JOIN orders o ON o.id = c.order_id WHERE o.created_at >= ? AND o.created_at < ?`),
+    addJob: db.prepare('INSERT INTO scheduled_jobs (run_at, kind, payload) VALUES (?, ?, ?)'),
+    dueJobs: db.prepare('SELECT * FROM scheduled_jobs WHERE done_at IS NULL AND run_at <= ? ORDER BY run_at LIMIT 50'),
+    jobDone: db.prepare('UPDATE scheduled_jobs SET done_at = ? WHERE id = ? AND done_at IS NULL'),
+    addEvent: db.prepare('INSERT INTO order_events (order_id, status, at) VALUES (?, ?, ?)'),
+    eventsBetween: db.prepare(`SELECT e.order_id, e.status, e.at FROM order_events e JOIN orders o ON o.id = e.order_id
+      WHERE o.created_at >= ? AND o.created_at < ? ORDER BY e.id`),
     customer: db.prepare('SELECT * FROM customers WHERE phone = ?'),
     customers: db.prepare('SELECT * FROM customers'),
     addPoints: db.prepare('INSERT OR IGNORE INTO loyalty_ledger (phone, order_id, points, kind, note, at) VALUES (?, ?, ?, ?, ?, ?)'),
@@ -171,7 +184,21 @@ function createSqliteStore(db) {
     pointsEarnedFor: (orderId) => q.earnedFor.get(orderId)?.points ?? null,
     ordersForPhone: (phone) => q.ordersForPhone.all(phone),
 
+    // Reviews
+    addRating: (r) => q.rate.run(r.orderId, r.itemId, r.name, r.stars, r.outletId, r.phone, r.at),
+    ratingsForOrder: (orderId) => q.ratingsFor.all(orderId),
+    ratingsBetween: (fromIso, toIso) => q.ratingsBetween.all(fromIso, toIso),
+    addReviewComment: (orderId, comment, at) => q.comment.run(orderId, comment, at),
+    commentsBetween: (fromIso, toIso) => q.commentsBetween.all(fromIso, toIso),
+
+    // Scheduled jobs
+    addJob: (runAt, kind, payload) => Number(q.addJob.run(runAt, kind, JSON.stringify(payload)).lastInsertRowid),
+    dueJobs: (nowIso) => q.dueJobs.all(nowIso).map((j) => ({ ...j, payload: JSON.parse(j.payload) })),
+    markJobDone: (id, at) => q.jobDone.run(at, id).changes > 0,
+
     // Analytics
+    addOrderEvent: (orderId, status, at) => q.addEvent.run(orderId, status, at),
+    orderEventsBetween: (fromIso, toIso) => q.eventsBetween.all(fromIso, toIso),
     ordersBetween: (fromIso, toIso) => q.ordersBetween.all(fromIso, toIso),
     linesBetween: (fromIso, toIso) => q.linesBetween.all(fromIso, toIso),
 

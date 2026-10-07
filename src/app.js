@@ -19,6 +19,7 @@ const { createSimulatedShadowfax } = require('./delivery/simulator');
 const { qrPng } = require('./payments');
 const { createCrm } = require('./crm');
 const { createMenuAdmin } = require('./menu-admin');
+const { createReviews } = require('./reviews');
 
 function isAdmin(req) {
   const token = Buffer.from((req.get('authorization') || '').replace(/^Bearer\s+/i, ''));
@@ -39,20 +40,20 @@ function deliveryProvider({ shadowfax, onCallback }) {
 }
 
 function createApp({
-  dbPath = config.dbPath, waClient, enableDevTools = !config.production, log = console, deliveryPartner,
+  dbPath = config.dbPath, waClient, enableDevTools = !config.production, log = console, deliveryPartner, seed,
 } = {}) {
-  const db = openDb(dbPath);
+  const db = openDb(dbPath, seed ? { seed } : {});
   const store = createSqliteStore(db);
   const orders = createOrderService(store);
   const handoffs = createHandoffService(store);
   const crm = createCrm({ store, orders }); // before notifications, so points are credited first
   const menuAdmin = createMenuAdmin({ store });
-  const bot = createBot({ orders, handoffs, crm, sessions: createSessionStore(store), places: () => store.localities() });
-
   // Dev: keep messages the business sends on its own so the simulator can show them.
   const outbox = [];
   const baseClient = waClient || createClient({ log });
   const client = enableDevTools ? recordOutbox(baseClient, outbox) : baseClient;
+  const reviews = createReviews({ store, orders, client, log });
+  const bot = createBot({ orders, handoffs, crm, reviews, sessions: createSessionStore(store), places: () => store.localities() });
   notifyOnStatusChange({ orders, client, crm, log });
   relayHandoffReplies({ handoffs, client, log });
   notifyOnPayment({ orders, client, log });
@@ -117,7 +118,7 @@ function createApp({
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin };
+  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews };
 }
 
 module.exports = { createApp };

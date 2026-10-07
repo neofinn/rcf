@@ -37,6 +37,18 @@ function toPayload(to, r) {
           action: { name: 'review_order', parameters: { reference_id: r.referenceId, order: { status: r.status, ...(r.description ? { description: r.description } : {}) } } },
         },
       };
+    case 'template':
+      // Approved message template (needed to message outside the 24h window).
+      return {
+        ...base, type: 'template',
+        template: {
+          name: r.name, language: { code: r.language || 'en' },
+          components: [
+            ...(r.params?.length ? [{ type: 'body', parameters: r.params.map((p) => ({ type: 'text', text: String(p) })) }] : []),
+            ...(r.buttonPayload ? [{ type: 'button', sub_type: 'quick_reply', index: '0', parameters: [{ type: 'payload', payload: r.buttonPayload }] }] : []),
+          ],
+        },
+      };
     case 'location_request':
       return {
         ...base, type: 'interactive',

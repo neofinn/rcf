@@ -32,19 +32,25 @@
   <div class="overlay hidden" id="locModal">
     <div class="sheet" role="dialog" aria-labelledby="locHeading">
       <button class="close" type="button" data-close="locModal" aria-label="Close">×</button>
-      <h3 id="locHeading">How do you want your food?</h3>
+      <h3 id="locHeading">How would you like your order?</h3>
       <div class="tabs">
         <button type="button" data-mode="delivery" class="on">🛵 Delivery</button>
         <button type="button" data-mode="pickup">🏃 Pickup</button>
       </div>
       <div id="deliveryPane">
+        <p class="small muted">Share your current location, type your full address, or both. We'll check delivery and pick your nearest Raju Chinese.</p>
         <button class="btn" type="button" id="useGps">📍 Use my current location</button>
+        <label for="startAddress">Full address</label>
+        <textarea id="startAddress" autocomplete="street-address" placeholder="House/flat no., street, sector/phase, city"></textarea>
+        <div id="areaChoices" class="choice-row"></div>
+        <button class="btn secondary" type="button" id="findAddress" style="margin-top:8px">Find my outlet</button>
         <div class="or">or choose your area</div>
-        <select id="locality"><option value="">Select area…</option></select>
+        <select id="locality" aria-label="Your area"><option value="">Select area…</option></select>
         <p class="error hidden" id="locError"></p>
       </div>
       <div id="pickupPane" class="hidden">
-        <p class="muted small">Pick the outlet you'll collect from.</p>
+        <button class="btn secondary" type="button" id="nearestPickup">📍 Show the nearest outlet</button>
+        <p class="muted small">Or pick the outlet you'll collect from.</p>
         <div id="outletList"></div>
       </div>
     </div>
@@ -60,8 +66,10 @@
       <form id="checkout" novalidate>
         <label for="name">Name</label>
         <input id="name" name="name" autocomplete="name" required>
-        <label for="phone">Mobile number</label>
-        <input id="phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="10-digit mobile" required>
+        <label for="phone">WhatsApp number</label>
+        <input id="phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="10-digit WhatsApp number" required>
+        <p class="small muted" style="margin:4px 0 0">Order updates, your bill and loyalty points come on this WhatsApp number.</p>
+        <p class="small" id="pointsLine" aria-live="polite"></p>
         <div id="addressBox">
           <label for="address">Delivery address</label>
           <textarea id="address" name="address" autocomplete="street-address" placeholder="House/flat no., street/sector, landmark"></textarea>
@@ -76,7 +84,6 @@
             <span><b>💵 Pay on <span id="payWhen">delivery</span></b><br><span class="small muted">Cash or UPI to the rider / counter</span></span></label>
         </fieldset>
         <label class="optin"><input type="checkbox" id="marketingOptIn" style="width:auto"> Send me offers and loyalty updates on WhatsApp</label>
-        <p class="small muted" id="loyaltyNote">⭐ Earn 1 loyalty point for every ₹100 you spend.</p>
         <p class="error hidden" id="checkoutError"></p>
         <button class="btn" type="submit" id="placeBtn">Place order</button>
       </form>

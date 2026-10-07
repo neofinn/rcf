@@ -220,6 +220,7 @@ function createOrderService(store) {
       created_at: ts, updated_at: ts,
     }, priced.lines);
     const order = getOrder(code);
+    store.addOrderEvent(order.id, 'placed', ts);
     // The customer's marketing consent travels with the event to the CRM.
     events.emit('created', { ...order, marketingOptIn: !!input.marketingOptIn });
     return order;
@@ -303,6 +304,7 @@ function createOrderService(store) {
       throw new ValidationError(`Cannot move order from "${order.status}" to "${next}".`, 'bad_transition');
     }
     if (!store.setOrderStatus(order.id, order.status, next, now.toISOString())) throw new ValidationError('Order was updated by someone else. Refresh and try again.', 'conflict');
+    store.addOrderEvent(order.id, next, now.toISOString());
     const updated = getOrder(code);
     events.emit('status', updated, meta);
     return updated;

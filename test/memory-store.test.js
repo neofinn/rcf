@@ -5,7 +5,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const seed = require('../src/seed');
+const seed = require('./fixtures/seed');
 const { createMemoryStore } = require('../src/store/memory');
 const { createOrderService } = require('../src/orders');
 const { createHandoffService } = require('../src/handoff');
