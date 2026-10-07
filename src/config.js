@@ -54,7 +54,7 @@ module.exports = {
     // Every outlet delivers up to this road distance; the nearest open outlet
     // cooks. 20 km leaves no blind spot across Chandigarh, Mohali, Panchkula,
     // Zirakpur, Kharar and the outskirts (New Chandigarh, Pinjore, Dera Bassi,
-    // Kurali, Banur). See test/coverage.test.js.
+    // Banur). Kurali (~25 km) is outside it. See test/coverage.test.js.
     rangeKm: num(env.MAX_DELIVERY_KM, 20),
     partner: 'Shadowfax',
     // Delivery charge shown to and paid by the customer: the Shadowfax rate
@@ -74,6 +74,13 @@ module.exports = {
     callbackToken: env.SHADOWFAX_CALLBACK_TOKEN || '',
     // Book the rider when the outlet accepts ('accepted') or starts cooking ('preparing').
     bookOn: env.SHADOWFAX_BOOK_ON === 'preparing' ? 'preparing' : 'accepted',
+  },
+
+  // Optional copy of the data in Supabase (Postgres) for Power BI, campaigns
+  // and other tools. The app keeps running on SQLite; see src/sync/supabase.js.
+  supabase: {
+    url: (env.SUPABASE_URL || '').replace(/\/$/, ''),
+    serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || '',
   },
 
   whatsapp: {

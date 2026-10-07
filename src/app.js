@@ -5,6 +5,7 @@ const path = require('node:path');
 const express = require('express');
 const config = require('./config');
 const { openDb } = require('./db');
+const { createSupabaseSync, dropTriggers } = require('./sync/supabase');
 const { createSqliteStore } = require('./store/sqlite');
 const { createOrderService, ValidationError } = require('./orders');
 const { createHandoffService } = require('./handoff');
@@ -40,9 +41,13 @@ function deliveryProvider({ shadowfax, onCallback }) {
 }
 
 function createApp({
-  dbPath = config.dbPath, waClient, enableDevTools = !config.production, log = console, deliveryPartner, seed,
+  dbPath = config.dbPath, waClient, enableDevTools = !config.production, log = console, deliveryPartner, seed, supabase = config.supabase, fetchImpl,
 } = {}) {
   const db = openDb(dbPath, seed ? { seed } : {});
+  // Optional copy of the data in Supabase; off unless both settings are given.
+  const sync = supabase && supabase.url && supabase.serviceKey
+    ? createSupabaseSync({ db, url: supabase.url, serviceKey: supabase.serviceKey, fetch: fetchImpl, log })
+    : (dropTriggers(db), null);
   const store = createSqliteStore(db);
   const orders = createOrderService(store);
   const handoffs = createHandoffService(store);
@@ -89,7 +94,7 @@ function createApp({
     ? safeEqual(req.get('x-callback-token'), config.shadowfax.callbackToken)
     : !config.production);
 
-  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin })) {
+  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync })) {
     if (route.dev && !enableDevTools) continue;
     // Shadowfax may call back with POST or PUT.
     const methods = route.partner ? ['post', 'put'] : [route.method.toLowerCase()];
@@ -118,7 +123,7 @@ function createApp({
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews };
+  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync };
 }
 
 module.exports = { createApp };

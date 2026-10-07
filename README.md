@@ -14,8 +14,10 @@ Online ordering for Raju Chinese's outlets across the Chandigarh tricity: a web 
 
 ## How orders reach the right outlet
 
-1. The customer shares a location: browser GPS, picking their area from a list (25 tricity localities), or a WhatsApp location pin.
-2. `assignOutlet` (`src/geo.js`) estimates the road distance to every outlet (straight-line distance × 1.3) and picks the **nearest outlet that is open, accepting orders, and within delivery range**. The range is **20 km by road for every outlet** (`MAX_DELIVERY_KM`), so there is **no blind spot**. `test/coverage.test.js` checks a 500 m grid over the whole tricity and outskirts (New Chandigarh, Mullanpur, Pinjore, Dera Bassi, Kurali, Banur), including with outlets paused.
+**Outlets** (`src/seed.js`): Sector 15-D, Sector 34 and Sector 46-C Chandigarh, Phase 3B2 Mohali, VIP Road Zirakpur, Khuda Lahora (near PGI) and Peer Muchalla. These are the outlets found on Zomato, Swiggy, Justdial, magicpin and Google listings; addresses and phone numbers come from those listings, and the coordinates are approximate (Peer Muchalla's is estimated). Check each against the real outlet before going live.
+
+1. The customer shares a location: browser GPS, a typed address, picking their area from a list of tricity localities, or a WhatsApp location pin.
+2. `assignOutlet` (`src/geo.js`) estimates the road distance to every outlet (straight-line distance × 1.3) and picks the **nearest outlet that is open, accepting orders, and within delivery range**. The range is **20 km by road for every outlet** (`MAX_DELIVERY_KM`), so there is **no blind spot**. `test/coverage.test.js` checks a 500 m grid over the whole tricity and outskirts (New Chandigarh, Mullanpur, Pinjore, Dera Bassi, Banur), including with outlets paused. Kurali (~25 km from Phase 3B2) is outside the range; raise `MAX_DELIVERY_KM` to 26 to include it.
 3. If the nearest outlet is closed or paused, the next nearest one in range takes the order.
 4. Only beyond 20 km, or when every outlet is closed, is the customer offered **pickup** instead.
 5. For delivery orders the server always works out the outlet itself from the coordinates. It never trusts an outlet ID sent by the client.
@@ -55,7 +57,7 @@ Customers can order in three ways and mix them freely.
 
 **2. Tap through the menu:** menu list → item → quantity (or type "2 less spicy") → cart → checkout.
 
-In the web app, customers browse first and the location is asked once, at checkout.
+The **web app follows the same steps**: on opening it asks Delivery or Pickup. Delivery takes the current location (GPS), a typed full address, or both, and picks the outlet; Pickup lists outlets nearest first. Then the menu. The phone field is labelled **WhatsApp number** (order updates and the review request go there), and once it's filled in, the customer's **saved loyalty points** are shown.
 
 **3. Send a cart from the WhatsApp catalog.** There is one catalog for all outlets. The cart arrives at the webhook as an `order` message; the bot keeps it, asks for the customer's location if it doesn't have one, routes it to the nearest outlet like any other order, removes anything sold out there, and continues to checkout. Product IDs in the catalog are `RC-<menu item id>`; staff can download the full feed at `/api/admin/catalog.csv` and upload it in Meta Commerce Manager.
 
@@ -113,7 +115,17 @@ Setup: get API access from Shadowfax (Dedicated Store model). Put each outlet's 
 - **Charts:** daily sales trend, outlet-wise sales, category mix, top 10 dishes, and a weekday × hour heatmap of when orders arrive. Also channel, payment and order-type splits.
 - **Tables:** item-wise sales (qty, revenue, share, % of orders it appears in), dishes that didn't sell, top customers, and a money breakdown (items, packing, GST, delivery).
 - **Exports:** outlet and item tables as CSV, for Excel or Power BI.
+- **Rush hours:** orders by hour of day with the peak marked, the busiest day-and-hour slots, and each outlet's peak hour. Use it for staff rosters and rider booking.
+- **Kitchen and delivery speed** (from the time of every status change, `order_events`): minutes to accept, to cook, rider time and total, by hour and by outlet, so slow-downs in the rush show up.
+- **Ordered together:** dish pairs that appear in the same order, with how often, revenue and their rating. Good for combo offers.
+- **Reviews:** average stars, distribution, response rate, by outlet, **star rating per dish** (with low-rating counts) and the latest comments.
+- **Exports:** outlets, items, combos and ratings as CSV.
 - Sales exclude cancelled orders. Dates are IST days.
+
+### Reviews on WhatsApp (`src/reviews.js`)
+**30 minutes after delivery** (or pickup), the customer gets a WhatsApp message asking for a 1–5 star rating of the order, then of each dish (up to 6), then an optional comment. A low rating offers to connect them with the outlet. Delay: `REVIEW_DELAY_MINUTES`. The job is stored in the database, so it survives restarts.
+- WhatsApp orders: sent as a normal message (the chat is open).
+- Web orders: WhatsApp only allows a business to start a chat with an approved **template**. Create one (e.g. *review_request*: "Hi {{1}}, how was your Raju Chinese order {{2}}?" with a quick-reply button "Rate order") and set `WHATSAPP_REVIEW_TEMPLATE`. Without it, web orders aren't asked.
 
 The demo ships ~90 days of generated sample history (`demo/sample-history.js`) so these screens have data. The real server starts empty and fills from real orders.
 
@@ -137,6 +149,10 @@ Delivery: `placed → accepted → preparing → out_for_delivery → completed`
 Pickup: `placed → accepted → preparing → ready → completed`
 Cancelling is allowed until the food is out for delivery or ready.
 
+## Supabase (optional copy of the data)
+
+The app runs on its own SQLite file, so orders never depend on an outside service. If `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set, every new or changed row (orders, items, status times, customers, points, ratings, deliveries, menu, outlets, price changes) is also copied to Supabase Postgres within seconds (`src/sync/supabase.js`). If Supabase is unreachable, changes wait in an outbox and are sent when it's back. Use it for **Power BI**, Metabase, campaigns or anything else that talks to Postgres. `supabase/schema.sql` has the tables plus ready views in rupees and IST (`v_orders`, `v_order_lines`, `v_item_ratings`, `v_customers`). `GET /api/admin/sync` shows the sync status. Setup steps are in [DEPLOY.md](DEPLOY.md).
+
 ## Running it
 
 Requires Node.js 22.5+ (uses the built-in `node:sqlite`, so there is no separate database server).
@@ -152,8 +168,10 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
 
 ## Going live checklist
 
-1. **Real outlet data.** `src/seed.js` contains *placeholder* addresses, coordinates, phone numbers, UPI IDs (`…@example`, deliberately invalid), prices and hours. Replace them before the first start (the seed runs only on an empty database), or edit the `outlets` / `menu_items` tables afterwards. Take each outlet's latitude/longitude from Google Maps (right-click the location).
-2. **Hosting.** Any small VPS or PaaS with a persistent disk for `data/`, behind HTTPS (required by both WhatsApp webhooks and browser geolocation). Set `NODE_ENV=production`, `PUBLIC_BASE_URL` and a long random `ADMIN_TOKEN`.
+Step-by-step hosting (Hostinger), Supabase and WhatsApp number setup: **[DEPLOY.md](DEPLOY.md)**.
+
+1. **Real outlet data.** `src/seed.js` has the 7 outlets from public listings, but the coordinates are approximate, and the menu prices, opening hours and UPI IDs (`…@example`, deliberately invalid) are *placeholders*. Fix them before the first start (the seed runs only on an empty database), or edit the `outlets` / `menu_items` tables afterwards. Take each outlet's latitude/longitude from Google Maps (right-click the outlet's pin).
+2. **Hosting.** Any small VPS with a persistent disk for `data/`, behind HTTPS (required by both WhatsApp webhooks and browser geolocation). Set `NODE_ENV=production`, `PUBLIC_BASE_URL` and a long random `ADMIN_TOKEN`.
 3. **WhatsApp Business.**
    - Create a Meta Business account and a WhatsApp Business app at developers.facebook.com, and add and verify the business phone number.
    - Copy the permanent access token and phone number ID into `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`, and the app secret into `WHATSAPP_APP_SECRET`.
@@ -167,7 +185,7 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
 - Automatic UPI confirmation through a payment gateway webhook (today staff confirm UPI payments by hand)
 - Separate logins per outlet (today one admin token sees every outlet)
 - An LLM (e.g. Claude) behind the WhatsApp parser for messages the rule-based parser can't follow, with the current parser as the fast path
-- WhatsApp template messages so web customers also get WhatsApp status updates (Meta only allows free-form messages within 24 h of the customer's last message)
+- WhatsApp template messages so web customers also get WhatsApp status updates (Meta only allows free-form messages within 24 h of the customer's last message; review requests already use a template)
 - OTP verification of phone numbers for web orders
 - Delivery zones drawn as polygons instead of a radius, if outlets' areas need sharper boundaries
 
@@ -187,7 +205,9 @@ src/
   payments.js            UPI payment links and QR codes
   crm.js                 customers, segments, loyalty points
   menu-admin.js          dish editing, bulk price changes, undo
-  analytics.js           sales analytics for the dashboard
+  analytics.js           sales, rush, speed, combos and review analytics
+  reviews.js             WhatsApp star ratings after delivery
+  sync/supabase.js       copies data to Supabase (outbox + retries)
   delivery/shadowfax.js  Shadowfax Hyperlocal API client
   delivery/dispatcher.js books riders, applies Shadowfax callbacks
   delivery/simulator.js  pretend Shadowfax for demo and local testing
@@ -198,6 +218,7 @@ src/
   whatsapp/webhook.js    webhook endpoint (signature check, dedupe)
   whatsapp/notify.js     status updates and staff replies to customers
 public/                  web app, tracking page, dashboard, simulator
-demo/, scripts/          single-file browser demo and its build
+supabase/schema.sql      Postgres tables and reporting views
+demo/, scripts/          browser demo build, Supabase backfill
 test/                    node:test suites
 ```

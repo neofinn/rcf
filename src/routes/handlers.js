@@ -40,7 +40,7 @@ const publicDelivery = (d) => d && {
   riderLat: d.rider_lat, riderLng: d.rider_lng, trackUrl: d.track_url,
 };
 
-function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin }) {
+function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync }) {
   return [
     // ---- Customer API ------------------------------------------------------
     {
@@ -146,6 +146,11 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
     },
 
     // ---- Outlet staff (admin) ---------------------------------------------
+    {
+      // Supabase copy: pending rows, last sync time and last error.
+      method: 'GET', path: '/api/admin/sync', admin: true,
+      handle: () => (sync ? sync.status() : { enabled: false }),
+    },
     {
       method: 'GET', path: '/api/admin/orders', admin: true,
       handle: ({ query }) => orders.listOrders({
