@@ -8,9 +8,11 @@ const { createMemoryStore } = require('../src/store/memory');
 const { createOrderService, ValidationError, deliveryCharge } = require('../src/orders');
 const config = require('./config');
 const { createHandoffService } = require('../src/handoff');
-const { createRoutes, recordOutbox, matchPath } = require('../src/routes/handlers');
+const { authorize, createRoutes, recordOutbox, matchPath } = require('../src/routes/handlers');
 const { createCrm } = require('../src/crm');
 const { createMenuAdmin } = require('../src/menu-admin');
+const { createStaffAuth } = require('../src/staff-auth');
+const { createStockService } = require('../src/stock');
 const { seedSampleHistory } = require('./sample-history');
 const { createReviews } = require('../src/reviews');
 const { createBot, createSessionStore } = require('../src/whatsapp/bot');
@@ -18,6 +20,8 @@ const { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment, notifyOnDeli
 const { createDispatcher } = require('../src/delivery/dispatcher');
 const { createSimulatedShadowfax } = require('../src/delivery/simulator');
 const { assignOutlet } = require('../src/geo');
+
+const DEMO_PIN = '1234';
 
 function createDemoBackend() {
   // Demo outlets stay open around the clock so it works at any hour.
@@ -45,17 +49,24 @@ function createDemoBackend() {
   notifyOnDelivery({ dispatcher, client, log: quiet });
   // Demo: check for due review requests every 5 seconds (asked 20 s after delivery).
   reviews.startTicker(5000);
-  const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin });
+  // Head office token is "demo"; every outlet's panel PIN is 1234.
+  const staffAuth = createStaffAuth({ store, adminToken: 'demo' });
+  for (const o of orders.listOutlets()) staffAuth.setPin(o.id, DEMO_PIN);
+  const stock = createStockService({ store, orders });
+  const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, staffAuth, stock });
 
   /** Serve one API request. Resolves to { status, body }. */
-  async function request(method, url, body) {
+  async function request(method, url, body, token = '') {
     const u = new URL(url, 'https://demo.local');
     for (const r of routes) {
       if (r.method !== method) continue;
       const params = matchPath(r.path, u.pathname);
       if (!params) continue;
+      // Same access rules as the server: head office vs one outlet's tablet.
+      const auth = r.admin || r.outlet ? staffAuth.resolve(token) : null;
+      if (!authorize(r, auth)) return { status: 401, body: { error: 'Unauthorized' } };
       try {
-        const out = await r.handle({ params, query: Object.fromEntries(u.searchParams), body: body || {} });
+        const out = await r.handle({ params, query: Object.fromEntries(u.searchParams), body: body || {}, auth, token });
         if (out && out.contentType) return { status: 200, body: out.text };
         if (out && out.httpStatus) return { status: out.httpStatus, body: out.body };
         return { status: 200, body: out };

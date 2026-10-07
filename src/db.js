@@ -44,6 +44,29 @@ CREATE TABLE IF NOT EXISTS outlet_unavailable_items (
   PRIMARY KEY (outlet_id, item_id)
 );
 
+-- Stock counts set by head office. A row means the outlet has only this many
+-- left (orders take from it, cancellations put it back); no row = no limit.
+CREATE TABLE IF NOT EXISTS outlet_stock (
+  outlet_id INTEGER NOT NULL REFERENCES outlets(id),
+  item_id INTEGER NOT NULL REFERENCES menu_items(id),
+  remaining INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (outlet_id, item_id)
+);
+
+-- Outlet panel logins: one PIN per outlet, set by head office.
+CREATE TABLE IF NOT EXISTS outlet_logins (
+  outlet_id INTEGER PRIMARY KEY REFERENCES outlets(id),
+  pin_hash TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS staff_sessions (
+  token_hash TEXT PRIMARY KEY,
+  outlet_id INTEGER NOT NULL REFERENCES outlets(id),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS localities (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,

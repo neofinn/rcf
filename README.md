@@ -7,7 +7,8 @@ Online ordering for Raju Chinese's outlets across the Chandigarh tricity: a web 
 | Customer web app | `/` | Customers on phone/desktop |
 | Order tracking | `/track.html?code=RC…` | Customers (link shown after ordering and sent on WhatsApp) |
 | WhatsApp bot | `/webhooks/whatsapp` | Customers chatting with the business number |
-| Outlet dashboard | `/admin/` | Outlet staff / managers |
+| Outlet panel | `/outlet/` | Staff at one outlet (logs in with that outlet's PIN) |
+| Head office panel | `/admin/` | Owner / head office (admin token) |
 | WhatsApp simulator | `/whatsapp-sim.html` | Developers/demos (disabled when `NODE_ENV=production`) |
 
 **Shareable demo:** `npm run build:demo` writes `dist/demo.html`, a single file with the web app, WhatsApp chat, outlet dashboard and a live routing map. It runs the real code from `src/` in the browser on an in-memory store, so no server is needed.
@@ -22,7 +23,7 @@ Online ordering for Raju Chinese's outlets across the Chandigarh tricity: a web 
 4. Only beyond 20 km, or when every outlet is closed, is the customer offered **pickup** instead.
 5. For delivery orders the server always works out the outlet itself from the coordinates. It never trusts an outlet ID sent by the client.
 
-Menu stock is per outlet: staff can mark an item out of stock at their outlet only.
+Stock is per outlet and controlled by head office: a dish can be switched off at one outlet, or given a count of how many are left (see below).
 
 ## Ordering on WhatsApp
 
@@ -92,7 +93,23 @@ Delivery orders are handed to **Shadowfax Hyperlocal** riders using their *Dedic
 
 Setup: get API access from Shadowfax (Dedicated Store model). Put each outlet's store code in `outlets.sfx_store_code`, set `SHADOWFAX_TOKEN` and `SHADOWFAX_BASE_URL` (staging `https://hlbackend.staging.shadowfax.in`, production `https://api.shadowfax.in`), and give Shadowfax your callback URL `https://<your-domain>/webhooks/shadowfax` with the header `X-Callback-Token: <SHADOWFAX_CALLBACK_TOKEN>`. The API paths are in `src/delivery/shadowfax.js` and follow Shadowfax's public docs. Confirm them, especially cancel, during onboarding. `SHADOWFAX_MODE=simulate` runs a pretend Shadowfax for local testing; the demo uses the same simulator.
 
-## Back office (admin panel `/admin/`)
+## Two staff panels
+
+**Outlet panel (`/outlet/`)**, for the counter tablet at each outlet:
+- The tablet logs in with **that outlet's PIN**. Head office sets PINs; staff can't pick another outlet's data.
+- It shows **only that outlet's** live orders (accept, cooking, ready, rider, payment), its WhatsApp chats, history and today's total, with a beep on new orders.
+- **Stock is read-only** here: what head office switched off, and the counts left. Counts go down by themselves as orders come in.
+- Staff can still pause new orders when the kitchen is overloaded (the next nearest outlet takes them).
+- Sessions last 30 days. Five wrong PINs lock that outlet's login for 5 minutes. A new PIN (or **Sign out all**) logs the outlet's tablets out.
+- Every outlet API is checked on the server (`/api/outlet/*`): an order or chat of another outlet answers "not found".
+
+**Head office panel (`/admin/`)**, for the owner, logs in with `ADMIN_TOKEN` and sees every outlet:
+- Live orders, chats and history for all outlets (or filter to one).
+- **Stock** (`src/stock.js`): every dish × every outlet. Tick to sell it there; type a count to sell only that many (orders take from it, a cancellation puts it back, at 0 the dish shows as sold out on web and WhatsApp, and customers can't order more than what's left). Empty count = no limit. Per dish: *All on*, *All off*, *No limits* across outlets. Tiles show what's off, sold out and running low.
+- **Outlets:** pause or resume an outlet, set each outlet's panel PIN, see how many tablets are signed in, sign them out.
+- Customers, Menu and Analytics below.
+
+## Back office (head office panel `/admin/`)
 
 ### Customers: CRM and loyalty (`src/crm.js`)
 - **Saved automatically from every order** (web and WhatsApp), keyed by phone: name, address, location, first channel, favourite outlet. Orders, total spent, average order, last order and favourite dishes are worked out from the orders themselves, so they never drift.
@@ -178,12 +195,12 @@ Step-by-step hosting (Hostinger), Supabase and WhatsApp number setup: **[DEPLOY.
    - Set the webhook URL to `https://<your-domain>/webhooks/whatsapp` with your `WHATSAPP_VERIFY_TOKEN`, and subscribe to the `messages` field.
    - Optional catalog: create a catalog in Meta Commerce Manager, upload `/api/admin/catalog.csv` (add real photos at the `image_link` URLs), and connect it to the WhatsApp number. Customers can then browse and send carts; routing still uses their location.
    - Put an "Order on WhatsApp" link (`https://wa.me/91XXXXXXXXXX?text=hi`) and a QR code on menus, packaging and the website.
-4. **Outlet tablets.** Open `/admin/` at each outlet, log in, select the outlet and leave it open; it refreshes every 5 s and beeps on new orders and new chat messages. "Accepting orders" pauses an outlet when it is overloaded.
+4. **Outlet tablets.** In the head office panel, **Outlets** tab, set a PIN for each outlet. On each outlet's tablet open `/outlet/`, choose the outlet and enter its PIN, and leave it open; it refreshes every 5 s and beeps on new orders and new chat messages. "Accepting orders" pauses that outlet when it is overloaded. Keep `/admin/` and the admin token for head office only.
 
 ## Suggested next steps
 
 - Automatic UPI confirmation through a payment gateway webhook (today staff confirm UPI payments by hand)
-- Separate logins per outlet (today one admin token sees every outlet)
+- Named staff accounts (today one PIN per outlet), and a manager role between outlet and head office
 - An LLM (e.g. Claude) behind the WhatsApp parser for messages the rule-based parser can't follow, with the current parser as the fast path
 - WhatsApp template messages so web customers also get WhatsApp status updates (Meta only allows free-form messages within 24 h of the customer's last message; review requests already use a template)
 - OTP verification of phone numbers for web orders
@@ -205,6 +222,8 @@ src/
   payments.js            UPI payment links and QR codes
   crm.js                 customers, segments, loyalty points
   menu-admin.js          dish editing, bulk price changes, undo
+  stock.js               per-outlet stock: on/off and counts (head office)
+  staff-auth.js          outlet PIN logins and head office token
   analytics.js           sales, rush, speed, combos and review analytics
   reviews.js             WhatsApp star ratings after delivery
   sync/supabase.js       copies data to Supabase (outbox + retries)
@@ -217,7 +236,9 @@ src/
   whatsapp/client.js     Cloud API sender
   whatsapp/webhook.js    webhook endpoint (signature check, dedupe)
   whatsapp/notify.js     status updates and staff replies to customers
-public/                  web app, tracking page, dashboard, simulator
+public/                  web app, tracking page, simulator
+  outlet/, admin/        outlet panel, head office panel
+  staff/                 code and styles shared by both panels
 supabase/schema.sql      Postgres tables and reporting views
 demo/, scripts/          browser demo build, Supabase backfill
 test/                    node:test suites

@@ -1,8 +1,9 @@
 'use strict';
 
 // Admin views for the back office: Customers (CRM + loyalty), Menu
-// (dish editing, one-click price changes, outlet stock) and Analytics.
-// Loaded after admin.js; uses its api(), state, rupees(), esc() helpers.
+// (dish editing, one-click price changes) and Analytics. Stock and outlet
+// logins are in control.js.
+// Loaded after staff/panel.js; uses its api(), state, rupees(), esc() helpers.
 
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -11,7 +12,7 @@
   const short = (name) => String(name || '').replace('Raju Chinese - ', '');
   const outletName = (id) => short(window.RCAdmin.state.outlets.find((o) => o.id === id)?.name || '—');
   const dateFmt = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short' }) : '—');
-  // esc() and rupees() come from admin.js.
+  // esc() and rupees() come from staff/panel.js.
   const kRupees = (p) => {
     const r = p / 100;
     if (r >= 1e7) return `₹${(r / 1e7).toFixed(1)}Cr`;
@@ -388,7 +389,6 @@
   async function renderMenu(ctx) {
     if (document.activeElement?.closest?.('#view .menu-table input, #view .bulk input')) return;
     const { items, lastChange } = await ctx.api('/menu');
-    const stock = ctx.state.outletId ? new Map((await ctx.api(`/outlets/${ctx.state.outletId}/menu`)).map((i) => [i.id, i.available])) : null;
     const cats = [...new Set(items.map((i) => i.category))];
     if (!M.category) M.category = cats[0];
     $('view').innerHTML = `
@@ -416,9 +416,9 @@
         </div>` : ''}
       </section>
       <section class="card">
-        <header><h3>Dishes</h3><span class="muted small">Edit and press Enter or click away to save.${stock ? ` Stock column is for ${esc(outletName(Number(ctx.state.outletId)))}.` : ' Pick an outlet above to manage its stock.'}</span></header>
+        <header><h3>Dishes</h3><span class="muted small">Edit and press Enter or click away to save. Stock per outlet is on the <button type="button" class="link" data-view="stock">Stock</button> tab.</span></header>
         <div class="table-wrap"><table class="data menu-table">
-          <thead><tr><th><span class="sr-only">Select</span></th><th>Dish</th><th>Category</th><th>Veg</th><th class="n">Price ₹</th><th>On menu</th>${stock ? '<th>In stock here</th>' : ''}</tr></thead>
+          <thead><tr><th><span class="sr-only">Select</span></th><th>Dish</th><th>Category</th><th>Veg</th><th class="n">Price ₹</th><th>On menu</th></tr></thead>
           <tbody>${items.map((i) => `<tr class="${i.active ? '' : 'off'}">
             <td><input type="checkbox" data-select="${i.id}" ${M.selected.has(i.id) ? 'checked' : ''} aria-label="Select ${esc(i.name)}" style="width:auto"></td>
             <td><input data-field="name" data-id="${i.id}" value="${esc(i.name)}" aria-label="Name"></td>
@@ -426,7 +426,6 @@
             <td><input type="checkbox" data-field="veg" data-id="${i.id}" ${i.veg ? 'checked' : ''} aria-label="Veg" style="width:auto"></td>
             <td class="n"><input type="number" min="1" step="1" data-field="price" data-id="${i.id}" value="${i.price / 100}" aria-label="Price" class="price"></td>
             <td><input type="checkbox" data-field="active" data-id="${i.id}" ${i.active ? 'checked' : ''} aria-label="On menu" style="width:auto"></td>
-            ${stock ? `<td><input type="checkbox" data-item="${i.id}" ${stock.get(i.id) ? 'checked' : ''} ${i.active ? '' : 'disabled'} aria-label="In stock" style="width:auto"></td>` : ''}
           </tr>`).join('')}</tbody>
         </table></div>
         <datalist id="catList">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>

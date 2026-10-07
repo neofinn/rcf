@@ -15,6 +15,9 @@ function createMemoryStore(seed) {
     veg: m.veg ? 1 : 0, sort: i, active: 1,
   }));
   const unavailable = new Set();
+  const stock = new Map(); // "outlet|item" -> { remaining, updated_at }
+  const pins = new Map();
+  const staffSessions = new Map();
   const orders = [];
   const lines = new Map();
   const handoffs = [];
@@ -39,6 +42,36 @@ function createMemoryStore(seed) {
     menuItems: () => items.filter((i) => i.active).map(copy),
     unavailableItemIds: (outletId) => items.filter((i) => unavailable.has(`${outletId}|${i.id}`)).map((i) => i.id),
     setAvailability(outletId, itemId, available) { unavailable[available ? 'delete' : 'add'](`${outletId}|${itemId}`); },
+    stockFor: (outletId) => [...stock].filter(([k]) => k.startsWith(`${outletId}|`)).map(([k, v]) => ({ item_id: Number(k.split('|')[1]), ...v })),
+    allStock: () => [...stock].map(([k, v]) => ({ outlet_id: Number(k.split('|')[0]), item_id: Number(k.split('|')[1]), ...v })),
+    allUnavailable: () => [...unavailable].map((k) => ({ outlet_id: Number(k.split('|')[0]), item_id: Number(k.split('|')[1]) })),
+    setStock(outletId, itemId, remaining, ts) {
+      if (remaining == null) stock.delete(`${outletId}|${itemId}`);
+      else stock.set(`${outletId}|${itemId}`, { remaining, updated_at: ts });
+    },
+    adjustStock(outletId, itemId, delta, ts) {
+      const s = stock.get(`${outletId}|${itemId}`);
+      if (s) Object.assign(s, { remaining: Math.max(0, s.remaining + delta), updated_at: ts });
+    },
+    outletPinHash: (outletId) => copy(pins.get(Number(outletId))),
+    outletLogins: () => [...pins].map(([outlet_id, p]) => ({ outlet_id, updated_at: p.updated_at })),
+    setOutletPin(outletId, hash, ts) { pins.set(Number(outletId), { pin_hash: hash, updated_at: ts }); },
+    addStaffSession(tokenHash, outletId, createdAt, expiresAt) {
+      staffSessions.set(tokenHash, { token_hash: tokenHash, outlet_id: outletId, created_at: createdAt, expires_at: expiresAt });
+    },
+    staffSession: (tokenHash, now) => { const x = staffSessions.get(tokenHash); return x && x.expires_at > now ? copy(x) : null; },
+    dropStaffSession(tokenHash) { staffSessions.delete(tokenHash); },
+    dropStaffSessions(outletId) { for (const [k, v] of staffSessions) if (v.outlet_id === Number(outletId)) staffSessions.delete(k); },
+    staffSessionCounts(now) {
+      const by = new Map();
+      for (const v of staffSessions.values()) {
+        if (v.expires_at <= now) continue;
+        const c = by.get(v.outlet_id) || { outlet_id: v.outlet_id, n: 0, last: '' };
+        c.n += 1; if (v.created_at > c.last) c.last = v.created_at;
+        by.set(v.outlet_id, c);
+      }
+      return [...by.values()];
+    },
     localities: () => seed.localities.map(copy),
 
     orderCodeExists: (code) => orders.some((o) => o.code === code),

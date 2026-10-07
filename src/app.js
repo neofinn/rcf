@@ -9,7 +9,7 @@ const { createSupabaseSync, dropTriggers } = require('./sync/supabase');
 const { createSqliteStore } = require('./store/sqlite');
 const { createOrderService, ValidationError } = require('./orders');
 const { createHandoffService } = require('./handoff');
-const { createRoutes, recordOutbox } = require('./routes/handlers');
+const { authorize, createRoutes, recordOutbox } = require('./routes/handlers');
 const { createBot, createSessionStore } = require('./whatsapp/bot');
 const { createClient } = require('./whatsapp/client');
 const { createWebhookRouter } = require('./whatsapp/webhook');
@@ -21,12 +21,8 @@ const { qrPng } = require('./payments');
 const { createCrm } = require('./crm');
 const { createMenuAdmin } = require('./menu-admin');
 const { createReviews } = require('./reviews');
-
-function isAdmin(req) {
-  const token = Buffer.from((req.get('authorization') || '').replace(/^Bearer\s+/i, ''));
-  const expected = Buffer.from(config.adminToken);
-  return token.length === expected.length && crypto.timingSafeEqual(token, expected);
-}
+const { createStaffAuth } = require('./staff-auth');
+const { createStockService } = require('./stock');
 
 function safeEqual(a, b) {
   const x = Buffer.from(String(a || ''));
@@ -53,6 +49,8 @@ function createApp({
   const handoffs = createHandoffService(store);
   const crm = createCrm({ store, orders }); // before notifications, so points are credited first
   const menuAdmin = createMenuAdmin({ store });
+  const stock = createStockService({ store, orders });
+  const staffAuth = createStaffAuth({ store, adminToken: config.adminToken });
   // Dev: keep messages the business sends on its own so the simulator can show them.
   const outbox = [];
   const baseClient = waClient || createClient({ log });
@@ -94,16 +92,18 @@ function createApp({
     ? safeEqual(req.get('x-callback-token'), config.shadowfax.callbackToken)
     : !config.production);
 
-  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync })) {
+  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock })) {
     if (route.dev && !enableDevTools) continue;
     // Shadowfax may call back with POST or PUT.
     const methods = route.partner ? ['post', 'put'] : [route.method.toLowerCase()];
     for (const method of methods) app[method](route.path, async (req, res, next) => {
-      if (route.admin && !isAdmin(req)) return res.status(401).json({ error: 'Unauthorized' });
+      const token = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+      const auth = route.admin || route.outlet ? staffAuth.resolve(token) : null;
+      if (!authorize(route, auth)) return res.status(401).json({ error: 'Unauthorized' });
       if (route.partner && !partnerAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
       let out;
       try {
-        out = await route.handle({ params: req.params, query: req.query, body: req.body || {} });
+        out = await route.handle({ params: req.params, query: req.query, body: req.body || {}, auth, token });
       } catch (e) { return next(e); }
       if (out && out.contentType) return res.type(out.contentType).attachment(out.filename).send(out.text);
       if (out && out.httpStatus) return res.status(out.httpStatus).json(out.body);
@@ -123,7 +123,7 @@ function createApp({
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync };
+  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock };
 }
 
 module.exports = { createApp };

@@ -93,6 +93,8 @@ certbot --nginx -d order.your-domain.in     # free Let's Encrypt certificate, au
 
 Check `https://order.your-domain.in/healthz`. It should return `{"ok":true}`.
 
+**Panels.** Open `https://order.your-domain.in/admin/` with the `ADMIN_TOKEN` (head office only). In **Outlets**, set a PIN for each outlet. On each outlet's tablet, open `https://order.your-domain.in/outlet/`, pick the outlet, enter its PIN, and add it to the home screen.
+
 **Backups.** The whole business data is one file. Back it up nightly (as user `rcf`, `crontab -e`):
 
 ```

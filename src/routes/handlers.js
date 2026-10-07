@@ -4,7 +4,9 @@
 // server (src/app.js) and the browser demo calls the same functions, so both
 // run identical logic.
 //
-// Each route: { method, path, admin?, dev?, handle({ params, query, body }) }.
+// Each route: { method, path, admin?, outlet?, dev?, handle({ params, query, body, auth }) }.
+//   admin:  head office only (ADMIN_TOKEN).
+//   outlet: a signed-in outlet tablet; auth.outletId is the only outlet it can touch.
 // A handler returns a JSON-able value, or { httpStatus, body }, or
 // { contentType, filename, text } for a file. ValidationError means 400.
 
@@ -15,6 +17,7 @@ const { computeAnalytics } = require('../analytics');
 const { placeAddress } = require('../geocode');
 const { normalisePhone } = require('../orders');
 const { qrSvg } = require('../payments');
+const { AuthError } = require('../staff-auth');
 
 const ACTIVE = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
 const IST_OFFSET_MS = 330 * 60 * 1000; // IST is UTC+5:30, no daylight saving
@@ -40,7 +43,94 @@ const publicDelivery = (d) => d && {
   riderLat: d.rider_lat, riderLng: d.rider_lng, trackUrl: d.track_url,
 };
 
-function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync }) {
+/** Does this request decide for itself who may call the route? */
+function authorize(route, auth) {
+  if (route.admin) return auth?.role === 'admin';
+  if (route.outlet) return auth?.role === 'outlet';
+  return true;
+}
+
+function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock }) {
+  // Head office reaches every outlet; an outlet tablet only its own.
+  const scope = (auth, requested) => (auth.role === 'outlet' ? auth.outletId : Number(requested) || null);
+  const mine = (auth, outletId) => auth.role === 'admin' || outletId === auth.outletId;
+  const ownOrder = (auth, code) => {
+    const o = orders.getOrder(code);
+    return o && mine(auth, o.outlet_id) ? o : null;
+  };
+  const ownChat = (auth, id) => {
+    const h = handoffs.get(Number(id));
+    return h && mine(auth, h.outlet_id) ? h : null;
+  };
+  const authFail = (e) => {
+    if (e instanceof AuthError) return { httpStatus: e.status, body: { error: e.message } };
+    throw e;
+  };
+
+  // Live orders, chats and today's totals: the same routes for the admin panel
+  // (/api/admin/…, every outlet) and the outlet panel (/api/outlet/…, its own).
+  const staffRoutes = (base, flag) => [
+    {
+      method: 'GET', path: `${base}/orders`, ...flag,
+      handle: ({ query, auth }) => orders.listOrders({
+        outletId: scope(auth, query.outletId), statuses: query.status === 'all' ? null : ACTIVE, limit: query.limit,
+      }),
+    },
+    {
+      method: 'POST', path: `${base}/orders/:code/status`, ...flag,
+      handle: ({ params, body, auth }) => (ownOrder(auth, params.code)
+        ? orders.updateStatus(params.code, String(body.status || ''))
+        : notFound('Order not found')),
+    },
+    {
+      // Staff confirm a UPI payment arrived, say it hasn't, or switch the order to cash.
+      method: 'POST', path: `${base}/orders/:code/payment`, ...flag,
+      handle: ({ params, body, auth }) => (ownOrder(auth, params.code)
+        ? orders.setPayment(params.code, String(body.status || ''))
+        : notFound('Order not found')),
+    },
+    {
+      // Delivery partner: (re)book a Shadowfax rider, or deliver with the outlet's own rider.
+      method: 'POST', path: `${base}/orders/:code/delivery`, ...flag,
+      handle: async ({ params, body, auth }) => {
+        if (!ownOrder(auth, params.code)) return notFound('Order not found');
+        if (body.action === 'own') return dispatcher.useOwnRider(params.code);
+        if (body.action === 'book') return dispatcher.book(params.code);
+        return { httpStatus: 400, body: { error: 'action must be "book" or "own"' } };
+      },
+    },
+    {
+      // Today's orders and revenue per outlet (IST day).
+      method: 'GET', path: `${base}/summary`, ...flag,
+      handle: ({ auth }) => store.summarySince(new Date(Math.floor((Date.now() + IST_OFFSET_MS) / DAY_MS) * DAY_MS - IST_OFFSET_MS).toISOString())
+        .filter((r) => mine(auth, r.outlet_id)),
+    },
+    {
+      // Customer chats handed over from the WhatsApp bot.
+      method: 'GET', path: `${base}/chats`, ...flag,
+      handle: ({ query, auth }) => handoffs.list({ outletId: scope(auth, query.outletId), status: query.status === 'closed' ? 'closed' : 'open' }),
+    },
+    {
+      method: 'POST', path: `${base}/chats/:id/reply`, ...flag,
+      handle: ({ params, body, auth }) => {
+        const h = ownChat(auth, params.id);
+        const text = String(body.text || '').trim();
+        if (!h) return notFound('Chat not found');
+        if (h.status !== 'open') return { httpStatus: 400, body: { error: 'This chat is closed' } };
+        if (!text) return { httpStatus: 400, body: { error: 'Message is empty' } };
+        return handoffs.addMessage(h.id, 'out', text);
+      },
+    },
+    {
+      method: 'POST', path: `${base}/chats/:id/close`, ...flag,
+      handle: ({ params, auth }) => {
+        if (!ownChat(auth, params.id)) return notFound('Chat not found');
+        handoffs.close(Number(params.id));
+        return { ok: true };
+      },
+    },
+  ];
+
   return [
     // ---- Customer API ------------------------------------------------------
     {
@@ -151,30 +241,54 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
       method: 'GET', path: '/api/admin/sync', admin: true,
       handle: () => (sync ? sync.status() : { enabled: false }),
     },
+    ...staffRoutes('/api/admin', { admin: true }),
+    ...staffRoutes('/api/outlet', { outlet: true }),
+
+    // ---- Outlet panel (/outlet/) -----------------------------------------
     {
-      method: 'GET', path: '/api/admin/orders', admin: true,
-      handle: ({ query }) => orders.listOrders({
-        outletId: Number(query.outletId) || null, statuses: query.status === 'all' ? null : ACTIVE, limit: query.limit,
-      }),
-    },
-    {
-      method: 'POST', path: '/api/admin/orders/:code/status', admin: true,
-      handle: ({ params, body }) => orders.updateStatus(params.code, String(body.status || '')) || notFound('Order not found'),
-    },
-    {
-      // Staff confirm a UPI payment arrived, say it hasn't, or switch the order to cash.
-      method: 'POST', path: '/api/admin/orders/:code/payment', admin: true,
-      handle: ({ params, body }) => orders.setPayment(params.code, String(body.status || '')) || notFound('Order not found'),
-    },
-    {
-      // Delivery partner: (re)book a Shadowfax rider, or deliver with the outlet's own rider.
-      method: 'POST', path: '/api/admin/orders/:code/delivery', admin: true,
-      handle: async ({ params, body }) => {
-        if (!orders.getOrder(params.code)) return notFound('Order not found');
-        if (body.action === 'own') return dispatcher.useOwnRider(params.code);
-        if (body.action === 'book') return dispatcher.book(params.code);
-        return { httpStatus: 400, body: { error: 'action must be "book" or "own"' } };
+      method: 'POST', path: '/api/outlet/login',
+      handle: ({ body }) => {
+        try {
+          const s = staffAuth.login(body.outletId, body.pin);
+          return { token: s.token, outlet: orders.getOutlet(s.outletId) };
+        } catch (e) { return authFail(e); }
       },
+    },
+    { method: 'POST', path: '/api/outlet/logout', outlet: true, handle: ({ token }) => { staffAuth.logout(token); return { ok: true }; } },
+    { method: 'GET', path: '/api/outlet/me', outlet: true, handle: ({ auth }) => orders.getOutlet(auth.outletId) },
+    {
+      // Read-only: head office controls stock. Shows what's off and what's running low.
+      method: 'GET', path: '/api/outlet/stock', outlet: true,
+      handle: ({ auth }) => orders.menuFor(auth.outletId),
+    },
+    {
+      // A busy kitchen can pause new orders; the next nearest outlet takes them.
+      method: 'PATCH', path: '/api/outlet/me', outlet: true,
+      handle: ({ body, auth }) => {
+        if (typeof body.acceptingOrders === 'boolean') store.setAccepting(auth.outletId, body.acceptingOrders);
+        return orders.getOutlet(auth.outletId);
+      },
+    },
+
+    // ---- Head office: stock and outlet logins ------------------------------
+    { method: 'GET', path: '/api/admin/stock', admin: true, handle: () => stock.board() },
+    {
+      // { outletId | 'all', itemId, available?: bool, remaining?: number | null }
+      method: 'POST', path: '/api/admin/stock', admin: true,
+      handle: ({ body }) => stock.set(body),
+    },
+    { method: 'GET', path: '/api/admin/logins', admin: true, handle: () => staffAuth.loginStatus() },
+    {
+      method: 'POST', path: '/api/admin/outlets/:id/pin', admin: true,
+      handle: ({ params, body }) => {
+        if (!orders.getOutlet(Number(params.id))) return notFound('Unknown outlet');
+        try { staffAuth.setPin(Number(params.id), body.pin); } catch (e) { return authFail(e); }
+        return { ok: true };
+      },
+    },
+    {
+      method: 'POST', path: '/api/admin/outlets/:id/sign-out', admin: true,
+      handle: ({ params }) => { staffAuth.signOutOutlet(Number(params.id)); return { ok: true }; },
     },
     {
       // Partner callbacks (Shadowfax). Mounted by the server with its own auth check.
@@ -219,44 +333,6 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
       },
     },
     { method: 'GET', path: '/api/admin/outlets/:id/menu', admin: true, handle: ({ params }) => orders.menuFor(Number(params.id)) },
-    {
-      method: 'POST', path: '/api/admin/outlets/:id/availability', admin: true,
-      handle: ({ params, body }) => {
-        const id = Number(params.id);
-        if (!orders.getOutlet(id)) return notFound('Unknown outlet');
-        store.setAvailability(id, Number(body.itemId), !!body.available);
-        return { ok: true };
-      },
-    },
-    {
-      // Today's orders and revenue per outlet (IST day).
-      method: 'GET', path: '/api/admin/summary', admin: true,
-      handle: () => store.summarySince(new Date(Math.floor((Date.now() + IST_OFFSET_MS) / DAY_MS) * DAY_MS - IST_OFFSET_MS).toISOString()),
-    },
-    {
-      // Customer chats handed over from the WhatsApp bot.
-      method: 'GET', path: '/api/admin/chats', admin: true,
-      handle: ({ query }) => handoffs.list({ outletId: Number(query.outletId) || null, status: query.status === 'closed' ? 'closed' : 'open' }),
-    },
-    {
-      method: 'POST', path: '/api/admin/chats/:id/reply', admin: true,
-      handle: ({ params, body }) => {
-        const h = handoffs.get(Number(params.id));
-        const text = String(body.text || '').trim();
-        if (!h) return notFound('Chat not found');
-        if (h.status !== 'open') return { httpStatus: 400, body: { error: 'This chat is closed' } };
-        if (!text) return { httpStatus: 400, body: { error: 'Message is empty' } };
-        return handoffs.addMessage(h.id, 'out', text);
-      },
-    },
-    {
-      method: 'POST', path: '/api/admin/chats/:id/close', admin: true,
-      handle: ({ params }) => {
-        if (!handoffs.get(Number(params.id))) return notFound('Chat not found');
-        handoffs.close(Number(params.id));
-        return { ok: true };
-      },
-    },
     {
       // Menu as a product feed for WhatsApp / Meta Commerce Manager. One catalog
       // serves every outlet; product ids (RC-<id>) map back to menu items, and the
@@ -320,4 +396,4 @@ function matchPath(pattern, path) {
   return params;
 }
 
-module.exports = { createRoutes, recordOutbox, matchPath, ACTIVE };
+module.exports = { authorize, createRoutes, recordOutbox, matchPath, ACTIVE };

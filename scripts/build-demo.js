@@ -50,7 +50,8 @@ const CHILD_SHIM = `<script>
     }
   });
   window.fetch = async (url, opts = {}) => {
-    const r = await ask({ kind: 'fetch', method: (opts.method || 'GET').toUpperCase(), url: String(url), body: opts.body ? JSON.parse(opts.body) : null });
+    const auth = (opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || '';
+    const r = await ask({ kind: 'fetch', method: (opts.method || 'GET').toUpperCase(), url: String(url), body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\\s+/i, '') });
     const text = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
     return new Response(text, { status: r.status, headers: { 'Content-Type': 'application/json' } });
   };
@@ -70,9 +71,8 @@ const CHILD_SHIM = `<script>
 </script>`;
 
 function inlinePage(file) {
-  const css = read('public/styles.css');
   let html = read(file)
-    .replace('<link rel="stylesheet" href="/styles.css">', () => `<style>${css}</style>`)
+    .replace(/<link rel="stylesheet" href="(\/[^"]+)">/g, (_, href) => `<style>${read('public' + href)}</style>`)
     .replace(/<script src="(\/[^"]+)"><\/script>/g, (_, src) => `<script>${read('public' + src).replace(/<\/script/gi, '<\\/script')}</script>`);
   html = html.replace('<head>', () => `<head>\n${CHILD_SHIM}`);
   return html;
@@ -97,6 +97,7 @@ async function main() {
     web: inlinePage('public/index.html'),
     track: inlinePage('public/track.html'),
     admin: inlinePage('public/admin/index.html'),
+    outlet: inlinePage('public/outlet/index.html'),
     whatsapp: inlinePage('public/whatsapp-sim.html'),
   };
   const json = (v) => JSON.stringify(v).replace(/</g, '\\u003c');

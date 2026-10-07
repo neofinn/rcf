@@ -45,6 +45,14 @@ create table if not exists outlet_unavailable_items (
   primary key (outlet_id, item_id)
 );
 
+create table if not exists outlet_stock (
+  outlet_id integer not null,
+  item_id integer not null,
+  remaining integer not null,
+  updated_at timestamptz not null,
+  primary key (outlet_id, item_id)
+);
+
 create table if not exists customers (
   phone text primary key,
   name text,
@@ -162,7 +170,7 @@ create table if not exists price_history (
 do $$
 declare t text;
 begin
-  foreach t in array array['outlets','menu_items','outlet_unavailable_items','customers','orders',
+  foreach t in array array['outlets','menu_items','outlet_unavailable_items','outlet_stock','customers','orders',
     'order_items','order_events','deliveries','loyalty_ledger','ratings','review_comments','price_history']
   loop
     execute format('alter table %I enable row level security', t);
@@ -218,7 +226,7 @@ left join (select phone, count(*) as orders, round(sum(total) / 100.0, 2) as spe
 -- do $$
 -- declare t text;
 -- begin
---   foreach t in array array['outlets','menu_items','outlet_unavailable_items','customers','orders',
+--   foreach t in array array['outlets','menu_items','outlet_unavailable_items','outlet_stock','customers','orders',
 --     'order_items','order_events','deliveries','loyalty_ledger','ratings','review_comments','price_history']
 --   loop
 --     execute format('create policy reporting_read on %I for select to reporting using (true)', t);

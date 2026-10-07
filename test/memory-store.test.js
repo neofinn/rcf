@@ -43,3 +43,24 @@ test('memory store: WhatsApp typed order, status updates, stock-outs and handoff
   assert.equal(handoffs.close(h.id), true);
   assert.equal(handoffs.openForPhone('919811100000'), null);
 });
+
+test('memory store: stock counts and outlet PIN logins behave like SQLite', () => {
+  const { createStockService } = require('../src/stock');
+  const { createStaffAuth } = require('../src/staff-auth');
+  const store = createMemoryStore(seed);
+  const orders = createOrderService(store);
+  const stock = createStockService({ store, orders });
+  const lemonade = orders.menuFor(1).find((i) => i.name === 'Masala Lemonade');
+  stock.set({ outletId: 1, itemId: lemonade.id, remaining: 2 });
+  const o = orders.createOrder({ fulfilment: 'pickup', outletId: 1, name: 'Isha', phone: '9811100000', items: [{ id: lemonade.id, qty: 2 }] }, LUNCH);
+  assert.equal(orders.menuFor(1).find((i) => i.id === lemonade.id).available, false);
+  orders.updateStatus(o.code, 'cancelled', LUNCH);
+  assert.equal(stock.board().items.find((i) => i.id === lemonade.id).outlets[1].remaining, 2);
+
+  const auth = createStaffAuth({ store, adminToken: 'hq' });
+  auth.setPin(1, '2468');
+  const { token } = auth.login(1, '2468');
+  assert.deepEqual(auth.resolve(token), { role: 'outlet', outletId: 1 });
+  assert.deepEqual(auth.resolve('hq'), { role: 'admin' });
+  assert.equal(auth.resolve('nope'), null);
+});

@@ -1,11 +1,20 @@
 'use strict';
 
+// Staff panels. One script, two panels:
+//  - head office (/admin/, data-panel="admin"): every outlet, plus Customers,
+//    Menu, Stock, Outlets and Analytics (insights.js, control.js).
+//  - outlet (/outlet/, data-panel="outlet"): one outlet's live orders, chats,
+//    history and a read-only stock list. Logs in with the outlet's PIN.
+
+const PANEL = document.body.dataset.panel === 'outlet' ? 'outlet' : 'admin';
+
 const $ = (id) => document.getElementById(id);
 const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', p % 100 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {});
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const KEY = PANEL === 'outlet' ? 'rco.' : 'rca.';
 const store = {
-  get(k, d) { try { return JSON.parse(localStorage.getItem('rca.' + k)) ?? d; } catch { return d; } },
-  set(k, v) { try { localStorage.setItem('rca.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
+  get(k, d) { try { return JSON.parse(localStorage.getItem(KEY + k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(KEY + k, JSON.stringify(v)); } catch { /* ignore */ } },
 };
 
 const NEXT_LABEL = {
@@ -13,10 +22,10 @@ const NEXT_LABEL = {
   completed: 'Complete', cancelled: 'Cancel',
 };
 
-const state = { token: store.get('token', '') || (window.RC_DEMO ? 'demo' : ''), outletId: store.get('outlet', ''), view: 'live', outlets: [], seen: new Set(), firstLoad: true, chatSeen: new Map(), chatsLoaded: false };
+const state = { token: store.get('token', '') || (window.RC_DEMO && PANEL === 'admin' ? 'demo' : ''), outletId: store.get('outlet', ''), view: 'live', outlets: [], seen: new Set(), firstLoad: true, chatSeen: new Map(), chatsLoaded: false };
 
 async function api(path, opts = {}) {
-  const res = await fetch('/api/admin' + path, {
+  const res = await fetch(`/api/${PANEL}` + path, {
     ...opts,
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + state.token },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
@@ -27,8 +36,16 @@ async function api(path, opts = {}) {
   return data;
 }
 
-function showLogin(err) {
+async function showLogin(err) {
+  clearInterval(poll);
   $('dash').classList.add('hidden');
+  if (PANEL === 'outlet' && !$('loginOutlet').options.length) {
+    try {
+      const outlets = await (await fetch('/api/outlets')).json();
+      $('loginOutlet').innerHTML = outlets.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
+      $('loginOutlet').value = store.get('loginOutlet', outlets[0]?.id);
+    } catch { /* offline: try again on the next login */ }
+  }
   $('login').classList.remove('hidden');
   $('loginError').textContent = err || '';
   $('loginError').classList.toggle('hidden', !err);
@@ -36,11 +53,27 @@ function showLogin(err) {
 
 $('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  state.token = $('token').value;
+  if (PANEL === 'outlet') {
+    // Swap the outlet's PIN for a session token.
+    const res = await fetch('/api/outlet/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outletId: Number($('loginOutlet').value), pin: $('token').value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return showLogin(data.error || 'Login failed');
+    store.set('loginOutlet', $('loginOutlet').value);
+    state.token = data.token;
+  } else {
+    state.token = $('token').value;
+  }
+  $('token').value = '';
   store.set('token', state.token);
   start();
 });
-$('logout').addEventListener('click', () => { store.set('token', ''); state.token = ''; showLogin(); });
+$('logout').addEventListener('click', () => {
+  if (PANEL === 'outlet' && state.token) api('/logout', { method: 'POST' }).catch(() => {});
+  store.set('token', ''); state.token = ''; showLogin();
+});
 
 function beep() {
   if (!$('sound').checked) return;
@@ -160,11 +193,28 @@ async function renderStats() {
     + (state.outletId ? '' : shown.map((r) => `<div class="stat">${esc(name(r.outlet_id))}: ${r.orders} · ${rupees(r.revenue)}</div>`).join(''));
 }
 
+// Outlet panel: what head office has set, read only.
+async function renderOutletStock() {
+  const items = await api('/stock');
+  const out = items.filter((i) => !i.available);
+  const low = items.filter((i) => i.available && i.remaining != null);
+  const row = (i) => `<tr><td>${esc(i.name)}<br><span class="small muted">${esc(i.category)}</span></td><td class="n">${
+    i.remaining == null ? '<span class="chip">Off by head office</span>' : i.remaining === 0 ? '<span class="chip">Sold out (0 left)</span>' : `<b>${i.remaining}</b> left`}</td></tr>`;
+  $('view').innerHTML = `<p class="small muted">Stock is managed by head office. Call them to switch a dish on or off or to change a count. Counts go down by themselves as orders come in.</p>
+    <div class="two">
+      <div class="card"><header><h3>Not available now (${out.length})</h3></header>
+        <div class="table-wrap"><table class="data"><tbody>${out.map(row).join('') || '<tr><td class="muted">Everything is available.</td></tr>'}</tbody></table></div></div>
+      <div class="card"><header><h3>Limited stock (${low.length})</h3></header>
+        <div class="table-wrap"><table class="data"><tbody>${low.sort((a, b) => a.remaining - b.remaining).map(row).join('') || '<tr><td class="muted">No counts set.</td></tr>'}</tbody></table></div></div>
+    </div>`;
+}
+
 async function refresh() {
   try {
     const chats = await loadChats();
-    const insights = window.RCInsights?.[state.view];
-    const view = insights ? insights() : state.view === 'chats' ? renderChats(chats) : renderOrders();
+    const insights = PANEL === 'admin' && window.RCInsights?.[state.view];
+    const view = insights ? insights() : state.view === 'chats' ? renderChats(chats)
+      : state.view === 'stock' ? renderOutletStock() : renderOrders();
     await Promise.all([view, renderStats()]);
   } catch (e) {
     if (e.message !== 'unauthorized') console.error(e);
@@ -223,13 +273,7 @@ document.addEventListener('submit', async (e) => {
   refresh();
 });
 
-document.addEventListener('change', async (e) => {
-  if (e.target.dataset.item) {
-    try { await api(`/outlets/${state.outletId}/availability`, { method: 'POST', body: { itemId: Number(e.target.dataset.item), available: e.target.checked } }); } catch (err) { alert(err.message); e.target.checked = !e.target.checked; }
-  }
-});
-
-$('outlet').addEventListener('change', (e) => {
+$('outlet')?.addEventListener('change', (e) => {
   state.outletId = e.target.value;
   store.set('outlet', state.outletId);
   syncAccepting();
@@ -244,26 +288,41 @@ function syncAccepting() {
 
 $('accepting').addEventListener('change', async (e) => {
   try {
-    const o = await api(`/outlets/${state.outletId}`, { method: 'PATCH', body: { acceptingOrders: e.target.checked } });
+    const o = await api(PANEL === 'outlet' ? '/me' : `/outlets/${state.outletId}`, { method: 'PATCH', body: { acceptingOrders: e.target.checked } });
     state.outlets = state.outlets.map((x) => (x.id === o.id ? o : x));
   } catch (err) { alert(err.message); e.target.checked = !e.target.checked; }
 });
 
 let poll;
 async function start() {
+  // Demo: the outlet tablet signs itself in to the outlet the demo picked.
+  if (!state.token && PANEL === 'outlet' && window.RC_DEMO_LOGIN) {
+    const res = await fetch('/api/outlet/login', { method: 'POST', body: JSON.stringify(window.RC_DEMO_LOGIN) });
+    state.token = (await res.json()).token || '';
+  }
   if (!state.token) return showLogin();
   try {
-    state.outlets = await api('/outlets');
+    if (PANEL === 'outlet') {
+      // An outlet tablet is locked to its own outlet.
+      const me = await api('/me');
+      state.outlets = [me];
+      state.outletId = String(me.id);
+      $('outletName').textContent = me.name.replace('Raju Chinese - ', '');
+    } else {
+      state.outlets = await api('/outlets');
+    }
   } catch { return; }
   $('login').classList.add('hidden');
   $('dash').classList.remove('hidden');
-  $('outlet').innerHTML = '<option value="">All outlets</option>' + state.outlets.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
-  $('outlet').value = state.outletId;
+  if (PANEL === 'admin') {
+    $('outlet').innerHTML = '<option value="">All outlets</option>' + state.outlets.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
+    $('outlet').value = state.outletId;
+  }
   syncAccepting();
   refresh();
   clearInterval(poll);
   // Live views refresh themselves; back-office views refresh when you act.
-  poll = setInterval(() => { if (['live', 'chats', 'history'].includes(state.view)) refresh(); else loadChats().catch(() => {}); }, 5000);
+  poll = setInterval(() => { if (['live', 'chats', 'history'].includes(state.view) || (PANEL === 'outlet' && state.view === 'stock')) refresh(); else loadChats().catch(() => {}); }, 5000);
 }
 
 start();

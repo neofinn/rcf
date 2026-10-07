@@ -116,6 +116,8 @@
     .stage { grid-template-columns: 392px 392px; justify-content: center; }
     .stage .surface.dash { grid-column: 1 / -1; }
   }
+  .stage .surface.hq { grid-column: 1 / -1; }
+  .desk .bar select { margin-left: auto; font: inherit; font-size: 0.8rem; padding: 3px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: inherit; }
   @media (max-width: 900px) {
     .tabs { display: flex; }
     .stage { grid-template-columns: minmax(0, 1fr); justify-items: center; }
@@ -161,6 +163,7 @@
     <button type="button" role="tab" data-tab="web" aria-selected="true">Web app</button>
     <button type="button" role="tab" data-tab="whatsapp" aria-selected="false">WhatsApp</button>
     <button type="button" role="tab" data-tab="dash" aria-selected="false">Outlet</button>
+    <button type="button" role="tab" data-tab="hq" aria-selected="false">Head office</button>
     <button type="button" role="tab" data-tab="routing" aria-selected="false">Routing</button>
   </nav>
 
@@ -174,8 +177,12 @@
       <div class="phone"><iframe id="f-whatsapp" title="WhatsApp chat"></iframe></div>
     </div>
     <div class="surface dash" data-panel="dash">
-      <header><h2>Outlet dashboard</h2><p class="muted">What staff see on the counter tablet. Accept a delivery order and a simulated Shadowfax rider is booked; watch the rider on the routing map. Open <b>Chats</b> to reply to WhatsApp customers.</p></header>
-      <div class="desk"><div class="bar" aria-hidden="true"><i></i><i></i><i></i><span>Outlet tablet · /admin</span></div><iframe id="f-admin" title="Outlet dashboard"></iframe></div>
+      <header><h2>Outlet panel</h2><p class="muted">The counter tablet at one outlet, signed in with that outlet's PIN. It sees <b>only its own orders and chats</b>; stock is read-only. A new order switches this tablet to the outlet that got it. Accept a delivery order and a simulated Shadowfax rider is booked.</p></header>
+      <div class="desk"><div class="bar"><i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i><span>Outlet tablet · /outlet</span><select id="tabletOutlet" aria-label="Which outlet's tablet"></select></div><iframe id="f-outlet" title="Outlet panel"></iframe></div>
+    </div>
+    <div class="surface dash hq" data-panel="hq">
+      <header><h2>Head office panel</h2><p class="muted">For the owner: every outlet's live orders, customers (CRM and loyalty), menu and prices, <b>Stock</b> (switch dishes on or off per outlet and set how many are left), <b>Outlets</b> (pause, set outlet panel PINs) and analytics.</p></header>
+      <div class="desk"><div class="bar" aria-hidden="true"><i></i><i></i><i></i><span>Head office · /admin</span></div><iframe id="f-admin" title="Head office panel"></iframe></div>
     </div>
   </section>
 
@@ -206,7 +213,7 @@
     </div>
   </section>
 
-  <footer>Demo data: outlet addresses, coordinates, phone numbers, UPI IDs and prices are placeholders, and the UPI IDs are deliberately invalid, so no real payment can be made. Inside this demo the <b>Pay with UPI app</b> button can't open a UPI app; on a real phone it opens GPay, PhonePe, Paytm or BHIM with the amount filled in. Outlets are open 24 hours here so the demo works at any time; in the real app they follow their opening hours. Nothing is saved: reloading the page starts a fresh demo.</footer>
+  <footer>Demo data: outlet addresses, coordinates, phone numbers, UPI IDs and prices are placeholders, and the UPI IDs are deliberately invalid, so no real payment can be made. Inside this demo the <b>Pay with UPI app</b> button can't open a UPI app; on a real phone it opens GPay, PhonePe, Paytm or BHIM with the amount filled in. Outlets are open 24 hours here so the demo works at any time; in the real app they follow their opening hours. Every outlet's panel PIN is 1234 in this demo. Nothing is saved: reloading the page starts a fresh demo.</footer>
 </div>
 
 <script>/*__BACKEND__*/</script>
@@ -220,7 +227,7 @@ const short = (name) => name.replace('Raju Chinese - ', '');
 const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', p % 100 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {});
 
 let be;
-const frames = { web: $('f-web'), whatsapp: $('f-whatsapp'), admin: $('f-admin') };
+const frames = { web: $('f-web'), whatsapp: $('f-whatsapp'), outlet: $('f-outlet'), admin: $('f-admin') };
 
 // ---- Demo GPS ---------------------------------------------------------------
 const OUTSIDE = { name: 'Ludhiana (outside delivery area)', lat: 30.9010, lng: 75.8573 };
@@ -250,9 +257,19 @@ function load(frame, page, query) {
   if (query) html = html.replace('<head>', () => `<head><script>window.RC_QUERY = ${JSON.stringify(query)};<\/script>`);
   frames[frame].srcdoc = html;
 }
+// The outlet tablet signs in to one outlet (demo PIN 1234 for every outlet).
+let tabletOutlet = null;
+function loadTablet(outletId) {
+  tabletOutlet = Number(outletId);
+  $('tabletOutlet').value = String(tabletOutlet);
+  try { localStorage.removeItem('rco.token'); } catch { /* storage unavailable */ }
+  frames.outlet.srcdoc = PAGES.outlet.replace('<head>', () => `<head><script>window.RC_DEMO_LOGIN = ${JSON.stringify({ outletId: tabletOutlet, pin: '1234' })};<\/script>`);
+}
+$('tabletOutlet').addEventListener('change', (e) => loadTablet(e.target.value));
+
 function clearChildStorage() {
   try {
-    for (const k of Object.keys(localStorage)) if (/^(rc\.|rca\.|sim\.)/.test(k)) localStorage.removeItem(k);
+    for (const k of Object.keys(localStorage)) if (/^(rc\.|rca\.|rco\.|sim\.)/.test(k)) localStorage.removeItem(k);
   } catch { /* storage unavailable */ }
 }
 const frameOf = (win) => Object.keys(frames).find((k) => frames[k].contentWindow === win);
@@ -262,7 +279,7 @@ window.addEventListener('message', async (e) => {
   const from = frameOf(e.source);
   if (!d || !d.rc || !from) return;
   if (d.kind === 'fetch') {
-    const res = await be.request(d.method, d.url, d.body);
+    const res = await be.request(d.method, d.url, d.body, d.token);
     observe(from, d, res);
     e.source.postMessage({ rc: true, reply: true, id: d.id, status: res.status, body: res.body }, '*');
   } else if (d.kind === 'gps') {
@@ -302,7 +319,7 @@ function observe(from, req, res) {
     preview(p, `Web app customer at ${where}`);
   }
   // Pausing an outlet hands its zone to the neighbours.
-  if (req.method === 'PATCH' && path.startsWith('/api/admin/outlets/')) drawZones();
+  if (req.method === 'PATCH' && (path.startsWith('/api/admin/outlets/') || path === '/api/outlet/me')) drawZones();
   if (path === '/api/dev/whatsapp' && req.body.type === 'location') {
     const p = req.body.location;
     const a = be.assignOutlet(be.outlets(), p, { fulfilment: 'delivery' });
@@ -317,6 +334,8 @@ function wireEvents() {
     const items = o.items.map((i) => `${i.qty}× ${esc(i.name)}${i.note ? ` <i>(${esc(i.note)})</i>` : ''}`).join(', ');
     log(o.channel === 'whatsapp' ? 'WhatsApp' : 'Web app', o.channel === 'whatsapp' ? 'wa' : 'web',
       `Order <b>${o.code}</b> sent to <b>${esc(short(o.outlet.name))}</b> · ${rupees(o.total)} ${o.payment_method === 'upi' ? `by UPI to <b>${esc(o.upi.upiId)}</b>` : 'cash/UPI on delivery'} · ${items}${o.notes ? ` · note: ${esc(o.notes)}` : ''}`);
+    // Show the order on the tablet of the outlet that got it.
+    if (o.outlet_id !== tabletOutlet) loadTablet(o.outlet_id);
     flagTab('dash');
   });
   be.orders.events.on('status', (o) => {
@@ -351,6 +370,7 @@ function wireEvents() {
   });
   be.handoffs.events.on('opened', (h) => {
     const o = h.outlet_id ? be.orders.getOutlet(h.outlet_id) : null;
+    if (o && o.id !== tabletOutlet) loadTablet(o.id);
     log('WhatsApp', 'wa', `Customer asked for a person → chat sent to ${o ? `<b>${esc(short(o.name))}</b> staff` : 'staff at all outlets'}`);
     flagTab('dash');
   });
@@ -507,6 +527,8 @@ function start() {
   load('web', 'web');
   load('whatsapp', 'whatsapp');
   load('admin', 'admin');
+  $('tabletOutlet').innerHTML = be.outlets().map((o) => `<option value="${o.id}">${esc(short(o.name))}</option>`).join('');
+  loadTablet((be.assignOutlet(be.outlets(), gpsPoint(), { fulfilment: 'delivery' }).outlet || be.outlets()[0]).id);
 }
 $('restart').addEventListener('click', start);
 start();

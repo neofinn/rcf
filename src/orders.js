@@ -100,6 +100,9 @@ function priceCart(menuList, items, fulfilment, distanceKm) {
     if (!item) throw new ValidationError('An item in your cart is no longer on the menu.');
     if (!item.available) throw new ValidationError(`${item.name} is not available at this outlet right now.`, 'unavailable');
     if (perItem.get(id) > MAX_QTY_PER_ITEM) throw new ValidationError(`Maximum ${MAX_QTY_PER_ITEM} of ${item.name} per order.`);
+    if (item.remaining != null && perItem.get(id) > item.remaining) {
+      throw new ValidationError(`Only ${item.remaining} × ${item.name} left at this outlet right now.`, 'low_stock');
+    }
     lines.push({ item_id: id, name: item.name, price: item.price, qty, note: note || null });
   }
   const p = config.pricing;
@@ -124,12 +127,18 @@ function createOrderService(store) {
   const listOutlets = () => store.outlets();
   const getOutlet = (id) => store.outlet(id);
 
-  /** Menu for an outlet, with per-outlet availability applied. */
+  /**
+   * Menu for an outlet, with its stock applied: items switched off by head
+   * office, or whose stock count has run out, are unavailable. `remaining` is
+   * the count left, or null when the item has no limit.
+   */
   function menuFor(outletId) {
     const out = new Set(outletId ? store.unavailableItemIds(outletId) : []);
+    const left = new Map(outletId ? store.stockFor(outletId).map((r) => [r.item_id, r.remaining]) : []);
     return store.menuItems().map((i) => ({
       id: i.id, category: i.category, name: i.name, description: i.description,
-      price: i.price, veg: !!i.veg, available: !out.has(i.id),
+      price: i.price, veg: !!i.veg, available: !out.has(i.id) && (left.get(i.id) ?? 1) > 0,
+      remaining: left.has(i.id) ? left.get(i.id) : null,
     }));
   }
 
@@ -219,6 +228,8 @@ function createOrderService(store) {
       delivery_fee: priced.deliveryFee, total: priced.total, payment_method: payUpi ? 'upi' : 'cod', payment_status: payUpi ? 'pending' : 'cod', status: 'placed',
       created_at: ts, updated_at: ts,
     }, priced.lines);
+    // Take the dishes out of the outlet's stock count (no-op for items without a count).
+    for (const l of priced.lines) store.adjustStock(outlet.id, l.item_id, -l.qty, ts);
     const order = getOrder(code);
     store.addOrderEvent(order.id, 'placed', ts);
     // The customer's marketing consent travels with the event to the CRM.
@@ -305,6 +316,8 @@ function createOrderService(store) {
     }
     if (!store.setOrderStatus(order.id, order.status, next, now.toISOString())) throw new ValidationError('Order was updated by someone else. Refresh and try again.', 'conflict');
     store.addOrderEvent(order.id, next, now.toISOString());
+    // A cancelled order's dishes go back into the outlet's stock count.
+    if (next === 'cancelled') for (const l of order.items) store.adjustStock(order.outlet_id, l.item_id, l.qty, now.toISOString());
     const updated = getOrder(code);
     events.emit('status', updated, meta);
     return updated;

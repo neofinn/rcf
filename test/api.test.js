@@ -75,7 +75,7 @@ test('web ordering end to end: locate, menu, quote, order, track, status', async
   assert.equal(s.sent.length, 0);
 });
 
-test('outlet staff can pause orders and mark items out of stock', async (t) => {
+test('head office pauses outlets and controls stock; counts run down with orders', async (t) => {
   const s = await start();
   t.after(s.close);
   await s.call('PATCH', '/api/admin/outlets/1', { acceptingOrders: false }, admin);
@@ -83,9 +83,77 @@ test('outlet staff can pause orders and mark items out of stock', async (t) => {
   assert.notEqual(loc.body.outlet.id, 1);
 
   const item = (await s.call('GET', '/api/menu?outletId=2')).body[0].items[0];
-  await s.call('POST', '/api/admin/outlets/2/availability', { itemId: item.id, available: false }, admin);
-  const after = (await s.call('GET', '/api/menu?outletId=2')).body[0].items[0];
-  assert.equal(after.available, false);
+  await s.call('POST', '/api/admin/stock', { outletId: 2, itemId: item.id, available: false }, admin);
+  assert.equal((await s.call('GET', '/api/menu?outletId=2')).body[0].items[0].available, false);
+  assert.equal((await s.call('GET', '/api/menu?outletId=3')).body[0].items[0].available, true, 'other outlets unaffected');
+
+  // A count: 3 left at outlet 2. Orders take from it; cancelling puts it back.
+  const paneer = (await s.call('GET', '/api/menu?outletId=2')).body.flatMap((c) => c.items).find((i) => i.name === 'Chilli Paneer Dry');
+  let board = (await s.call('POST', '/api/admin/stock', { outletId: 2, itemId: paneer.id, remaining: 3 }, admin)).body;
+  assert.equal(board.items.find((i) => i.id === paneer.id).outlets[2].remaining, 3);
+  const order = (qty) => s.call('POST', '/api/orders', { fulfilment: 'pickup', outletId: 2, items: [{ id: paneer.id, qty }], name: 'Rohit', phone: '9812345678' });
+  const tooMany = await order(4);
+  assert.equal(tooMany.status, 400);
+  assert.match(tooMany.body.error, /Only 3 × Chilli Paneer Dry left/);
+  const o = await order(3);
+  assert.equal(o.status, 201);
+  let dish = (await s.call('GET', '/api/menu?outletId=2')).body.flatMap((c) => c.items).find((i) => i.id === paneer.id);
+  assert.deepEqual([dish.available, dish.remaining], [false, 0], 'sold out at 0');
+  await s.call('POST', `/api/admin/orders/${o.body.code}/status`, { status: 'cancelled' }, admin);
+  dish = (await s.call('GET', '/api/menu?outletId=2')).body.flatMap((c) => c.items).find((i) => i.id === paneer.id);
+  assert.deepEqual([dish.available, dish.remaining], [true, 3]);
+
+  // Empty = no limit again; 'all' changes every outlet at once.
+  board = (await s.call('POST', '/api/admin/stock', { outletId: 'all', itemId: paneer.id, remaining: null }, admin)).body;
+  assert.ok(Object.values(board.items.find((i) => i.id === paneer.id).outlets).every((c) => c.remaining === null));
+  assert.equal((await s.call('POST', '/api/admin/stock', { outletId: 2, itemId: paneer.id, remaining: -1 }, admin)).status, 400);
+});
+
+test('outlet panel: PIN login, only its own orders and chats, stock is read-only', async (t) => {
+  const s = await start();
+  t.after(s.close);
+  const paneer = (await s.call('GET', '/api/menu')).body.flatMap((c) => c.items).find((i) => i.name === 'Chilli Paneer Dry');
+  const order = (outletId) => s.call('POST', '/api/orders', { fulfilment: 'pickup', outletId, items: [{ id: paneer.id, qty: 1 }], name: 'Rohit', phone: '9812345678' });
+  const mine = (await order(2)).body.code;
+  const theirs = (await order(3)).body.code;
+
+  assert.equal((await s.call('POST', '/api/outlet/login', { outletId: 2, pin: '1234' })).status, 401, 'no PIN set yet');
+  assert.equal((await s.call('POST', '/api/admin/outlets/2/pin', { pin: '12' }, admin)).status, 400);
+  assert.equal((await s.call('POST', '/api/admin/outlets/2/pin', { pin: '482913' })).status, 401, 'only head office sets PINs');
+  await s.call('POST', '/api/admin/outlets/2/pin', { pin: '482913' }, admin);
+  assert.equal((await s.call('POST', '/api/outlet/login', { outletId: 2, pin: '000000' })).status, 401);
+  const login = await s.call('POST', '/api/outlet/login', { outletId: 2, pin: '482913' });
+  assert.equal(login.status, 200);
+  assert.equal(login.body.outlet.id, 2);
+  const tab = { Authorization: `Bearer ${login.body.token}` };
+
+  const live = (await s.call('GET', '/api/outlet/orders?outletId=3', undefined, tab)).body;
+  assert.deepEqual(live.map((o) => o.code), [mine], 'asking for another outlet still returns only its own');
+  assert.equal((await s.call('POST', `/api/outlet/orders/${theirs}/status`, { status: 'accepted' }, tab)).status, 404);
+  assert.equal((await s.call('POST', `/api/outlet/orders/${mine}/status`, { status: 'accepted' }, tab)).body.status, 'accepted');
+  assert.ok((await s.call('GET', '/api/outlet/summary', undefined, tab)).body.every((r) => r.outlet_id === 2));
+
+  // Head office screens and stock changes are closed to outlet tablets.
+  for (const [m, p, b] of [['GET', '/api/admin/orders'], ['GET', '/api/admin/customers'], ['GET', '/api/admin/analytics'],
+    ['GET', '/api/admin/stock'], ['POST', '/api/admin/stock', { outletId: 2, itemId: paneer.id, available: false }],
+    ['PATCH', '/api/admin/menu/1', { price: 1 }]]) {
+    assert.equal((await s.call(m, p, b, tab)).status, 401, `${m} ${p}`);
+  }
+  assert.equal((await s.call('GET', '/api/outlet/orders', undefined, admin)).status, 401, 'outlet routes need an outlet login');
+  const stock = (await s.call('GET', '/api/outlet/stock', undefined, tab)).body;
+  assert.ok(stock.find((i) => i.id === paneer.id).available);
+  // The outlet can still pause new orders when the kitchen is overloaded.
+  assert.equal((await s.call('PATCH', '/api/outlet/me', { acceptingOrders: false }, tab)).body.accepting_orders, 0);
+
+  const status = (await s.call('GET', '/api/admin/logins', undefined, admin)).body.find((r) => r.outletId === 2);
+  assert.deepEqual([status.hasPin, status.devices], [true, 1]);
+  // Changing the PIN (or "sign out tablets") signs the outlet's tablets out.
+  await s.call('POST', '/api/admin/outlets/2/pin', { pin: '777123' }, admin);
+  assert.equal((await s.call('GET', '/api/outlet/orders', undefined, tab)).status, 401);
+
+  // Five wrong PINs lock the outlet's login for a few minutes.
+  for (let i = 0; i < 5; i++) await s.call('POST', '/api/outlet/login', { outletId: 2, pin: '000000' });
+  assert.equal((await s.call('POST', '/api/outlet/login', { outletId: 2, pin: '777123' })).status, 429);
 });
 
 test('WhatsApp webhook: verification, signature, dedupe and status notifications', async (t) => {

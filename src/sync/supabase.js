@@ -17,6 +17,7 @@ const TABLES = [
   { name: 'outlets', key: ['id'], bools: ['accepting_orders', 'active'] },
   { name: 'menu_items', key: ['id'], bools: ['veg', 'active'] },
   { name: 'outlet_unavailable_items', key: ['outlet_id', 'item_id'] },
+  { name: 'outlet_stock', key: ['outlet_id', 'item_id'] },
   { name: 'customers', key: ['phone'], bools: ['marketing_opt_in'] },
   { name: 'orders', key: ['id'] },
   { name: 'order_items', key: ['line_id'], rowid: 'line_id' },
