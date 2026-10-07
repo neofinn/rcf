@@ -106,7 +106,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       .map((o) => ({ o, km: from ? roadKm(from, o) : null }))
       .sort((a, b) => (a.km ?? 0) - (b.km ?? 0))
       .map(({ o, km }) => row(`outlet:${o.id}`, shortName(o),
-        `${km != null ? `${km} km · ` : ''}${isOpen(o, now) ? 'Open' : 'Closed'} · ${o.opens}-${o.closes} · ${o.address}`));
+        `${km != null ? `${km} km · ` : ''}${isOpen(o, now) ? 'Open' : 'Closed'} · ${o.opens === o.closes ? '24 hours' : `${o.opens}-${o.closes}`} · ${o.address}`));
     return [list(`🏃 *Pickup:* choose the outlet you'll collect from.${from ? ' Nearest first.' : ''}`, 'Choose outlet', [{ title: 'Outlets', rows: rows.slice(0, 10) }])];
   }
 
@@ -586,6 +586,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
         crm.update(msg.from, { optIn: false });
         return [text("👍 Done. We won't send you offers. You'll still get updates about your orders.")];
       }
+      if (['checkout', 'check out', 'place order', 'done', "that's all", 'thats all'].includes(t) && s.cart.length) return checkout(s);
       if (t === 'cart') return s.outletId || s.cart.length ? cartView(s) : welcome(msg.name);
       if (['menu', 'order'].includes(t)) return s.outletId ? categoriesList(s) : welcome(msg.name);
       if (['change address', 'new address', 'change location'].includes(t)) {

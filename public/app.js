@@ -140,7 +140,7 @@ async function renderOutletList() {
   const nearest = at ? list.find((o) => o.open) : null;
   $('outletList').innerHTML = list.map((o) => `
     <button type="button" class="outlet-opt" data-outlet="${o.id}" ${o.open ? '' : 'disabled'}>
-      <span><b>${esc(o.name.replace('Raju Chinese - ', ''))}</b>${at ? ` <span class="small muted">· ${km(o)} km</span>` : ''}<br><span class="small muted">${esc(o.address)} · ${o.opens}–${o.closes}</span></span>
+      <span><b>${esc(o.name.replace('Raju Chinese - ', ''))}</b>${at ? ` <span class="small muted">· ${km(o)} km</span>` : ''}<br><span class="small muted">${esc(o.address)} · ${o.opens === o.closes ? 'open 24 hours' : `${o.opens}–${o.closes}`}</span></span>
       <span class="pill ${o === nearest ? 'near' : o.open ? 'open' : 'closed'}">${o === nearest ? 'Nearest' : o.open ? 'Open' : 'Closed'}</span>
     </button>`).join('');
   $('outletList').querySelectorAll('[data-outlet]').forEach((b) => b.addEventListener('click', () => {

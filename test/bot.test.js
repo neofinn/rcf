@@ -95,6 +95,14 @@ test('pickup flow skips the address step', () => {
   assert.match(c.tap('act:place')[0].text, /Order placed/);
 });
 
+test('typing "checkout" or "done" goes to checkout once the cart has something', () => {
+  const c = chat();
+  c.tap('mode:pickup');
+  c.tap('outlet:4');
+  c.text('1 masala lemonade');
+  assert.match(c.text('done')[0].text, /Pickup from: Raju Chinese - Phase 7 Mohali/);
+});
+
 test('delivery below the minimum order is blocked at checkout', () => {
   const c = chat();
   c.say({ type: 'location', location: PLACES.sector22 });
