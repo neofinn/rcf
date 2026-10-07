@@ -61,8 +61,8 @@ const menu = [
   { category: 'Beverages', name: 'Masala Lemonade', price: 59, veg: true },
 ];
 
-// Approximate locality centroids for customers who prefer to pick an area
-// instead of sharing GPS location.
+// Approximate locality centroids: for picking an area in the web app and for
+// placing typed WhatsApp addresses (src/geocode.js). Add more areas freely.
 const localities = [
   ['Sector 8', 'Chandigarh', 30.7410, 76.8010], ['Sector 9', 'Chandigarh', 30.7480, 76.7930],
   ['Sector 15', 'Chandigarh', 30.7520, 76.7680], ['Sector 17', 'Chandigarh', 30.7410, 76.7790],
@@ -76,7 +76,14 @@ const localities = [
   ['Kharar', 'Kharar', 30.7460, 76.6450], ['Landran', 'Kharar', 30.7020, 76.6630],
   ['Zirakpur VIP Road', 'Zirakpur', 30.6420, 76.8170], ['Dhakoli', 'Zirakpur', 30.6560, 76.8420],
   ['Sector 5', 'Panchkula', 30.6940, 76.8600], ['Sector 11', 'Panchkula', 30.6960, 76.8480],
-  ['Sector 20', 'Panchkula', 30.6710, 76.8410],
+  ['Sector 20', 'Panchkula', 30.6710, 76.8410], ['Sector 26', 'Panchkula', 30.6870, 76.8800],
+  ['Mansa Devi', 'Panchkula', 30.7310, 76.8610], ['Chandimandir', 'Panchkula', 30.7220, 76.8850],
+  ['Peer Muchalla', 'Zirakpur', 30.6720, 76.8450], ['Bhabat', 'Zirakpur', 30.6400, 76.8250],
+  ['Aerocity', 'Mohali', 30.6630, 76.7330], ['Sohana', 'Mohali', 30.6830, 76.7000], ['TDI City', 'Mohali', 30.6480, 76.6900],
+  ['Sunny Enclave', 'Kharar', 30.7350, 76.6600], ['New Chandigarh', 'Mullanpur', 30.7870, 76.6950],
+  ['PGI', 'Chandigarh', 30.7650, 76.7760], ['IT Park', 'Chandigarh', 30.7270, 76.8450],
+  ['Pinjore', 'Pinjore', 30.7970, 76.9170], ['Dera Bassi', 'Dera Bassi', 30.5880, 76.8430],
+  ['Kurali', 'Kurali', 30.8360, 76.5740], ['Banur', 'Banur', 30.5560, 76.7160],
 ].map(([name, city, lat, lng]) => ({ name, city, lat, lng }));
 
 module.exports = { outlets, menu, localities };

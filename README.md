@@ -24,7 +24,20 @@ Menu stock is per outlet: staff can mark an item out of stock at their outlet on
 
 ## Ordering on WhatsApp
 
-Built on the official **WhatsApp Business Cloud API** (Meta). Customers can order in three ways and mix them freely.
+Built on the official **WhatsApp Business Cloud API** (Meta).
+
+**How a chat starts:**
+1. *hi* → **Delivery** or **Pickup**.
+2. **Pickup** → list of outlets. When the customer shares a location, the bot suggests the nearest ones ("Sector 11 · 1.5 km"), and the list sorts nearest first.
+3. **Delivery** → the customer shares their **current location**, types their **full address**, or both.
+   - A typed address is placed on the map from known areas (`src/geocode.js`: sectors, phases, towns in the `localities` table). If a sector exists in two cities, the bot asks which. If the area isn't known, the address is saved and a location pin is requested.
+   - A pin without an address gets a follow-up asking for house/flat details.
+4. We check range and opening hours, pick the outlet, and show the Shadowfax delivery charge.
+5. Then the **menu**.
+
+At checkout the saved address is used directly (type *change address* to edit it). If someone types an order before choosing, the cart is kept and delivery/pickup is asked at checkout.
+
+Customers can order in three ways and mix them freely.
 
 **1. Type it like a message to a person** (`src/whatsapp/nlu.js`)
 
@@ -42,7 +55,7 @@ Built on the official **WhatsApp Business Cloud API** (Meta). Customers can orde
 
 **2. Tap through the menu:** menu list → item → quantity (or type "2 less spicy") → cart → checkout.
 
-Customers can browse and add as much as they like first. The location (or, for pickup, the outlet) is asked **once, at checkout**, and checkout then carries straight on to the address. The web app works the same way.
+In the web app, customers browse first and the location is asked once, at checkout.
 
 **3. Send a cart from the WhatsApp catalog.** There is one catalog for all outlets. The cart arrives at the webhook as an `order` message; the bot keeps it, asks for the customer's location if it doesn't have one, routes it to the nearest outlet like any other order, removes anything sold out there, and continues to checkout. Product IDs in the catalog are `RC-<menu item id>`; staff can download the full feed at `/api/admin/catalog.csv` and upload it in Meta Commerce Manager.
 

@@ -21,6 +21,8 @@ const { assignOutlet, isOpen, etaMinutes } = require('../geo');
 const { rupees } = require('../format');
 const { ValidationError, deliveryFee, deliveryCharge } = require('../orders');
 const { parseOrderText } = require('./nlu');
+const { placeAddress } = require('../geocode');
+const { roadKm } = require('../geo');
 const { qrSvg, orderDetailsReply } = require('../payments');
 
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
@@ -46,11 +48,11 @@ const describe = (name, note) => `${name}${note ? ` _(${note})_` : ''}`;
 function freshSession() {
   return {
     state: 'start', fulfilment: null, lat: null, lng: null, outletId: null, distanceKm: null,
-    cart: [], pendingItemId: null, address: null, choices: [], orderNotes: [], checkingOut: false,
+    cart: [], pendingItemId: null, address: null, choices: [], orderNotes: [], checkingOut: false, areaChoices: [],
   };
 }
 
-function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicBaseUrl }) {
+function createBot({ orders, sessions, handoffs = null, places = () => [], baseUrl = config.publicBaseUrl }) {
   function load(phone, now) {
     const s = sessions.get(phone);
     if (!s || now - new Date(s.updatedAt).getTime() > SESSION_TTL_MS) return freshSession();
@@ -71,7 +73,8 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
   function welcome(name) {
     return [
       buttons(`Namaste${name ? ' ' + name : ''}! 🙏 Welcome to *Raju Chinese* 🥡\n\n`
-        + 'Order by tapping below, or just type what you want, like:\n'
+        + '*Delivery or pickup?*\n\n'
+        + 'Once we know where you are, you can tap through the menu or just type your order, like:\n'
         + '_"2 chilli paneer dry less spicy and 1 veg noodles no onion"_\n\n'
         + 'Type *track* for your order status.', [
         btn('mode:delivery', '🛵 Delivery'),
@@ -81,19 +84,62 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     ];
   }
 
+  const shortName = (o) => o.name.replace('Raju Chinese - ', '');
+
+  // Delivery: current location, typed full address, or both.
   function askLocation(prefix = '') {
     return [{
       type: 'location_request',
-      text: `${prefix}Please share your delivery location 📍 so we can send your order from the nearest Raju Chinese outlet.\n\n(Tap *Send location*, or use 📎 → Location.)`,
+      text: `${prefix}📍 *Where should we deliver?*\n\nTap *Send location* to share your current location, or type your full address (house/flat no., street, sector/phase, city).\nSending both gets the rider to your exact door.`,
     }];
   }
 
-  function pickupOutlets(now) {
-    const rows = orders.listOutlets().map((o) => row(`outlet:${o.id}`, o.name.replace('Raju Chinese - ', ''),
-      `${isOpen(o, now) ? 'Open' : 'Closed'} · ${o.opens}-${o.closes} · ${o.address}`));
+  function askDelivery(s, prefix = '') {
+    s.fulfilment = 'delivery';
+    s.state = 'await_location';
+    return askLocation(prefix);
+  }
+
+  // Outlets for pickup, nearest first once we know where the customer is.
+  function pickupOutlets(now, from = null) {
+    const rows = orders.listOutlets()
+      .map((o) => ({ o, km: from ? roadKm(from, o) : null }))
+      .sort((a, b) => (a.km ?? 0) - (b.km ?? 0))
+      .map(({ o, km }) => row(`outlet:${o.id}`, shortName(o),
+        `${km != null ? `${km} km · ` : ''}${isOpen(o, now) ? 'Open' : 'Closed'} · ${o.opens}-${o.closes} · ${o.address}`));
+    return [list(`🏃 *Pickup:* choose the outlet you'll collect from.${from ? ' Nearest first.' : ''}`, 'Choose outlet', [{ title: 'Outlets', rows: rows.slice(0, 10) }])];
+  }
+
+  function pickupStart(s, now) {
+    s.fulfilment = 'pickup';
+    s.outletId = null;
+    s.distanceKm = null;
+    s.state = 'choose_outlet';
+    if (s.lat != null) return pickupSuggest(s, now);
     return [
-      list('Choose the outlet you will pick up from. Or share your location 📍 and we will pick the nearest one.', 'Choose outlet', [{ title: 'Outlets', rows: rows.slice(0, 10) }]),
+      ...pickupOutlets(now),
+      { type: 'location_request', text: '📍 Not sure which is closest? Share your location and I\'ll suggest the nearest outlet.' },
     ];
+  }
+
+  // Suggest the nearest open outlets for pickup.
+  function pickupSuggest(s, now) {
+    const a = assignOutlet(orders.listOutlets(), s, { fulfilment: 'pickup', now });
+    const open = a.ranked.filter((r) => r.open).slice(0, 2);
+    if (!open.length) return [text('😔 All our outlets are closed right now. Please try again during opening hours.')];
+    const [first] = open;
+    return [buttons(`📍 Your nearest outlet is *${first.outlet.name}*, ${first.distanceKm} km away (${first.outlet.address}). Ready in about ${etaMinutes('pickup')} min after you order.\n\nPick up from here?`, [
+      // Buttons allow 20 characters: "Sector 11 · 1.5 km".
+      ...open.map((r) => btn(`outlet:${r.outlet.id}`, `${shortName(r.outlet).replace(/ (Panchkula|Mohali|Chandigarh)$/, '')} · ${r.distanceKm} km`)),
+      btn('act:outlets', 'All outlets'),
+    ])];
+  }
+
+  // Outlet is set and checks passed: show the menu (or carry on with a cart/checkout).
+  function readyMenu(s, intro) {
+    s.state = 'browsing';
+    if (s.cart.length) return afterOutletKnown(s, intro);
+    return categoriesList(s, intro);
   }
 
   function categoriesList(s, intro) {
@@ -203,14 +249,13 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     return [...intro, ...cartView(s)];
   }
 
-  // Checkout needs an outlet: ask for the location (delivery) or outlet (pickup)
-  // once, then carry on with checkout where the customer left off.
+  // Checkout needs an outlet (e.g. the customer typed an order straight away):
+  // ask delivery/pickup and where, then carry on with checkout.
   function askWhere(s) {
     s.checkingOut = true;
-    if (s.fulfilment === 'pickup') { s.state = 'choose_outlet'; return pickupOutlets(new Date()); }
-    s.fulfilment = 'delivery';
-    s.state = 'await_location';
-    return askLocation('Almost done! 🙌 ');
+    if (s.fulfilment === 'pickup') return pickupStart(s, new Date());
+    if (s.fulfilment === 'delivery') return askDelivery(s, 'Almost done! 🙌 ');
+    return [buttons('Almost done! 🙌 Delivery or pickup?', [btn('mode:delivery', '🛵 Delivery'), btn('mode:pickup', '🏃 Pickup')])];
   }
 
   // Once the outlet is known: drop anything sold out there, then resume checkout if that's where we were.
@@ -225,18 +270,27 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
   function onLocation(s, loc, now) {
     s.lat = loc.lat;
     s.lng = loc.lng;
-    const fulfilment = s.fulfilment === 'pickup' ? 'pickup' : 'delivery';
-    const a = assignOutlet(orders.listOutlets(), loc, { fulfilment, now });
+    if (s.fulfilment === 'pickup') return pickupSuggest(s, now);
+    return deliverTo(s, loc, now, { pin: true });
+  }
+
+  // Delivery checks for a point: in range of an open outlet? Then pick it.
+  function deliverTo(s, loc, now, { pin = false, area = null } = {}) {
+    s.fulfilment = 'delivery';
+    s.lat = loc.lat;
+    s.lng = loc.lng;
+    const a = assignOutlet(orders.listOutlets(), loc, { fulfilment: 'delivery', now });
     if (a.outlet) {
-      s.fulfilment = fulfilment;
       s.outletId = a.outlet.id;
       s.distanceKm = a.distanceKm;
-      s.state = 'browsing';
-      const intro = fulfilment === 'delivery'
-        ? `📍 Great news! *${a.outlet.name}* (${a.distanceKm} km away) will deliver to you in about ${etaMinutes('delivery', a.distanceKm)} min.\n🛵 Delivery by ${config.delivery.partner}: *${rupees(deliveryCharge(a.distanceKm))}*`
-        : `📍 Nearest outlet: *${a.outlet.name}* (${a.distanceKm} km). Your order will be ready in about ${etaMinutes('pickup')} min.`;
-      if (!s.cart.length) return categoriesList(s, intro);
-      return afterOutletKnown(s, intro);
+      const intro = `✅ We deliver to ${area ? `*${area}*` : 'you'}! *${a.outlet.name}* (${a.distanceKm} km away) will cook your order, about ${etaMinutes('delivery', a.distanceKm)} min.\n🛵 Delivery by ${config.delivery.partner}: *${rupees(deliveryCharge(a.distanceKm))}*`
+        + (area ? '\n_(Placed from your address. Share your location pin anytime for the exact spot.)_' : '');
+      if (pin && !s.address) {
+        // Location pin only: get the house/flat details for the rider now.
+        s.state = 'await_address_start';
+        return [text(`${intro}\n\n🏠 Now please type your full address (house/flat no., street, landmark) so the rider finds you.`)];
+      }
+      return readyMenu(s, intro);
     }
     s.state = 'await_location';
     const alt = a.pickupSuggestion;
@@ -311,6 +365,22 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     return nextStep(s, intro);
   }
 
+  // Typed address: place it on the map from known areas, or ask for a pin.
+  function onTypedAddress(s, raw, now) {
+    s.address = raw.slice(0, 300);
+    const r = placeAddress(raw, places());
+    if (r.place) return deliverTo(s, r.place, now, { area: `${r.place.name}, ${r.place.city}` });
+    if (r.candidates) {
+      s.areaChoices = r.candidates;
+      s.state = 'await_area';
+      return [buttons('🏠 Address saved. Which area is it in?', r.candidates.map((c, i) => btn(`area:${i}`, `${c.name}, ${c.city}`)))];
+    }
+    return [{
+      type: 'location_request',
+      text: "🏠 Thanks, I've saved your address. I couldn't place it on the map, though.\n\nPlease tap *Send location* to share your location pin 📍 so we pick the right outlet, or type your sector/phase and city (e.g. _Sector 22, Chandigarh_).",
+    }];
+  }
+
   function checkout(s) {
     if (!cartLines(s).length) return s.outletId ? cartView(s) : welcome();
     if (!s.outletId) return askWhere(s);
@@ -320,6 +390,11 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
       return [buttons(`Minimum order for delivery is ${rupees(config.pricing.minDeliveryOrder)}. Your item total is ${rupees(qte.subtotal)}.`, [
         btn('act:more', '➕ Add more'),
       ])];
+    }
+    if (s.fulfilment === 'delivery' && s.address) {
+      // Address was given at the start; confirm with it (type "change address" to edit).
+      s.state = 'confirm';
+      return confirmView(s);
     }
     if (s.fulfilment === 'delivery') {
       s.state = 'await_address';
@@ -481,6 +556,10 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
       if (['track', 'status', 'order status', 'where is my order'].includes(t)) return trackView(msg.from);
       if (t === 'cart') return s.outletId || s.cart.length ? cartView(s) : welcome(msg.name);
       if (['menu', 'order'].includes(t)) return s.outletId ? categoriesList(s) : welcome(msg.name);
+      if (['change address', 'new address', 'change location'].includes(t)) {
+        s.state = 'await_address';
+        return [text('🏠 Please type the new delivery address (house/flat no., street, landmark).')];
+      }
       if (s.state === 'await_qty') {
         const m = t.match(/^(\d{1,2})\b\s*(.*)$/);
         if (m && Number(m[1]) >= 1) return addToCart(s, Math.min(Number(m[1]), MAX_QTY), raw.slice(m[0].length - m[2].length).trim().slice(0, 120));
@@ -488,8 +567,18 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
       if (s.state === 'await_address') {
         if (t.length < 5) return [text('That address looks too short. Please include house/flat no., sector/street and a landmark.')];
         s.address = raw.slice(0, 300);
+        if (!s.outletId) return onTypedAddress(s, raw, now);
         s.state = 'confirm';
         return confirmView(s);
+      }
+      if (s.state === 'await_address_start' && !parseOrderText(raw, orders.menuFor(s.outletId)).isOrder) {
+        if (t.length < 5) return [text('That address looks too short. Please include house/flat no., street and a landmark.')];
+        s.address = raw.slice(0, 300);
+        return readyMenu(s, '🏠 Thanks, address saved.');
+      }
+      // Delivery location step: a typed message is the address.
+      if (s.state === 'await_location' && s.fulfilment === 'delivery' && t.length >= 6 && !parseOrderText(raw, orders.menuFor(null)).isOrder) {
+        return onTypedAddress(s, raw, now);
       }
       if (HUMAN_RE.test(t) || t === 'help') return startHandoff(s, msg, now);
       if (s.state === 'await_choice' && s.choices.length) {
@@ -507,6 +596,7 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
         return s.cart.length ? [text(`Welcome back${msg.name ? ' ' + msg.name : ''}! Your cart is saved.`), ...cartView(s)] : welcome(msg.name);
       }
       if (s.state === 'await_location') return askLocation();
+      if (s.state === 'choose_outlet') return pickupOutlets(now, s.lat != null ? s : null);
       if (parsed.unknown.length) {
         return [buttons(`🤔 Sorry, I couldn't find "${parsed.unknown.join('", "')}" on our menu.\n\nWant to talk to our team about it? They can help with special requests.`, [
           btn('act:human', '💬 Talk to us'), btn('act:more', '📋 Menu'),
@@ -531,18 +621,29 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     if (msg.type !== 'reply') return [text('Sorry, I can only understand text, buttons and shared locations. Type *hi* to start.')];
 
     const [kind, arg] = msg.replyId.split(/:(.*)/s);
-    // Browsing and adding items work before we know the outlet; placing doesn't.
-    const needsOutlet = ['place', 'place_upi', 'same_address'].includes(arg);
-    if (needsOutlet && !s.outletId) return s.cart.length ? checkout(s) : welcome(msg.name);
+    // The menu comes after delivery/pickup and outlet are settled; placing needs them too.
+    const needsOutlet = ['cat', 'item', 'qty'].includes(kind) || ['more', 'place', 'place_upi', 'same_address'].includes(arg);
+    if (needsOutlet && !s.outletId) return s.cart.length ? checkout(s) : (s.fulfilment ? askWhere(s) : welcome(msg.name));
 
     switch (kind) {
       case 'mode':
-        s.fulfilment = arg === 'pickup' ? 'pickup' : 'delivery';
-        s.state = 'browsing';
-        if (s.outletId && s.fulfilment === 'delivery' && s.lat == null) { s.outletId = null; s.distanceKm = null; }
-        return categoriesList(s, s.fulfilment === 'pickup'
-          ? "🏃 Pickup it is! Add what you'd like. I'll ask which outlet you'll collect from at checkout."
-          : "🛵 Delivery it is! Add what you'd like. I'll ask for your location once, at checkout.");
+        if (arg === 'pickup') return pickupStart(s, now);
+        s.outletId = null;
+        s.distanceKm = null;
+        if (s.address && s.lat != null) {
+          // Returning customer this session: offer the last address.
+          s.fulfilment = 'delivery';
+          s.state = 'await_location';
+          return [buttons(`🛵 Deliver to your last address?\n_${s.address}_`, [btn('act:same_place', '📍 Same address'), btn('act:new_place', '🆕 New address')])];
+        }
+        s.address = null;
+        return askDelivery(s);
+      case 'area': {
+        const c = s.areaChoices[Number(arg)];
+        if (!c) return askDelivery(s);
+        s.areaChoices = [];
+        return deliverTo(s, c, now, { area: `${c.name}, ${c.city}` });
+      }
       case 'outlet': {
         const o = orders.getOutlet(Number(arg));
         if (!o) return pickupOutlets(now);
@@ -609,7 +710,10 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
           case 'cancel': s.state = 'browsing'; return [text('No problem, your order was not placed. Your cart is still saved.'), ...cartView(s)];
           case 'track': return trackView(msg.from);
           case 'human': return startHandoff(s, msg, now);
-          case 'relocate': s.fulfilment = 'delivery'; s.state = 'await_location'; return askLocation();
+          case 'relocate': s.address = null; return askDelivery(s);
+          case 'same_place': return deliverTo(s, { lat: s.lat, lng: s.lng }, now);
+          case 'new_place': s.address = null; return askDelivery(s);
+          case 'outlets': s.state = 'choose_outlet'; return pickupOutlets(now, s.lat != null ? s : null);
           default: return welcome(msg.name);
         }
       default:

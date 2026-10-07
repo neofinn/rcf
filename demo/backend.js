@@ -21,7 +21,7 @@ function createDemoBackend() {
   const store = createMemoryStore(demoSeed);
   const orders = createOrderService(store);
   const handoffs = createHandoffService(store);
-  const bot = createBot({ orders, handoffs, sessions: createSessionStore(store), baseUrl: 'https://order.rajuchinese.example' });
+  const bot = createBot({ orders, handoffs, sessions: createSessionStore(store), places: () => store.localities(), baseUrl: 'https://order.rajuchinese.example' });
   const outbox = [];
   const client = recordOutbox({ send: async () => {} }, outbox);
   const quiet = { error: () => {}, info: () => {} };

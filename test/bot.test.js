@@ -7,10 +7,10 @@ const { createHandoffService } = require('../src/handoff');
 const { toPayload } = require('../src/whatsapp/client');
 const { setup, LUNCH, PLACES } = require('./helpers');
 
-function chat() {
+function chat({ places } = {}) {
   const { db, store, orders } = setup();
   const handoffs = createHandoffService(store);
-  const bot = createBot({ orders, handoffs, sessions: createSessionStore(store), baseUrl: 'https://order.example' });
+  const bot = createBot({ orders, handoffs, sessions: createSessionStore(store), places: places || (() => store.localities()), baseUrl: 'https://order.example' });
   const from = '919876543210';
   const say = (msg) => bot.handle({ from, name: 'Aman', ...msg }, LUNCH);
   return { db, orders, handoffs, say, text: (t) => say({ type: 'text', text: t }), tap: (id) => say({ type: 'reply', replyId: id }) };
@@ -23,9 +23,15 @@ test('full delivery order over WhatsApp', () => {
   let r = c.text('hi');
   assert.deepEqual(allIds(r), ['mode:delivery', 'mode:pickup', 'act:human']);
 
-  // Delivery goes straight to the menu; no location until checkout.
+  // Delivery: location (and/or address) first, then the outlet, then the menu.
   r = c.tap('mode:delivery');
-  assert.match(r[0].text, /ask for your location once, at checkout/);
+  assert.equal(r[0].type, 'location_request');
+  assert.match(r[0].text, /Send location.*or type your full address/s);
+  r = c.say({ type: 'location', location: PLACES.sector22 });
+  assert.match(r[0].text, /We deliver to you! \*Raju Chinese - Sector 17\*/);
+  assert.match(r[0].text, /type your full address/);
+  r = c.text('House 12, Sector 22-B, near gurudwara');
+  assert.match(r[0].text, /address saved/);
   assert.ok(allIds(r).includes('cat:Noodles'));
 
   r = c.tap('cat:Noodles');
@@ -37,15 +43,10 @@ test('full delivery order over WhatsApp', () => {
   assert.match(r[0].text, /Added 2/);
   assert.ok(r.every((x) => x.type !== 'location_request'));
 
+  // Address was given at the start, so checkout goes straight to confirmation.
   r = c.tap('act:checkout');
-  assert.equal(r[0].type, 'location_request');
-  r = c.say({ type: 'location', location: PLACES.sector22 });
-  assert.match(r[0].text, /Sector 17/);
-  // Checkout resumes straight away with the address step.
-  assert.match(r.at(-1).text, /delivery address/);
-
-  r = c.text('House 12, Sector 22-B, near gurudwara');
   assert.match(r[0].text, /Please confirm/);
+  assert.match(r[0].text, /Delivery to: House 12, Sector 22-B, near gurudwara/);
   assert.match(r[0].text, /To pay: ₹\d+/);
 
   r = c.tap('act:place');
@@ -57,14 +58,15 @@ test('full delivery order over WhatsApp', () => {
   assert.equal(order.outlet.name, 'Raju Chinese - Sector 17');
   assert.equal(order.address, 'House 12, Sector 22-B, near gurudwara');
 
-  // Second checkout offers the saved address.
+  // Next order: the address is remembered, and can be changed.
   c.tap('act:more');
   c.tap(itemRow);
   c.text('3');
   r = c.tap('act:checkout');
-  assert.ok(allIds(r).includes('act:same_address'));
-  r = c.tap('act:same_address');
   assert.match(r[0].text, /Please confirm/);
+  c.text('change address');
+  r = c.text('Flat 9, Sector 22-C');
+  assert.match(r[0].text, /Delivery to: Flat 9, Sector 22-C/);
 });
 
 test('out-of-range location offers pickup from the nearest outlet', () => {
@@ -80,14 +82,16 @@ test('out-of-range location offers pickup from the nearest outlet', () => {
 
 test('pickup flow skips the address step', () => {
   const c = chat();
-  c.tap('mode:pickup');
+  // Pickup: outlet list (plus share-location for a suggestion), then the menu.
+  let r = c.tap('mode:pickup');
+  assert.equal(allIds(r).length, 7);
+  assert.equal(r[1].type, 'location_request');
+  r = c.tap('outlet:4');
+  assert.match(r[0].text, /Pickup from \*Raju Chinese - Phase 7 Mohali\*/);
   c.tap('cat:Beverages');
   c.tap(`item:${c.orders.menuFor(4).find((i) => i.name === 'Masala Lemonade').id}`);
   c.tap('qty:1');
-  // Outlet is chosen at checkout.
-  const r = c.tap('act:checkout');
-  assert.equal(allIds(r).length, 7);
-  assert.match(c.tap('outlet:4').at(-1).text, /Pickup from: Raju Chinese - Phase 7 Mohali/);
+  assert.match(c.tap('act:checkout')[0].text, /Pickup from: Raju Chinese - Phase 7 Mohali/);
   assert.match(c.tap('act:place')[0].text, /Order placed/);
 });
 
@@ -149,15 +153,17 @@ test('typed order with special instructions, a follow-up question and location',
   assert.match(r[1].text, /Which \*chilli paneer\*/);
   r = c.tap(`pick:${idOf(c.orders, 'Chilli Paneer Dry')}`);
   assert.match(r[0].text, /Added 2 × Chilli Paneer Dry _\(less spicy\)_/);
-  // No location question yet: show the cart, ask for location at checkout.
+  // Ordered before choosing delivery/pickup: the cart is kept and asked at checkout.
   assert.match(r[1].text, /Your cart/);
   r = c.tap('act:checkout');
-  assert.equal(r[0].type, 'location_request');
+  assert.deepEqual(allIds(r), ['mode:delivery', 'mode:pickup']);
+  assert.equal(c.tap('mode:delivery')[0].type, 'location_request');
   r = c.say({ type: 'location', location: PLACES.phase7 });
   assert.match(r[0].text, /Phase 7 Mohali/);
-  assert.match(r.at(-1).text, /delivery address/);
+  assert.match(r[0].text, /type your full address/);
   r = c.text('Flat 3, Phase 7, near market');
-  assert.match(r[0].text, /Note for kitchen: call before coming/);
+  assert.match(r.at(-1).text, /Please confirm/);
+  assert.match(r.at(-1).text, /Note for kitchen: call before coming/);
   c.tap('act:place');
   const o = c.orders.latestOrderForPhone('919876543210');
   assert.equal(o.outlet.name, 'Raju Chinese - Phase 7 Mohali');
@@ -191,10 +197,12 @@ test('catalog cart is routed to the nearest outlet after location', () => {
   let r = c.say({ type: 'catalog_order', text: 'extra spicy please', items: [{ retailerId: `RC-${combo}`, qty: 2 }] });
   assert.match(r[0].text, /Got your cart: 1 item/);
   assert.match(r[1].text, /2 × Noodles \+ Manchurian Combo/);
-  assert.equal(c.tap('act:checkout')[0].type, 'location_request');
-  r = c.say({ type: 'location', location: PLACES.panchkula5 });
-  assert.match(r[0].text, /Sector 11 Panchkula/);
-  assert.match(r.at(-1).text, /delivery address/);
+  c.tap('act:checkout');
+  assert.equal(c.tap('mode:delivery')[0].type, 'location_request');
+  r = c.text('House 77, Sector 5, Panchkula');
+  assert.match(r[0].text, /We deliver to \*Sector 5, Panchkula\*! \*Raju Chinese - Sector 11 Panchkula\*/);
+  assert.match(r.at(-1).text, /Please confirm/);
+  assert.match(r.at(-1).text, /2 × Noodles \+ Manchurian Combo/);
 });
 
 test('unknown requests offer a person; handoff relays messages and staff can hand back', () => {
@@ -283,13 +291,64 @@ test('WhatsApp shows the Shadowfax delivery charge before ordering', () => {
   const c = chat();
   let r = c.text('3 veg fried rice');
   assert.match(r.at(-1).text, /Delivery by Shadowfax: ₹40 for the first 3 km \+ ₹10\/km/);
-  r = c.tap('act:checkout');
+  c.tap('act:checkout');
+  c.tap('mode:delivery');
   r = c.say({ type: 'location', location: PLACES.panchkula5 });
   assert.match(r[0].text, /Delivery by Shadowfax: \*₹\d+\*/);
   r = c.text('House 77, Sector 5, Panchkula');
-  assert.match(r[0].text, /Delivery by Shadowfax \([\d.]+ km\): ₹\d+/);
+  assert.match(r.at(-1).text, /Delivery by Shadowfax \([\d.]+ km\): ₹\d+/);
   c.tap('act:place');
   const o = c.orders.latestOrderForPhone('919876543210');
   assert.ok(o.delivery_fee >= 4000);
   assert.equal(o.total, o.subtotal + o.packing + o.gst + o.delivery_fee);
+});
+
+test('delivery by typed address: area found, ambiguous area, or ask for a pin', () => {
+  let c = chat();
+  c.tap('mode:delivery');
+  let r = c.text('House 12, sec 22-B, Chandigarh near gurudwara');
+  assert.match(r[0].text, /We deliver to \*Sector 22, Chandigarh\*! \*Raju Chinese - Sector 17\*/);
+  assert.match(r[0].text, /Delivery by Shadowfax/);
+  assert.ok(allIds(r).includes('cat:Noodles'), 'menu follows');
+
+  // Same sector number in two cities: ask which.
+  c = chat({ places: () => [
+    { name: 'Sector 20', city: 'Chandigarh', lat: 30.7290, lng: 76.7860 },
+    { name: 'Sector 20', city: 'Panchkula', lat: 30.6710, lng: 76.8410 },
+  ] });
+  c.tap('mode:delivery');
+  r = c.text('SCO 5, Sector 20');
+  assert.deepEqual(allIds(r), ['area:0', 'area:1']);
+  r = c.tap('area:1');
+  assert.match(r[0].text, /Sector 20, Panchkula/);
+
+  // Unknown area: address kept, pin requested; the pin then goes straight to the menu.
+  c = chat();
+  c.tap('mode:delivery');
+  r = c.text('Flat 7, Green Valley Apartments');
+  assert.equal(r[0].type, 'location_request');
+  assert.match(r[0].text, /saved your address/);
+  r = c.say({ type: 'location', location: PLACES.sector22 });
+  assert.ok(allIds(r).includes('cat:Noodles'));
+  assert.doesNotMatch(r[0].text, /type your full address/);
+});
+
+test('pickup suggests the nearest outlets once location is shared', () => {
+  const c = chat();
+  c.tap('mode:pickup');
+  let r = c.say({ type: 'location', location: PLACES.panchkula5 });
+  assert.match(r[0].text, /nearest outlet is \*Raju Chinese - Sector 11 Panchkula\*/);
+  assert.equal(allIds(r)[0], 'outlet:7');
+  assert.equal(allIds(r).at(-1), 'act:outlets');
+  r = c.tap('act:outlets');
+  assert.match(r[0].sections[0].rows[0].description, /^[\d.]+ km/);
+  r = c.tap('outlet:7');
+  assert.ok(allIds(r).includes('cat:Noodles'));
+});
+
+test('menu waits until delivery/pickup and outlet are settled', () => {
+  const c = chat();
+  assert.deepEqual(allIds(c.tap('cat:Noodles')), ['mode:delivery', 'mode:pickup', 'act:human']);
+  c.tap('mode:delivery');
+  assert.equal(c.tap('act:more')[0].type, 'location_request');
 });

@@ -43,7 +43,7 @@ function createApp({
   const store = createSqliteStore(db);
   const orders = createOrderService(store);
   const handoffs = createHandoffService(store);
-  const bot = createBot({ orders, handoffs, sessions: createSessionStore(store) });
+  const bot = createBot({ orders, handoffs, sessions: createSessionStore(store), places: () => store.localities() });
 
   // Dev: keep messages the business sends on its own so the simulator can show them.
   const outbox = [];
