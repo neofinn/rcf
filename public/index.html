@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#d62828">
+  <title>Raju Chinese – Order Online</title>
+  <meta name="description" content="Order Chinese food online from your nearest Raju Chinese outlet in Chandigarh, Mohali, Panchkula, Zirakpur and Kharar.">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">Raju <span>Chinese</span></div>
+    <button class="loc-chip" id="locChip" type="button">
+      <b id="locTitle">Set location</b>
+      <small id="locSub">to see your nearest outlet</small>
+    </button>
+  </header>
+
+  <main class="wrap">
+    <div id="banner" class="banner hidden"></div>
+    <nav class="cats" id="cats"></nav>
+    <label class="vegtoggle"><input type="checkbox" id="vegOnly" style="width:auto"> Veg only</label>
+    <div id="menu"></div>
+  </main>
+
+  <div class="cartbar hidden" id="cartBar">
+    <button type="button" id="openCart"><span id="cartCount">0 items</span><span>View cart →</span></button>
+  </div>
+
+  <!-- Location picker -->
+  <div class="overlay hidden" id="locModal">
+    <div class="sheet" role="dialog" aria-labelledby="locHeading">
+      <button class="close" type="button" data-close="locModal" aria-label="Close">×</button>
+      <h3 id="locHeading">How do you want your food?</h3>
+      <div class="tabs">
+        <button type="button" data-mode="delivery" class="on">🛵 Delivery</button>
+        <button type="button" data-mode="pickup">🏃 Pickup</button>
+      </div>
+      <div id="deliveryPane">
+        <button class="btn" type="button" id="useGps">📍 Use my current location</button>
+        <div class="or">or choose your area</div>
+        <select id="locality"><option value="">Select area…</option></select>
+        <p class="error hidden" id="locError"></p>
+      </div>
+      <div id="pickupPane" class="hidden">
+        <p class="muted small">Pick the outlet you'll collect from.</p>
+        <div id="outletList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cart / checkout -->
+  <div class="overlay hidden" id="cartModal">
+    <div class="sheet" role="dialog" aria-labelledby="cartHeading">
+      <button class="close" type="button" data-close="cartModal" aria-label="Close">×</button>
+      <h3 id="cartHeading">Your order</h3>
+      <div id="cartLines"></div>
+      <div class="bill" id="bill"></div>
+      <form id="checkout" novalidate>
+        <label for="name">Name</label>
+        <input id="name" name="name" autocomplete="name" required>
+        <label for="phone">Mobile number</label>
+        <input id="phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="10-digit mobile" required>
+        <div id="addressBox">
+          <label for="address">Delivery address</label>
+          <textarea id="address" name="address" autocomplete="street-address" placeholder="House/flat no., street/sector, landmark"></textarea>
+        </div>
+        <label for="notes">Cooking notes (optional)</label>
+        <input id="notes" name="notes" placeholder="e.g. less spicy">
+        <p class="small muted">Payment: cash / UPI on <span id="payWhen">delivery</span>.</p>
+        <p class="error hidden" id="checkoutError"></p>
+        <button class="btn" type="submit" id="placeBtn">Place order</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

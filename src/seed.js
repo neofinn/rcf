@@ -1,0 +1,81 @@
+'use strict';
+
+// Starter data. Outlet addresses, coordinates, phone numbers and prices are
+// PLACEHOLDERS: replace them with the real values before going live (or edit
+// them in the database after the first run).
+
+const outlets = [
+  { slug: 'sec-17-chd', name: 'Raju Chinese - Sector 17', city: 'Chandigarh', address: 'SCO 00, Sector 17-C, Chandigarh', lat: 30.7410, lng: 76.7790, phone: '+910000000001', radiusKm: 5, opens: '11:00', closes: '23:00' },
+  { slug: 'sec-35-chd', name: 'Raju Chinese - Sector 35', city: 'Chandigarh', address: 'SCO 00, Sector 35-C, Chandigarh', lat: 30.7225, lng: 76.7570, phone: '+910000000002', radiusKm: 5, opens: '11:00', closes: '23:00' },
+  { slug: 'manimajra', name: 'Raju Chinese - Manimajra', city: 'Chandigarh', address: 'Main Market, Manimajra, Chandigarh', lat: 30.7290, lng: 76.8380, phone: '+910000000003', radiusKm: 5, opens: '11:00', closes: '23:00' },
+  { slug: 'phase-7-mohali', name: 'Raju Chinese - Phase 7 Mohali', city: 'Mohali', address: 'SCO 00, Phase 7, SAS Nagar, Mohali', lat: 30.7085, lng: 76.7195, phone: '+910000000004', radiusKm: 5, opens: '11:00', closes: '23:00' },
+  { slug: 'kharar', name: 'Raju Chinese - Kharar', city: 'Kharar', address: 'Landran Road, Kharar', lat: 30.7460, lng: 76.6450, phone: '+910000000005', radiusKm: 6, opens: '11:00', closes: '23:00' },
+  { slug: 'zirakpur', name: 'Raju Chinese - Zirakpur', city: 'Zirakpur', address: 'VIP Road, Zirakpur', lat: 30.6420, lng: 76.8170, phone: '+910000000006', radiusKm: 6, opens: '11:00', closes: '23:00' },
+  { slug: 'sec-11-pkl', name: 'Raju Chinese - Sector 11 Panchkula', city: 'Panchkula', address: 'SCO 00, Sector 11, Panchkula', lat: 30.6960, lng: 76.8480, phone: '+910000000007', radiusKm: 5, opens: '11:00', closes: '23:00' },
+];
+
+// Prices in rupees. Keep every category at 10 items or fewer: WhatsApp list
+// messages show at most 10 rows.
+const menu = [
+  { category: 'Soups', name: 'Veg Manchow Soup', price: 89, veg: true },
+  { category: 'Soups', name: 'Veg Hot & Sour Soup', price: 89, veg: true },
+  { category: 'Soups', name: 'Sweet Corn Soup', price: 89, veg: true },
+  { category: 'Soups', name: 'Chicken Manchow Soup', price: 109, veg: false },
+  { category: 'Soups', name: 'Chicken Hot & Sour Soup', price: 109, veg: false },
+
+  { category: 'Momos', name: 'Veg Steam Momos (8 pcs)', price: 79, veg: true },
+  { category: 'Momos', name: 'Veg Fried Momos (8 pcs)', price: 99, veg: true },
+  { category: 'Momos', name: 'Paneer Momos (8 pcs)', price: 119, veg: true },
+  { category: 'Momos', name: 'Chicken Steam Momos (8 pcs)', price: 109, veg: false },
+  { category: 'Momos', name: 'Chicken Fried Momos (8 pcs)', price: 129, veg: false },
+  { category: 'Momos', name: 'Kurkure Momos (8 pcs)', price: 139, veg: true },
+
+  { category: 'Starters', name: 'Veg Spring Roll', price: 109, veg: true },
+  { category: 'Starters', name: 'Honey Chilli Potato', price: 139, veg: true },
+  { category: 'Starters', name: 'Chilli Paneer Dry', price: 179, veg: true },
+  { category: 'Starters', name: 'Crispy Corn', price: 149, veg: true },
+  { category: 'Starters', name: 'Chilli Chicken Dry', price: 199, veg: false },
+  { category: 'Starters', name: 'Chicken Lollipop (6 pcs)', price: 219, veg: false },
+
+  { category: 'Noodles', name: 'Veg Hakka Noodles', price: 119, veg: true },
+  { category: 'Noodles', name: 'Chilli Garlic Noodles', price: 129, veg: true },
+  { category: 'Noodles', name: 'Schezwan Noodles', price: 129, veg: true },
+  { category: 'Noodles', name: 'Egg Hakka Noodles', price: 139, veg: false },
+  { category: 'Noodles', name: 'Chicken Hakka Noodles', price: 159, veg: false },
+
+  { category: 'Rice', name: 'Veg Fried Rice', price: 119, veg: true },
+  { category: 'Rice', name: 'Schezwan Fried Rice', price: 129, veg: true },
+  { category: 'Rice', name: 'Egg Fried Rice', price: 139, veg: false },
+  { category: 'Rice', name: 'Chicken Fried Rice', price: 159, veg: false },
+
+  { category: 'Main Course', name: 'Veg Manchurian Gravy', price: 149, veg: true },
+  { category: 'Main Course', name: 'Chilli Paneer Gravy', price: 189, veg: true },
+  { category: 'Main Course', name: 'Chilli Chicken Gravy', price: 209, veg: false },
+
+  { category: 'Combos', name: 'Noodles + Manchurian Combo', price: 179, veg: true, description: 'Hakka noodles with veg manchurian gravy' },
+  { category: 'Combos', name: 'Fried Rice + Chilli Paneer Combo', price: 219, veg: true, description: 'Veg fried rice with chilli paneer gravy' },
+  { category: 'Combos', name: 'Fried Rice + Chilli Chicken Combo', price: 239, veg: false, description: 'Chicken fried rice with chilli chicken gravy' },
+
+  { category: 'Beverages', name: 'Coke (300 ml)', price: 40, veg: true },
+  { category: 'Beverages', name: 'Masala Lemonade', price: 59, veg: true },
+];
+
+// Approximate locality centroids for customers who prefer to pick an area
+// instead of sharing GPS location.
+const localities = [
+  ['Sector 8', 'Chandigarh', 30.7410, 76.8010], ['Sector 9', 'Chandigarh', 30.7480, 76.7930],
+  ['Sector 15', 'Chandigarh', 30.7520, 76.7680], ['Sector 17', 'Chandigarh', 30.7410, 76.7790],
+  ['Sector 22', 'Chandigarh', 30.7330, 76.7720], ['Sector 26', 'Chandigarh', 30.7300, 76.8070],
+  ['Sector 32', 'Chandigarh', 30.7150, 76.7780], ['Sector 35', 'Chandigarh', 30.7225, 76.7570],
+  ['Sector 43', 'Chandigarh', 30.7180, 76.7400], ['Sector 44', 'Chandigarh', 30.7080, 76.7550],
+  ['Industrial Area Phase 1', 'Chandigarh', 30.7050, 76.8000], ['Manimajra', 'Chandigarh', 30.7290, 76.8380],
+  ['Phase 3B2', 'Mohali', 30.7230, 76.7120], ['Phase 5', 'Mohali', 30.7140, 76.7200],
+  ['Phase 7', 'Mohali', 30.7085, 76.7195], ['Phase 10', 'Mohali', 30.6930, 76.7310],
+  ['Sector 70', 'Mohali', 30.6990, 76.7140], ['Sector 82 (IT City)', 'Mohali', 30.6680, 76.7180],
+  ['Kharar', 'Kharar', 30.7460, 76.6450], ['Landran', 'Kharar', 30.7020, 76.6630],
+  ['Zirakpur VIP Road', 'Zirakpur', 30.6420, 76.8170], ['Dhakoli', 'Zirakpur', 30.6560, 76.8420],
+  ['Sector 5', 'Panchkula', 30.6940, 76.8600], ['Sector 11', 'Panchkula', 30.6960, 76.8480],
+  ['Sector 20', 'Panchkula', 30.6710, 76.8410],
+].map(([name, city, lat, lng]) => ({ name, city, lat, lng }));
+
+module.exports = { outlets, menu, localities };

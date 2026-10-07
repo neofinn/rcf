@@ -1,0 +1,19 @@
+{
+  "name": "raju-chinese-ordering",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Online food ordering for Raju Chinese: web app, WhatsApp ordering and nearest-outlet assignment across the Chandigarh tricity.",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.js\""
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

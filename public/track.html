@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#d62828">
+  <title>Track Order – Raju Chinese</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="logo" href="/" style="color:#fff;text-decoration:none">Raju <span>Chinese</span></a>
+  </header>
+  <main class="wrap">
+    <div class="track-card" id="card"><p class="muted">Loading your order…</p></div>
+    <a class="btn secondary" href="/" style="text-align:center;text-decoration:none">Order more</a>
+  </main>
+  <script>
+  'use strict';
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  const code = new URLSearchParams(location.search).get('code');
+  const STEPS = {
+    delivery: [['placed', 'Order placed'], ['accepted', 'Accepted by outlet'], ['preparing', 'Being prepared'], ['out_for_delivery', 'Out for delivery'], ['completed', 'Delivered']],
+    pickup: [['placed', 'Order placed'], ['accepted', 'Accepted by outlet'], ['preparing', 'Being prepared'], ['ready', 'Ready for pickup'], ['completed', 'Picked up']],
+  };
+  let timer;
+
+  async function load() {
+    const card = document.getElementById('card');
+    if (!code) { card.innerHTML = '<p>No order code given.</p>'; return; }
+    const res = await fetch('/api/orders/' + encodeURIComponent(code));
+    if (!res.ok) { card.innerHTML = '<p>Order not found. Please check your order ID.</p>'; return; }
+    const o = await res.json();
+    const steps = STEPS[o.fulfilment];
+    const idx = steps.findIndex(([s]) => s === o.status);
+    const stepsHtml = o.status === 'cancelled'
+      ? '<p class="error">This order was cancelled. Please call the outlet if you have questions.</p>'
+      : `<ol class="steps">${steps.map(([, label], i) => `<li class="${i <= idx ? 'done' : ''} ${i === idx ? 'current' : ''}">${label}</li>`).join('')}</ol>`;
+    card.innerHTML = `
+      <h2 style="margin:0">Order ${esc(o.code)}</h2>
+      <p class="muted small">Thanks, ${esc(o.customerName)}! ${o.status === 'completed' || o.status === 'cancelled' ? '' : `Estimated ${o.fulfilment === 'delivery' ? 'delivery' : 'ready'} time: about <b>${o.etaMinutes} min</b> from ordering.`}</p>
+      ${stepsHtml}
+      <p><b>${esc(o.outlet.name)}</b><br><span class="small muted">${esc(o.outlet.address)}</span><br>
+        <a href="tel:${esc(o.outlet.phone)}">📞 Call outlet</a> ·
+        <a href="https://www.google.com/maps/search/?api=1&query=${o.outlet.lat},${o.outlet.lng}" target="_blank" rel="noopener">🗺️ Directions</a></p>
+      <div class="bill">
+        ${o.items.map((i) => `<div><span>${i.qty} × ${esc(i.name)}</span><span>${rupees(i.price * i.qty)}</span></div>`).join('')}
+        <div><span>Packing</span><span>${rupees(o.packing)}</span></div>
+        <div><span>GST</span><span>${rupees(o.gst)}</span></div>
+        ${o.fulfilment === 'delivery' ? `<div><span>Delivery</span><span>${o.deliveryFee ? rupees(o.deliveryFee) : 'FREE'}</span></div>` : ''}
+        <div class="total"><span>To pay (cash/UPI)</span><span>${rupees(o.total)}</span></div>
+      </div>`;
+    clearTimeout(timer);
+    if (!['completed', 'cancelled'].includes(o.status)) timer = setTimeout(load, 15000);
+  }
+  load().catch(() => { timer = setTimeout(load, 15000); });
+  </script>
+</body>
+</html>
