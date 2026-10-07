@@ -8,7 +8,7 @@ const { rupees } = require('../format');
 const STATUS_MESSAGES = {
   accepted: (o) => `✅ ${o.outlet.name} has accepted your order *${o.code}*.`,
   preparing: (o) => `👨‍🍳 Your order *${o.code}* is being prepared.`,
-  out_for_delivery: (o) => `🛵 Your order *${o.code}* is out for delivery! Please keep ${rupees(o.total)} ready (cash/UPI).`,
+  out_for_delivery: (o) => `🛵 Your order *${o.code}* is out for delivery!${o.delivery?.rider_name ? ` ${o.delivery.rider_name} is bringing it.` : ''}${o.payment_status === 'paid' ? '' : ` Please keep ${rupees(o.total)} ready (cash/UPI).`}${o.delivery?.track_url ? `\nLive tracking: ${o.delivery.track_url}` : ''}`,
   ready: (o) => `🥡 Your order *${o.code}* is ready for pickup at ${o.outlet.name}, ${o.outlet.address}.`,
   completed: (o) => `🙏 Thank you for ordering from Raju Chinese! Hope you enjoyed order *${o.code}*. Send *hi* to order again.`,
   cancelled: (o) => `❌ Sorry, your order *${o.code}* was cancelled by the outlet. Please call ${o.outlet.phone} for help.`,
@@ -16,7 +16,8 @@ const STATUS_MESSAGES = {
 
 /** Message WhatsApp customers when their order status changes. */
 function notifyOnStatusChange({ orders, client, log = console }) {
-  orders.events.on('status', (o) => {
+  orders.events.on('status', (o, meta = {}) => {
+    if (meta.quiet) return;
     // Free-form messages are only allowed inside WhatsApp's 24h customer
     // service window, which WhatsApp orders are. Web orders would need an
     // approved template message.
@@ -52,4 +53,19 @@ function notifyOnPayment({ orders, client, log = console }) {
   });
 }
 
-module.exports = { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment };
+/** Rider updates from the delivery partner (Shadowfax). */
+function notifyOnDelivery({ dispatcher, client, log = console }) {
+  dispatcher.events.on('delivery', (o, change) => {
+    if (o.channel !== 'whatsapp' || !o.delivery) return;
+    const d = o.delivery;
+    let text = null;
+    if (change === 'rider_assigned' || change === 'allotted') {
+      text = `🛵 *${d.rider_name || 'A rider'}* will deliver your order *${o.code}*.${d.rider_phone ? `\nRider's number: ${d.rider_phone}` : ''}${d.track_url ? `\nLive tracking: ${d.track_url}` : ''}`;
+    } else if (change === 'arrived_customer_doorstep') {
+      text = `🚪 Your rider is at your door with order *${o.code}*.${o.payment_status === 'paid' ? '' : ` Amount to pay: ${rupees(o.total)}.`}`;
+    }
+    if (text) client.send(o.phone.replace(/^\+/, ''), [{ type: 'text', text }]).catch((e) => log.error('[whatsapp] notify failed', e));
+  });
+}
+
+module.exports = { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment, notifyOnDelivery };

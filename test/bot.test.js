@@ -23,11 +23,9 @@ test('full delivery order over WhatsApp', () => {
   let r = c.text('hi');
   assert.deepEqual(allIds(r), ['mode:delivery', 'mode:pickup', 'act:human']);
 
+  // Delivery goes straight to the menu; no location until checkout.
   r = c.tap('mode:delivery');
-  assert.equal(r[0].type, 'location_request');
-
-  r = c.say({ type: 'location', location: PLACES.sector22 });
-  assert.match(r[0].text, /Sector 17/);
+  assert.match(r[0].text, /ask for your location once, at checkout/);
   assert.ok(allIds(r).includes('cat:Noodles'));
 
   r = c.tap('cat:Noodles');
@@ -37,9 +35,14 @@ test('full delivery order over WhatsApp', () => {
   c.tap(itemRow);
   r = c.tap('qty:2');
   assert.match(r[0].text, /Added 2/);
+  assert.ok(r.every((x) => x.type !== 'location_request'));
 
   r = c.tap('act:checkout');
-  assert.match(r[0].text, /delivery address/);
+  assert.equal(r[0].type, 'location_request');
+  r = c.say({ type: 'location', location: PLACES.sector22 });
+  assert.match(r[0].text, /Sector 17/);
+  // Checkout resumes straight away with the address step.
+  assert.match(r.at(-1).text, /delivery address/);
 
   r = c.text('House 12, Sector 22-B, near gurudwara');
   assert.match(r[0].text, /Please confirm/);
@@ -77,13 +80,14 @@ test('out-of-range location offers pickup from the nearest outlet', () => {
 
 test('pickup flow skips the address step', () => {
   const c = chat();
-  const r = c.tap('mode:pickup');
-  assert.equal(allIds(r).length, 7);
-  c.tap('outlet:4');
+  c.tap('mode:pickup');
   c.tap('cat:Beverages');
   c.tap(`item:${c.orders.menuFor(4).find((i) => i.name === 'Masala Lemonade').id}`);
   c.tap('qty:1');
-  assert.match(c.tap('act:checkout')[0].text, /Pickup from: Raju Chinese - Phase 7 Mohali/);
+  // Outlet is chosen at checkout.
+  const r = c.tap('act:checkout');
+  assert.equal(allIds(r).length, 7);
+  assert.match(c.tap('outlet:4').at(-1).text, /Pickup from: Raju Chinese - Phase 7 Mohali/);
   assert.match(c.tap('act:place')[0].text, /Order placed/);
 });
 
@@ -145,12 +149,13 @@ test('typed order with special instructions, a follow-up question and location',
   assert.match(r[1].text, /Which \*chilli paneer\*/);
   r = c.tap(`pick:${idOf(c.orders, 'Chilli Paneer Dry')}`);
   assert.match(r[0].text, /Added 2 × Chilli Paneer Dry _\(less spicy\)_/);
-  // No location yet, so ask for it before showing the cart.
-  assert.equal(r[1].type, 'location_request');
+  // No location question yet: show the cart, ask for location at checkout.
+  assert.match(r[1].text, /Your cart/);
+  r = c.tap('act:checkout');
+  assert.equal(r[0].type, 'location_request');
   r = c.say({ type: 'location', location: PLACES.phase7 });
   assert.match(r[0].text, /Phase 7 Mohali/);
-  assert.match(r[1].text, /Your cart/);
-  c.tap('act:checkout');
+  assert.match(r.at(-1).text, /delivery address/);
   r = c.text('Flat 3, Phase 7, near market');
   assert.match(r[0].text, /Note for kitchen: call before coming/);
   c.tap('act:place');
@@ -185,10 +190,11 @@ test('catalog cart is routed to the nearest outlet after location', () => {
   const combo = idOf(c.orders, 'Noodles + Manchurian Combo');
   let r = c.say({ type: 'catalog_order', text: 'extra spicy please', items: [{ retailerId: `RC-${combo}`, qty: 2 }] });
   assert.match(r[0].text, /Got your cart: 1 item/);
-  assert.equal(r[1].type, 'location_request');
+  assert.match(r[1].text, /2 × Noodles \+ Manchurian Combo/);
+  assert.equal(c.tap('act:checkout')[0].type, 'location_request');
   r = c.say({ type: 'location', location: PLACES.panchkula5 });
   assert.match(r[0].text, /Sector 11 Panchkula/);
-  assert.match(r[1].text, /2 × Noodles \+ Manchurian Combo/);
+  assert.match(r.at(-1).text, /delivery address/);
 });
 
 test('unknown requests offer a person; handoff relays messages and staff can hand back', () => {

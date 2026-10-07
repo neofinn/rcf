@@ -7,7 +7,7 @@ function createMemoryStore(seed) {
   const outlets = seed.outlets.map((o, i) => ({
     id: i + 1, slug: o.slug, name: o.name, city: o.city, address: o.address, lat: o.lat, lng: o.lng, phone: o.phone,
     delivery_radius_km: o.radiusKm, opens: o.opens, closes: o.closes, accepting_orders: 1, active: 1,
-    upi_id: o.upiId || null, upi_name: 'Raju Chinese',
+    upi_id: o.upiId || null, upi_name: 'Raju Chinese', sfx_store_code: o.sfxStoreCode || null,
   }));
   const items = seed.menu.map((m, i) => ({
     id: i + 1, category: m.category, name: m.name, description: m.description || '', price: m.price * 100,
@@ -19,6 +19,7 @@ function createMemoryStore(seed) {
   const handoffs = [];
   const handoffMsgs = new Map();
   const sessions = new Map();
+  const deliveries = new Map();
   const copy = (x) => (x ? { ...x } : null);
   const byNewest = (a, b) => b.id - a.id;
 
@@ -55,6 +56,12 @@ function createMemoryStore(seed) {
       if (!o) return false;
       Object.assign(o, { payment_status: to, updated_at: ts });
       return true;
+    },
+    orderById: (id) => copy(orders.find((o) => o.id === id)),
+    getDelivery: (orderId) => copy(deliveries.get(orderId)),
+    deliveryByRef: (ref) => copy([...deliveries.values()].find((d) => d.ref === ref)),
+    upsertDelivery(orderId, fields) {
+      deliveries.set(orderId, { provider: 'none', ref: null, status: 'FAILED', ...deliveries.get(orderId), ...fields, order_id: orderId });
     },
     summarySince(iso) {
       const m = new Map();

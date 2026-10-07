@@ -39,6 +39,17 @@ module.exports = {
     ],
   },
 
+  // Delivery partner. SHADOWFAX_MODE=simulate runs a pretend Shadowfax (dev/demo).
+  shadowfax: {
+    mode: env.SHADOWFAX_MODE || (env.SHADOWFAX_TOKEN ? 'live' : 'off'),
+    token: env.SHADOWFAX_TOKEN || '',
+    baseUrl: env.SHADOWFAX_BASE_URL || 'https://hlbackend.staging.shadowfax.in',
+    // Shared secret Shadowfax sends back in a custom header on callbacks.
+    callbackToken: env.SHADOWFAX_CALLBACK_TOKEN || '',
+    // Book the rider when the outlet accepts ('accepted') or starts cooking ('preparing').
+    bookOn: env.SHADOWFAX_BOOK_ON === 'preparing' ? 'preparing' : 'accepted',
+  },
+
   whatsapp: {
     token: env.WHATSAPP_TOKEN || '',
     phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID || '',

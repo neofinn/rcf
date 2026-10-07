@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS outlets (
   delivery_radius_km REAL NOT NULL DEFAULT 5,
   upi_id TEXT,
   upi_name TEXT,
+  sfx_store_code TEXT, -- Shadowfax store code, assigned at Shadowfax onboarding
   opens TEXT NOT NULL DEFAULT '11:00',
   closes TEXT NOT NULL DEFAULT '23:00',
   accepting_orders INTEGER NOT NULL DEFAULT 1,
@@ -91,6 +92,22 @@ CREATE TABLE IF NOT EXISTS wa_sessions (
   updated_at TEXT NOT NULL
 );
 
+-- Delivery partner bookings (Shadowfax) for delivery orders.
+CREATE TABLE IF NOT EXISTS deliveries (
+  order_id INTEGER PRIMARY KEY REFERENCES orders(id),
+  provider TEXT NOT NULL,
+  ref TEXT,
+  status TEXT NOT NULL,
+  rider_name TEXT,
+  rider_phone TEXT,
+  rider_lat REAL,
+  rider_lng REAL,
+  track_url TEXT,
+  error TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS deliveries_ref ON deliveries(ref);
+
 -- Conversations handed over from the bot to outlet staff.
 CREATE TABLE IF NOT EXISTS wa_handoffs (
   id INTEGER PRIMARY KEY,
@@ -136,6 +153,9 @@ function migrate(db) {
     db.exec('ALTER TABLE outlets ADD COLUMN upi_id TEXT; ALTER TABLE outlets ADD COLUMN upi_name TEXT;');
     const set = db.prepare("UPDATE outlets SET upi_id = ?, upi_name = 'Raju Chinese' WHERE slug = ?");
     for (const o of seed.outlets) set.run(o.upiId || null, o.slug);
+  }
+  if (!db.prepare('PRAGMA table_info(outlets)').all().some((c) => c.name === 'sfx_store_code')) {
+    db.exec('ALTER TABLE outlets ADD COLUMN sfx_store_code TEXT');
   }
   const orderCols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
   if (!orderCols.includes('payment_status')) db.exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'cod'");

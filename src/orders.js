@@ -6,6 +6,15 @@ const config = require('./config');
 const { assignOutlet, isOpen, etaMinutes } = require('./geo');
 const { upiLink, PAYMENT_LABELS } = require('./payments');
 
+// Delivery partner statuses as staff and customers see them (see delivery/dispatcher.js).
+const DELIVERY_LABELS = {
+  BOOKING: 'Booking a rider', ACCEPTED: 'Looking for a rider', UNASSIGNED: 'Looking for a rider',
+  ALLOTTED: 'Rider assigned', ARRIVED: 'Rider at the outlet', DISPATCHED: 'Rider on the way',
+  ARRIVED_CUSTOMER_DOORSTEP: 'Rider at the door', DELIVERED: 'Delivered', CANCELLED: 'Partner cancelled',
+  CANCELLED_BY_CUSTOMER: 'Customer cancelled', RETURNED_TO_SELLER: 'Returned to outlet', UNDELIVERED: 'Not delivered',
+  FAILED: 'Rider booking failed', OWN: 'Outlet rider',
+};
+
 class ValidationError extends Error {
   constructor(message, code = 'invalid') {
     super(message);
@@ -215,6 +224,7 @@ function createOrderService(store) {
       etaMinutes: etaMinutes(row.fulfilment, row.distance_km || 0),
       outlet: outlet && { id: outlet.id, name: outlet.name, phone: outlet.phone, address: outlet.address, lat: outlet.lat, lng: outlet.lng },
       paymentLabel: PAYMENT_LABELS[row.payment_status],
+      delivery: presentDelivery(row),
       upi: row.payment_method === 'upi' && outlet?.upi_id ? {
         upiId: outlet.upi_id,
         payee: outlet.upi_name || 'Raju Chinese',
@@ -253,6 +263,13 @@ function createOrderService(store) {
     return setPayment(code, 'claimed', now, 'customer');
   }
 
+  function presentDelivery(row) {
+    const d = store.getDelivery(row.id);
+    if (!d) return null;
+    return { ...d, label: DELIVERY_LABELS[d.status] || d.status, collect: row.payment_status === 'paid' ? 0 : row.total };
+  }
+
+  const getOrderById = (id) => present(store.orderById(id));
   const getOrder = (code) => present(store.orderByCode(String(code || '').toUpperCase()));
 
   function latestOrderForPhone(raw) {
@@ -264,7 +281,8 @@ function createOrderService(store) {
     return store.listOrders({ outletId, statuses, limit: Math.min(Number(limit) || 100, 500) }).map(present);
   }
 
-  function updateStatus(code, next, now = new Date()) {
+  // meta: { by?: 'staff' | 'delivery', quiet?: true } is passed on to listeners.
+  function updateStatus(code, next, now = new Date(), meta = {}) {
     const order = getOrder(code);
     if (!order) return null;
     if (!order.nextStatuses.includes(next)) {
@@ -272,16 +290,16 @@ function createOrderService(store) {
     }
     if (!store.setOrderStatus(order.id, order.status, next, now.toISOString())) throw new ValidationError('Order was updated by someone else. Refresh and try again.', 'conflict');
     const updated = getOrder(code);
-    events.emit('status', updated);
+    events.emit('status', updated, meta);
     return updated;
   }
 
   return {
-    events, listOutlets, getOutlet, menuFor, categories, resolveOutlet, quote, createOrder, getOrder,
+    events, listOutlets, getOutlet, menuFor, categories, resolveOutlet, quote, createOrder, getOrder, getOrderById,
     latestOrderForPhone, listOrders, updateStatus, setPayment, claimPayment,
   };
 }
 
 module.exports = {
-  createOrderService, priceCart, ValidationError, normalisePhone, STATUSES, STATUS_LABELS, TRANSITIONS, deliveryFee,
+  createOrderService, priceCart, ValidationError, normalisePhone, STATUSES, STATUS_LABELS, TRANSITIONS, deliveryFee, DELIVERY_LABELS,
 };

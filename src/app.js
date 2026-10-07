@@ -12,7 +12,10 @@ const { createRoutes, recordOutbox } = require('./routes/handlers');
 const { createBot, createSessionStore } = require('./whatsapp/bot');
 const { createClient } = require('./whatsapp/client');
 const { createWebhookRouter } = require('./whatsapp/webhook');
-const { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment } = require('./whatsapp/notify');
+const { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment, notifyOnDelivery } = require('./whatsapp/notify');
+const { createDispatcher } = require('./delivery/dispatcher');
+const { createShadowfaxClient } = require('./delivery/shadowfax');
+const { createSimulatedShadowfax } = require('./delivery/simulator');
 const { qrPng } = require('./payments');
 
 function isAdmin(req) {
@@ -21,7 +24,21 @@ function isAdmin(req) {
   return token.length === expected.length && crypto.timingSafeEqual(token, expected);
 }
 
-function createApp({ dbPath = config.dbPath, waClient, enableDevTools = !config.production, log = console } = {}) {
+function safeEqual(a, b) {
+  const x = Buffer.from(String(a || ''));
+  const y = Buffer.from(String(b || ''));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+function deliveryProvider({ shadowfax, onCallback }) {
+  if (shadowfax.mode === 'live') return createShadowfaxClient({ token: shadowfax.token, baseUrl: shadowfax.baseUrl });
+  if (shadowfax.mode === 'simulate') return createSimulatedShadowfax({ onCallback });
+  return null;
+}
+
+function createApp({
+  dbPath = config.dbPath, waClient, enableDevTools = !config.production, log = console, deliveryPartner,
+} = {}) {
   const db = openDb(dbPath);
   const store = createSqliteStore(db);
   const orders = createOrderService(store);
@@ -35,6 +52,12 @@ function createApp({ dbPath = config.dbPath, waClient, enableDevTools = !config.
   notifyOnStatusChange({ orders, client, log });
   relayHandoffReplies({ handoffs, client, log });
   notifyOnPayment({ orders, client, log });
+
+  let dispatcher;
+  const provider = deliveryPartner !== undefined ? deliveryPartner
+    : deliveryProvider({ shadowfax: config.shadowfax, onCallback: (p) => dispatcher.handleCallback(p) });
+  dispatcher = createDispatcher({ orders, store, provider, bookOn: config.shadowfax.bookOn, log });
+  notifyOnDelivery({ dispatcher, client, log });
 
   const app = express();
   app.disable('x-powered-by');
@@ -55,11 +78,23 @@ function createApp({ dbPath = config.dbPath, waClient, enableDevTools = !config.
     } catch (e) { next(e); }
   });
 
-  for (const route of createRoutes({ store, orders, handoffs, bot, outbox })) {
+  // Shadowfax sends a shared secret in a custom header we agree with them at
+  // onboarding. Without one configured, callbacks are only accepted outside production.
+  const partnerAuthorized = (req) => (config.shadowfax.callbackToken
+    ? safeEqual(req.get('x-callback-token'), config.shadowfax.callbackToken)
+    : !config.production);
+
+  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher })) {
     if (route.dev && !enableDevTools) continue;
-    app[route.method.toLowerCase()](route.path, (req, res) => {
+    // Shadowfax may call back with POST or PUT.
+    const methods = route.partner ? ['post', 'put'] : [route.method.toLowerCase()];
+    for (const method of methods) app[method](route.path, async (req, res, next) => {
       if (route.admin && !isAdmin(req)) return res.status(401).json({ error: 'Unauthorized' });
-      const out = route.handle({ params: req.params, query: req.query, body: req.body || {} });
+      if (route.partner && !partnerAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+      let out;
+      try {
+        out = await route.handle({ params: req.params, query: req.query, body: req.body || {} });
+      } catch (e) { return next(e); }
       if (out && out.contentType) return res.type(out.contentType).attachment(out.filename).send(out.text);
       if (out && out.httpStatus) return res.status(out.httpStatus).json(out.body);
       res.json(out);
@@ -78,7 +113,7 @@ function createApp({ dbPath = config.dbPath, waClient, enableDevTools = !config.
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, store, orders, handoffs, bot };
+  return { app, db, store, orders, handoffs, bot, dispatcher };
 }
 
 module.exports = { createApp };

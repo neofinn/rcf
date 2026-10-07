@@ -102,6 +102,10 @@
   .log .tag.web { color: var(--wok); }
   .log .tag.wa { color: var(--leaf); }
   .log .tag.outlet { color: var(--amber); }
+  .log .tag.sfx { color: var(--ink); }
+  .map .rider { fill: var(--ink); stroke: var(--panel); stroke-width: 2; }
+  .map .rider-label { fill: var(--ink); stroke: var(--map-land); stroke-width: 4; paint-order: stroke; font-size: 11.5px; font-weight: 700; }
+  .map .drop { fill: none; stroke: var(--leaf); stroke-width: 2.5; }
   .log .empty { display: block; color: var(--muted); background: transparent; padding: 0; }
   .side { display: grid; gap: 16px; align-content: start; min-width: 0; }
   footer { font-size: 0.82rem; color: var(--muted); max-width: 90ch; }
@@ -158,15 +162,15 @@
 
   <section class="stage">
     <div class="surface on" data-panel="web">
-      <header><h2>Customer web app</h2><p class="muted">Tap <b>Use my current location</b> or pick an area, add dishes, place the order.</p></header>
+      <header><h2>Customer web app</h2><p class="muted">Add dishes, then open the cart. Location is asked once, at checkout: tap <b>Use my current location</b> or pick an area.</p></header>
       <div class="phone"><iframe id="f-web" title="Customer web app"></iframe></div>
     </div>
     <div class="surface" data-panel="whatsapp">
-      <header><h2>WhatsApp ordering</h2><p class="muted">Type naturally, tap the menu, send a catalog cart, or ask for a person. Share a location with the picker below the chat.</p></header>
+      <header><h2>WhatsApp ordering</h2><p class="muted">Type naturally, tap the menu, send a catalog cart, or ask for a person. At checkout, share a location with the picker below the chat.</p></header>
       <div class="phone"><iframe id="f-whatsapp" title="WhatsApp chat"></iframe></div>
     </div>
     <div class="surface dash" data-panel="dash">
-      <header><h2>Outlet dashboard</h2><p class="muted">What staff see on the counter tablet. Pick an outlet, accept orders, open <b>Chats</b> to reply to WhatsApp customers.</p></header>
+      <header><h2>Outlet dashboard</h2><p class="muted">What staff see on the counter tablet. Accept a delivery order and a simulated Shadowfax rider is booked; watch the rider on the routing map. Open <b>Chats</b> to reply to WhatsApp customers.</p></header>
       <div class="desk"><div class="bar" aria-hidden="true"><i></i><i></i><i></i><span>Outlet tablet · /admin</span></div><iframe id="f-admin" title="Outlet dashboard"></iframe></div>
     </div>
   </section>
@@ -188,6 +192,7 @@
         <li>The nearest one cooks. If it is paused or closed, the next nearest takes over.</li>
         <li>Nobody in range? The customer is offered pickup from the nearest open outlet.</li>
         <li>A catalog cart sent on WhatsApp is held until the customer shares a location, then routed the same way.</li>
+        <li>When the outlet accepts a delivery order, a Shadowfax rider is booked from that outlet. Rider updates move the order along and reach the customer on WhatsApp. (Simulated here.)</li>
       </ol>
       <div>
         <h2 style="font-size:1rem;margin-bottom:8px">Live activity</h2>
@@ -247,12 +252,12 @@ function clearChildStorage() {
 }
 const frameOf = (win) => Object.keys(frames).find((k) => frames[k].contentWindow === win);
 
-window.addEventListener('message', (e) => {
+window.addEventListener('message', async (e) => {
   const d = e.data;
   const from = frameOf(e.source);
   if (!d || !d.rc || !from) return;
   if (d.kind === 'fetch') {
-    const res = be.request(d.method, d.url, d.body);
+    const res = await be.request(d.method, d.url, d.body);
     observe(from, d, res);
     e.source.postMessage({ rc: true, reply: true, id: d.id, status: res.status, body: res.body }, '*');
   } else if (d.kind === 'gps') {
@@ -319,6 +324,23 @@ function wireEvents() {
     else if (o.payment_status === 'pending' && previous === 'claimed') log('Outlet', 'outlet', `${esc(short(o.outlet.name))} couldn't find the UPI payment for <b>${o.code}</b>`);
     flagTab(by === 'customer' ? 'dash' : (o.channel === 'whatsapp' ? 'whatsapp' : 'web'));
   });
+  be.dispatcher.events.on('delivery', (o, change) => {
+    const d = o.delivery;
+    const where = esc(short(o.outlet.name));
+    const msg = {
+      booked: `Shadowfax rider requested for <b>${o.code}</b> from ${where}`,
+      allotted: `Shadowfax assigned <b>${esc(d.rider_name || 'a rider')}</b> to <b>${o.code}</b>`,
+      arrived: `Rider ${esc(d.rider_name || '')} reached ${where} for <b>${o.code}</b>`,
+      dispatched: `Rider picked up <b>${o.code}</b>; order is out for delivery`,
+      arrived_customer_doorstep: `Rider is at the customer's door with <b>${o.code}</b>`,
+      delivered: `<b>${o.code}</b> delivered by Shadowfax; order completed`,
+      failed: `Rider booking failed for <b>${o.code}</b>: ${esc(d.error || '')}`,
+      own: `${where} will deliver <b>${o.code}</b> with its own rider`,
+    }[change];
+    if (msg) log('Shadowfax', 'sfx', msg);
+    drawRiders();
+    if (change !== 'location' && o.channel === 'whatsapp') flagTab('whatsapp');
+  });
   be.handoffs.events.on('opened', (h) => {
     const o = h.outlet_id ? be.orders.getOutlet(h.outlet_id) : null;
     log('WhatsApp', 'wa', `Customer asked for a person → chat sent to ${o ? `<b>${esc(short(o.name))}</b> staff` : 'staff at all outlets'}`);
@@ -362,6 +384,7 @@ function drawMap() {
       <text x="${X(76.645)}" y="${Y(30.765)}" text-anchor="middle" class="city">KHARAR</text>
     </g>
     <g id="route"></g>
+    <g id="riders"></g>
     <g id="outlets">${out.map((o) => `
       <g data-outlet="${o.id}">
         <circle cx="${X(o.lng)}" cy="${Y(o.lat)}" r="8" class="odot"/>
@@ -392,6 +415,20 @@ function preview(p, label) {
     ? `${esc(label)} → <b>${esc(a.outlet.name)}</b> delivers, ${a.distanceKm} km by road (radius ${a.outlet.delivery_radius_km} km).`
       + (a.ranked[0].outlet.id !== a.outlet.id ? ` The nearest outlet, ${esc(short(a.ranked[0].outlet.name))}, is not taking orders.` : '')
     : `${esc(label)}: no outlet delivers here. ${a.pickupSuggestion ? `The customer is offered pickup from <b>${esc(a.pickupSuggestion.outlet.name)}</b>, ${a.pickupSuggestion.distanceKm} km away.` : ''}`;
+}
+
+// Live Shadowfax riders (from the simulated partner's location callbacks).
+function drawRiders() {
+  const g = $('riders');
+  if (!g) return;
+  const active = be.orders.listOrders({ statuses: ['accepted', 'preparing', 'out_for_delivery'], limit: 20 })
+    .filter((o) => o.delivery && o.delivery.rider_lat != null && !['DELIVERED', 'FAILED', 'OWN', 'CANCELLED'].includes(o.delivery.status));
+  g.innerHTML = active.map((o) => {
+    const d = o.delivery;
+    return `<circle cx="${X(o.lng)}" cy="${Y(o.lat)}" r="9" class="drop"><title>Drop for ${o.code}</title></circle>
+      <circle cx="${X(d.rider_lng)}" cy="${Y(d.rider_lat)}" r="6.5" class="rider"><title>${esc(d.rider_name || 'Rider')} · ${o.code}</title></circle>
+      <text x="${X(d.rider_lng) + 10}" y="${Y(d.rider_lat) - 8}" class="rider-label">🛵 ${esc((d.rider_name || 'Rider').split(' ')[0])} · ${esc(d.label.toLowerCase())}</text>`;
+  }).join('');
 }
 
 $('map').addEventListener('click', (e) => {

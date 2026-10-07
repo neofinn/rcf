@@ -120,21 +120,27 @@ async function loadLocalities() {
     `<optgroup label="${esc(city)}">${ls.map((l) => `<option value="${esc(l.name)}" data-lat="${l.lat}" data-lng="${l.lng}">${esc(l.name)}, ${esc(city)}</option>`).join('')}</optgroup>`).join('');
 }
 
-function setLocation(loc) {
+async function setLocation(loc) {
   const changedOutlet = !state.location || state.location.outlet?.id !== loc.outlet.id;
   state.location = loc;
   store.set('location', loc);
   renderHeader();
-  if (changedOutlet) loadMenu();
+  if (changedOutlet) await loadMenu();
   else renderCartBar();
+  // Location was asked for at checkout: carry on to the cart.
+  if (state.checkoutAfterLocation) {
+    state.checkoutAfterLocation = false;
+    openCartSheet();
+  }
 }
 
 function renderHeader() {
   const l = state.location;
   if (!l) {
     $('locTitle').textContent = 'Set location';
-    $('locSub').textContent = 'to see your nearest outlet';
-    $('banner').classList.add('hidden');
+    $('locSub').textContent = 'or add dishes first';
+    $('banner').classList.remove('hidden', 'warn');
+    $('banner').textContent = "👋 Add what you'd like. We'll ask where to deliver at checkout and send it from your nearest Raju Chinese.";
     return;
   }
   const short = l.outlet.name.replace('Raju Chinese - ', '');
@@ -196,7 +202,6 @@ $('vegOnly').checked = state.vegOnly;
 $('vegOnly').addEventListener('change', (e) => { state.vegOnly = e.target.checked; store.set('vegOnly', state.vegOnly); renderMenu(); });
 
 function changeQty(id, delta) {
-  if (!state.location) { openModal('locModal'); return; }
   const q = Math.max(0, Math.min(20, (state.cart[id] || 0) + delta));
   if (q) state.cart[id] = q; else delete state.cart[id];
   saveCart();
@@ -284,11 +289,23 @@ function showCheckoutError(msg) {
 }
 
 $('openCart').addEventListener('click', () => {
+  if (!state.location) {
+    // First time we need the location: at checkout, not while browsing.
+    state.checkoutAfterLocation = true;
+    $('locHeading').textContent = 'Where should we deliver?';
+    setModeTab('delivery');
+    openModal('locModal');
+    return;
+  }
+  openCartSheet();
+});
+
+function openCartSheet() {
   const saved = store.get('customer', {});
   for (const k of ['name', 'phone', 'address']) if (saved[k] && !$(k).value) $(k).value = saved[k];
   openModal('cartModal');
   renderCart();
-});
+}
 
 $('checkout').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -332,7 +349,7 @@ $('checkout').addEventListener('submit', async (e) => {
         }).catch(() => {});
     }
   } else {
-    openModal('locModal');
+    renderHeader();
   }
   await loadMenu();
 })();

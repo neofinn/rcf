@@ -24,6 +24,9 @@ function createSqliteStore(db) {
     latestForPhone: db.prepare('SELECT * FROM orders WHERE phone = ? ORDER BY id DESC LIMIT 1'),
     setStatus: db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ? AND status = ?'),
     setPayment: db.prepare('UPDATE orders SET payment_status = ?, updated_at = ? WHERE id = ? AND payment_status = ?'),
+    byId: db.prepare('SELECT * FROM orders WHERE id = ?'),
+    getDelivery: db.prepare('SELECT * FROM deliveries WHERE order_id = ?'),
+    deliveryByRef: db.prepare('SELECT * FROM deliveries WHERE ref = ? ORDER BY updated_at DESC LIMIT 1'),
     summary: db.prepare(`SELECT outlet_id, COUNT(*) AS orders, SUM(total) AS revenue FROM orders
       WHERE status != 'cancelled' AND created_at >= ? GROUP BY outlet_id`),
 
@@ -89,6 +92,21 @@ function createSqliteStore(db) {
     setOrderStatus: (id, from, to, ts) => q.setStatus.run(to, ts, id, from).changes > 0,
     setPaymentStatus: (id, from, to, ts) => q.setPayment.run(to, ts, id, from).changes > 0,
     summarySince: (iso) => q.summary.all(iso),
+    orderById: (id) => q.byId.get(id) || null,
+
+    // Delivery partner bookings
+    getDelivery: (orderId) => q.getDelivery.get(orderId) || null,
+    deliveryByRef: (ref) => q.deliveryByRef.get(ref) || null,
+    upsertDelivery(orderId, fields) {
+      const cur = q.getDelivery.get(orderId);
+      const row = { provider: 'none', ref: null, status: 'FAILED', rider_name: null, rider_phone: null, rider_lat: null, rider_lng: null, track_url: null, error: null, ...cur, ...fields, order_id: orderId };
+      db.prepare(`INSERT INTO deliveries (order_id, provider, ref, status, rider_name, rider_phone, rider_lat, rider_lng, track_url, error, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(order_id) DO UPDATE SET provider = excluded.provider, ref = excluded.ref, status = excluded.status,
+          rider_name = excluded.rider_name, rider_phone = excluded.rider_phone, rider_lat = excluded.rider_lat,
+          rider_lng = excluded.rider_lng, track_url = excluded.track_url, error = excluded.error, updated_at = excluded.updated_at`)
+        .run(orderId, ...['provider', 'ref', 'status', 'rider_name', 'rider_phone', 'rider_lat', 'rider_lng', 'track_url', 'error', 'updated_at'].map((k) => row[k] ?? null));
+    },
 
     // WhatsApp handoffs to staff
     openHandoff: ({ phone, name, outletId, ts }) => Number(q.openHandoff.run(phone, name || null, outletId || null, ts, ts).lastInsertRowid),

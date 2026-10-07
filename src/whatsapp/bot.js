@@ -46,7 +46,7 @@ const describe = (name, note) => `${name}${note ? ` _(${note})_` : ''}`;
 function freshSession() {
   return {
     state: 'start', fulfilment: null, lat: null, lng: null, outletId: null, distanceKm: null,
-    cart: [], pendingItemId: null, address: null, choices: [], orderNotes: [],
+    cart: [], pendingItemId: null, address: null, choices: [], orderNotes: [], checkingOut: false,
   };
 }
 
@@ -184,17 +184,29 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     return [list(prompt, 'Choose', [{ title: 'Options', rows: c.options.map((o) => row(`pick:${o.id}`, o.name, `${o.veg ? '🟢 Veg' : '🔴 Non-veg'} · ${rupees(o.price)}`)) }])];
   }
 
-  // After items are added by text or catalog: resolve questions, then location, then cart.
+  // After items are added by text or catalog: resolve questions, then show the
+  // cart. Location is only asked once, at checkout.
   function nextStep(s, intro = []) {
     if (s.choices.length) return [...intro, ...choiceView(s)];
-    if (!s.outletId) {
-      s.fulfilment = s.fulfilment || 'delivery';
-      if (s.fulfilment === 'pickup') { s.state = 'choose_outlet'; return [...intro, ...pickupOutlets(new Date())]; }
-      s.state = 'await_location';
-      return [...intro, ...askLocation('Where should we send it? ')];
-    }
     s.state = 'browsing';
     return [...intro, ...cartView(s)];
+  }
+
+  // Checkout needs an outlet: ask for the location (delivery) or outlet (pickup)
+  // once, then carry on with checkout where the customer left off.
+  function askWhere(s) {
+    s.checkingOut = true;
+    if (s.fulfilment === 'pickup') { s.state = 'choose_outlet'; return pickupOutlets(new Date()); }
+    s.fulfilment = 'delivery';
+    s.state = 'await_location';
+    return askLocation('Almost done! 🙌 ');
+  }
+
+  // Once the outlet is known: drop anything sold out there, then resume checkout if that's where we were.
+  function afterOutletKnown(s, intro) {
+    const dropped = dropUnavailable(s);
+    if (s.checkingOut && s.cart.length) return [text(intro), ...dropped, ...checkout(s)];
+    return [text(intro), ...dropped, ...nextStep(s)];
   }
 
   // ---- Actions -----------------------------------------------------------
@@ -213,7 +225,7 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
         ? `📍 Great news! *${a.outlet.name}* (${a.distanceKm} km away) will deliver to you in about ${etaMinutes('delivery', a.distanceKm)} min.`
         : `📍 Nearest outlet: *${a.outlet.name}* (${a.distanceKm} km). Your order will be ready in about ${etaMinutes('pickup')} min.`;
       if (!s.cart.length) return categoriesList(s, intro);
-      return [text(intro), ...dropUnavailable(s), ...nextStep(s)];
+      return afterOutletKnown(s, intro);
     }
     s.state = 'await_location';
     const alt = a.pickupSuggestion;
@@ -223,7 +235,7 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     if (!alt) return [text(`${msg} All our outlets are closed at the moment. Please try again during opening hours.`)];
     return [buttons(`${msg}\n\nYou can pick up from *${alt.outlet.name}* (${alt.distanceKm} km away), or send a different location.`, [
       btn(`outlet:${alt.outlet.id}`, 'Pickup instead'),
-      btn('mode:delivery', 'Another location'),
+      btn('act:relocate', 'Another location'),
     ])];
   }
 
@@ -289,8 +301,9 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
   }
 
   function checkout(s) {
-    if (!s.outletId) return s.cart.length ? nextStep(s) : welcome();
-    if (!cartLines(s).length) return cartView(s);
+    if (!cartLines(s).length) return s.outletId ? cartView(s) : welcome();
+    if (!s.outletId) return askWhere(s);
+    s.checkingOut = false;
     const qte = orders.quote({ outletId: s.outletId, items: s.cart, fulfilment: s.fulfilment, distanceKm: s.distanceKm || 0 });
     if (s.fulfilment === 'delivery' && qte.subtotal < config.pricing.minDeliveryOrder) {
       return [buttons(`Minimum order for delivery is ${rupees(config.pricing.minDeliveryOrder)}. Your item total is ${rupees(qte.subtotal)}.`, [
@@ -350,7 +363,7 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
       s.state = 'browsing';
-      return [buttons(`⚠️ ${e.message}`, [btn('act:cart', '🛒 View cart'), btn('mode:delivery', '📍 Change location')])];
+      return [buttons(`⚠️ ${e.message}`, [btn('act:cart', '🛒 View cart'), btn('act:relocate', '📍 Change location')])];
     }
   }
 
@@ -466,15 +479,18 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
     if (msg.type !== 'reply') return [text('Sorry, I can only understand text, buttons and shared locations. Type *hi* to start.')];
 
     const [kind, arg] = msg.replyId.split(/:(.*)/s);
-    const needsOutlet = ['cat', 'item', 'qty'].includes(kind) || ['more', 'place', 'place_upi', 'same_address'].includes(arg);
-    if (needsOutlet && !s.outletId) return s.cart.length ? nextStep(s) : welcome(msg.name);
+    // Browsing and adding items work before we know the outlet; placing doesn't.
+    const needsOutlet = ['place', 'place_upi', 'same_address'].includes(arg);
+    if (needsOutlet && !s.outletId) return s.cart.length ? checkout(s) : welcome(msg.name);
 
     switch (kind) {
       case 'mode':
         s.fulfilment = arg === 'pickup' ? 'pickup' : 'delivery';
-        if (s.fulfilment === 'pickup') { s.state = 'choose_outlet'; return pickupOutlets(now); }
-        s.state = 'await_location';
-        return askLocation();
+        s.state = 'browsing';
+        if (s.outletId && s.fulfilment === 'delivery' && s.lat == null) { s.outletId = null; s.distanceKm = null; }
+        return categoriesList(s, s.fulfilment === 'pickup'
+          ? "🏃 Pickup it is! Add what you'd like. I'll ask which outlet you'll collect from at checkout."
+          : "🛵 Delivery it is! Add what you'd like. I'll ask for your location once, at checkout.");
       case 'outlet': {
         const o = orders.getOutlet(Number(arg));
         if (!o) return pickupOutlets(now);
@@ -485,7 +501,7 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
         s.state = 'browsing';
         const intro = `🏃 Pickup from *${o.name}*\n${o.address}`;
         if (!s.cart.length) return categoriesList(s, intro);
-        return [text(intro), ...dropUnavailable(s), ...nextStep(s)];
+        return afterOutletKnown(s, intro);
       }
       case 'cat':
         return itemsList(s, arg);
@@ -536,6 +552,7 @@ function createBot({ orders, sessions, handoffs = null, baseUrl = config.publicB
           case 'cancel': s.state = 'browsing'; return [text('No problem, your order was not placed. Your cart is still saved.'), ...cartView(s)];
           case 'track': return trackView(msg.from);
           case 'human': return startHandoff(s, msg, now);
+          case 'relocate': s.fulfilment = 'delivery'; s.state = 'await_location'; return askLocation();
           default: return welcome(msg.name);
         }
       default:

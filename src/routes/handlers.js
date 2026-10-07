@@ -31,7 +31,12 @@ const publicPayment = (o) => ({
   ...(o.upi && o.payment_status !== 'cod' ? { upiId: o.upi.upiId, payee: o.upi.payee, link: o.upi.link, qrSvg: qrSvg(o.upi.link) } : {}),
 });
 
-function createRoutes({ store, orders, handoffs, bot, outbox }) {
+const publicDelivery = (d) => d && {
+  partner: d.provider, status: d.status, label: d.label, riderName: d.rider_name, riderPhone: d.rider_phone,
+  riderLat: d.rider_lat, riderLng: d.rider_lng, trackUrl: d.track_url,
+};
+
+function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher }) {
   return [
     // ---- Customer API ------------------------------------------------------
     {
@@ -100,6 +105,7 @@ function createRoutes({ store, orders, handoffs, bot, outbox }) {
           gst: o.gst, deliveryFee: o.delivery_fee, total: o.total, paymentMethod: o.payment_method,
           etaMinutes: o.etaMinutes, createdAt: o.created_at, updatedAt: o.updated_at, outlet: o.outlet,
           payment: publicPayment(o),
+          delivery: publicDelivery(o.delivery),
         };
       },
     },
@@ -127,6 +133,24 @@ function createRoutes({ store, orders, handoffs, bot, outbox }) {
       // Staff confirm a UPI payment arrived, say it hasn't, or switch the order to cash.
       method: 'POST', path: '/api/admin/orders/:code/payment', admin: true,
       handle: ({ params, body }) => orders.setPayment(params.code, String(body.status || '')) || notFound('Order not found'),
+    },
+    {
+      // Delivery partner: (re)book a Shadowfax rider, or deliver with the outlet's own rider.
+      method: 'POST', path: '/api/admin/orders/:code/delivery', admin: true,
+      handle: async ({ params, body }) => {
+        if (!orders.getOrder(params.code)) return notFound('Order not found');
+        if (body.action === 'own') return dispatcher.useOwnRider(params.code);
+        if (body.action === 'book') return dispatcher.book(params.code);
+        return { httpStatus: 400, body: { error: 'action must be "book" or "own"' } };
+      },
+    },
+    {
+      // Partner callbacks (Shadowfax). Mounted by the server with its own auth check.
+      method: 'POST', path: '/webhooks/shadowfax', partner: true,
+      handle: ({ body }) => {
+        dispatcher.handleCallback(body);
+        return { ok: true };
+      },
     },
     { method: 'GET', path: '/api/admin/outlets', admin: true, handle: () => orders.listOutlets() },
     {

@@ -26,6 +26,16 @@
   };
   let timer;
 
+  function riderHtml(o) {
+    const d = o.delivery;
+    if (!d || !d.riderName || ['DELIVERED', 'OWN'].includes(d.status) || o.status === 'cancelled') return '';
+    return `<div class="paybox done" style="justify-items:start;text-align:left">
+      <b>🛵 ${esc(d.label)}: ${esc(d.riderName)}</b>
+      ${d.riderPhone ? `<span class="small">Rider's number: <b>${esc(d.riderPhone)}</b></span>` : ''}
+      ${d.trackUrl ? `<a href="${esc(d.trackUrl)}" target="_blank" rel="noopener">Live rider tracking</a>` : ''}
+    </div>`;
+  }
+
   function payHtml(o) {
     const p = o.payment;
     if (p.status === 'paid') return `<div class="paybox done"><b>✅ Paid ${rupees(o.total)} by UPI</b></div>`;
@@ -65,6 +75,7 @@
       <p class="muted small">Thanks, ${esc(o.customerName)}! ${o.status === 'completed' || o.status === 'cancelled' ? '' : `Estimated ${o.fulfilment === 'delivery' ? 'delivery' : 'ready'} time: about <b>${o.etaMinutes} min</b> from ordering.`}</p>
       ${o.status === 'cancelled' ? '' : payHtml(o)}
       ${stepsHtml}
+      ${riderHtml(o)}
       <p><b>${esc(o.outlet.name)}</b><br><span class="small muted">${esc(o.outlet.address)}</span><br>
         <a href="tel:${esc(o.outlet.phone)}">📞 Call outlet</a> ·
         <a href="https://www.google.com/maps/search/?api=1&query=${o.outlet.lat},${o.outlet.lng}" target="_blank" rel="noopener">🗺️ Directions</a></p>
@@ -76,7 +87,7 @@
         <div class="total"><span>${o.payment.status === 'paid' ? 'Paid' : 'To pay'}</span><span>${rupees(o.total)}</span></div>
       </div>`;
     clearTimeout(timer);
-    if (!['completed', 'cancelled'].includes(o.status)) timer = setTimeout(load, 15000);
+    if (!['completed', 'cancelled'].includes(o.status)) timer = setTimeout(load, 8000);
   }
   load().catch(() => { timer = setTimeout(load, 15000); });
   </script>

@@ -42,6 +42,8 @@ Built on the official **WhatsApp Business Cloud API** (Meta). Customers can orde
 
 **2. Tap through the menu:** menu list → item → quantity (or type "2 less spicy") → cart → checkout.
 
+Customers can browse and add as much as they like first. The location (or, for pickup, the outlet) is asked **once, at checkout**, and checkout then carries straight on to the address. The web app works the same way.
+
 **3. Send a cart from the WhatsApp catalog.** There is one catalog for all outlets. The cart arrives at the webhook as an `order` message; the bot keeps it, asks for the customer's location if it doesn't have one, routes it to the nearest outlet like any other order, removes anything sold out there, and continues to checkout. Product IDs in the catalog are `RC-<menu item id>`; staff can download the full feed at `/api/admin/catalog.csv` and upload it in Meta Commerce Manager.
 
 **Talk to a person.** Typing things like "talk to someone", "party order", "complaint" or tapping **💬 Talk to us** hands the chat to staff at the customer's outlet. The dashboard's **Chats** tab shows the conversation with the customer's cart and address, staff reply from there, and the bot stays quiet until staff close the chat or the customer types `bot`. When the bot can't find something on the menu it offers this handoff too.
@@ -58,6 +60,16 @@ At checkout (web and WhatsApp) the customer picks **💳 Pay now (UPI)** or **�
 - **Outlet staff** see `UPI payment pending` / `Customer says paid` on the order card and tap **Payment received** once it shows in their UPI app (or **Not received** / **Take cash instead**). WhatsApp customers are told either way.
 - Confirmation is manual because plain UPI QR codes don't report payments back to us. For automatic confirmation, add a payment gateway (Razorpay, PayU, Cashfree) or Meta's *Payments on WhatsApp (India)*. Their webhook calls `orders.setPayment(code, 'paid', now, 'gateway')`, and the rest of the flow stays as is.
 - Outlets without a UPI ID only offer pay on delivery.
+
+## Delivery riders: Shadowfax (`src/delivery/`)
+
+Delivery orders are handed to **Shadowfax Hyperlocal** riders using their *Dedicated Store* integration, where each outlet is a registered Shadowfax store.
+
+1. When the outlet taps **Accept** on a delivery order (or **Start preparing**, with `SHADOWFAX_BOOK_ON=preparing`), we check Shadowfax serviceability for that store and drop point, then place a Shadowfax order. It carries the customer's coordinates, the items with their notes, and `paid` (a UPI order already marked paid) or the amount the rider should collect.
+2. Shadowfax calls `/webhooks/shadowfax` as the delivery moves. *Rider allotted* sends the customer the rider's name, number and live tracking link on WhatsApp. *Dispatched* moves our order to **Out for delivery**, *at doorstep* sends a "rider is at your door" message, and *delivered* completes the order.
+3. The dashboard shows the rider, their number and the amount to collect on each order card. If booking fails (no store code, not serviceable, Shadowfax error) or Shadowfax cancels, the card turns red with **Retry Shadowfax rider** and **Own rider**. Cancelling an order cancels its Shadowfax booking.
+
+Setup: get API access from Shadowfax (Dedicated Store model). Put each outlet's store code in `outlets.sfx_store_code`, set `SHADOWFAX_TOKEN` and `SHADOWFAX_BASE_URL` (staging `https://hlbackend.staging.shadowfax.in`, production `https://api.shadowfax.in`), and give Shadowfax your callback URL `https://<your-domain>/webhooks/shadowfax` with the header `X-Callback-Token: <SHADOWFAX_CALLBACK_TOKEN>`. The API paths are in `src/delivery/shadowfax.js` and follow Shadowfax's public docs. Confirm them, especially cancel, during onboarding. `SHADOWFAX_MODE=simulate` runs a pretend Shadowfax for local testing; the demo uses the same simulator.
 
 ## Pricing rules (`src/config.js`)
 
@@ -105,7 +117,6 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
 - An LLM (e.g. Claude) behind the WhatsApp parser for messages the rule-based parser can't follow, with the current parser as the fast path
 - WhatsApp template messages so web customers also get WhatsApp status updates (Meta only allows free-form messages within 24 h of the customer's last message)
 - OTP verification of phone numbers for web orders
-- Rider assignment / third-party delivery integration
 - Delivery zones drawn as polygons instead of a radius, if outlets' areas need sharper boundaries
 
 ## Code map
@@ -122,6 +133,9 @@ src/
   orders.js              menu, pricing, order creation and status changes
   handoff.js             WhatsApp chats handed to outlet staff
   payments.js            UPI payment links and QR codes
+  delivery/shadowfax.js  Shadowfax Hyperlocal API client
+  delivery/dispatcher.js books riders, applies Shadowfax callbacks
+  delivery/simulator.js  pretend Shadowfax for demo and local testing
   routes/handlers.js     the HTTP API as plain functions (server + demo)
   whatsapp/bot.js        WhatsApp conversation
   whatsapp/nlu.js        free-text order understanding

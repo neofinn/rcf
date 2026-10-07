@@ -59,6 +59,24 @@ const ago = (iso) => {
   return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' });
 };
 
+function deliveryBlock(o) {
+  if (o.fulfilment !== 'delivery' || (['completed', 'cancelled'].includes(o.status) && !o.delivery)) return '';
+  const d = o.delivery;
+  const book = `<button type="button" data-delivery="${o.code}" data-action="book">🛵 ${d ? 'Retry' : 'Book'} Shadowfax rider</button>`;
+  const own = `<button type="button" class="cancel" data-delivery="${o.code}" data-action="own">Own rider</button>`;
+  if (!d) {
+    if (o.status === 'placed') return '<div class="small muted" style="margin-bottom:6px">🛵 A Shadowfax rider is booked when you accept.</div>';
+    return `<div class="actions" style="margin-bottom:6px">${book}${own}</div>`;
+  }
+  if (d.status === 'OWN') return '<div class="small" style="margin-bottom:6px">🛵 Outlet rider</div>';
+  const failed = d.status === 'FAILED' || d.error;
+  const rider = d.rider_name ? ` · <b>${esc(d.rider_name)}</b>${d.rider_phone ? ` <a href="tel:${esc(d.rider_phone)}">${esc(d.rider_phone)}</a>` : ''}` : '';
+  const collect = !failed && d.collect && d.status !== 'DELIVERED' ? ` · rider collects ${rupees(d.collect)}` : '';
+  const track = d.track_url ? ` · <a href="${esc(d.track_url)}" target="_blank" rel="noopener">track</a>` : '';
+  return `<div class="small delivery ${failed ? 'bad' : ''}" style="margin-bottom:6px">🛵 Shadowfax · ${esc(d.label)}${rider}${collect}${track}
+    ${failed ? `<div>${esc(d.error || '')}</div><div class="actions" style="margin-top:6px">${book}${own}</div>` : ''}</div>`;
+}
+
 function payActions(o) {
   if (o.payment_status === 'claimed') {
     return `<div class="actions" style="margin-bottom:6px"><button type="button" class="paid" data-pay="${o.code}" data-to="paid">✅ Payment received</button><button type="button" class="cancel" data-pay="${o.code}" data-to="pending">Not received</button></div>`;
@@ -80,6 +98,7 @@ function orderCard(o) {
     ${o.address ? `<div class="small">${esc(o.address)}${o.distance_km != null ? ` (${o.distance_km} km)` : ''}${map}</div>` : ''}
     <div style="margin:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${rupees(o.total)}</b> <span class="chip pay-${o.payment_status}">${esc(o.paymentLabel)}</span></div>
     ${payActions(o)}
+    ${deliveryBlock(o)}
     <div class="actions">${o.nextStatuses.map((s) => `<button type="button" class="${s === 'cancelled' ? 'cancel' : ''}" data-code="${o.code}" data-status="${s}">${NEXT_LABEL[s]}</button>`).join('')}</div>
   </div>`;
 }
@@ -166,6 +185,12 @@ document.addEventListener('click', async (e) => {
     if (b.dataset.status === 'cancelled' && !confirm(`Cancel order ${b.dataset.code}?`)) return;
     b.disabled = true;
     try { await api(`/orders/${b.dataset.code}/status`, { method: 'POST', body: { status: b.dataset.status } }); } catch (err) { alert(err.message); }
+    refresh();
+  }
+  const del = e.target.closest('[data-delivery]');
+  if (del) {
+    del.disabled = true;
+    try { await api(`/orders/${del.dataset.delivery}/delivery`, { method: 'POST', body: { action: del.dataset.action } }); } catch (err) { alert(err.message); }
     refresh();
   }
   const pay = e.target.closest('[data-pay]');

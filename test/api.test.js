@@ -12,7 +12,7 @@ const silent = { info() {}, error() {} };
 async function start() {
   const sent = [];
   const waClient = { enabled: true, send: async (to, replies) => { sent.push({ to, replies }); } };
-  const ctx = createApp({ dbPath: ':memory:', waClient, enableDevTools: true, log: silent });
+  const ctx = createApp({ dbPath: ':memory:', waClient, enableDevTools: true, log: silent, deliveryPartner: null });
   // Open 24h so tests don't depend on the wall clock.
   ctx.db.exec("UPDATE outlets SET opens = '00:00', closes = '00:00'");
   const server = ctx.app.listen(0);
@@ -162,7 +162,7 @@ test('catalog cart over the webhook, human handoff with staff replies, catalog f
 
   await post('c1', { type: 'order', order: { catalog_id: '1', text: '', product_items: [{ product_retailer_id: firstId, quantity: 3, item_price: 89, currency: 'INR' }] } });
   assert.match(s.sent.at(-1).replies[0].text, /Got your cart/);
-  assert.equal(s.sent.at(-1).replies[1].type, 'location_request');
+  assert.match(s.sent.at(-1).replies[1].text, /Your cart/);
 
   await post('c2', { type: 'text', text: { body: 'talk to someone please' } });
   assert.match(s.sent.at(-1).replies[0].text, /Connecting you to our team/);
@@ -211,4 +211,25 @@ test('UPI on the web: QR on tracking, customer claim, staff confirm; PNG QR for 
   assert.equal((await s.call('POST', `/api/admin/orders/${code}/payment`, { status: 'pending' }, admin)).status, 400);
   // Web orders don't get WhatsApp messages.
   assert.equal(s.sent.length, 0);
+});
+
+test('Shadowfax: staff book from the dashboard; callbacks need the shared token', async (t) => {
+  const s = await start();
+  t.after(s.close);
+  const menu = (await s.call('GET', '/api/menu?outletId=1')).body.flatMap((c) => c.items);
+  const items = [{ id: menu.find((i) => i.name === 'Veg Fried Rice').id, qty: 2 }];
+  const { code } = (await s.call('POST', '/api/orders', { fulfilment: 'delivery', ...PLACES.sector22, items, name: 'Kiran', phone: '9876501234', address: 'House 1, Sector 22' })).body;
+
+  // No partner configured in tests: booking is recorded as failed, own rider works.
+  const failed = await s.call('POST', `/api/admin/orders/${code}/delivery`, { action: 'book' }, admin);
+  assert.equal(failed.body.delivery.status, 'FAILED');
+  const own = await s.call('POST', `/api/admin/orders/${code}/delivery`, { action: 'own' }, admin);
+  assert.equal(own.body.delivery.label, 'Outlet rider');
+  assert.equal((await s.call('GET', `/api/orders/${code}`)).body.delivery.label, 'Outlet rider');
+
+  const prev = config.shadowfax.callbackToken;
+  config.shadowfax.callbackToken = 'cb-secret';
+  t.after(() => { config.shadowfax.callbackToken = prev; });
+  assert.equal((await s.call('POST', '/webhooks/shadowfax', { sfx_order_id: 'x', order_status: 'DELIVERED' })).status, 401);
+  assert.equal((await s.call('PUT', '/webhooks/shadowfax', { sfx_order_id: 'x', order_status: 'DELIVERED' }, { 'X-Callback-Token': 'cb-secret' })).status, 200);
 });
