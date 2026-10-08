@@ -24,12 +24,16 @@ const { assignOutlet } = require('../src/geo');
 
 const DEMO_PIN = '1234';
 
-function createDemoBackend() {
+/**
+ * state: a saved snapshot (from snapshot()) to continue from instead of starting
+ * fresh. Used by the standalone demo pages, which keep the demo across page loads.
+ */
+function createDemoBackend({ state } = {}) {
   // Demo outlets stay open around the clock so it works at any hour.
   const demoSeed = { ...seed, outlets: seed.outlets.map((o, i) => ({ ...o, opens: '00:00', closes: '00:00', sfxStoreCode: `DEMO-${i + 1}` })) };
   const store = createMemoryStore(demoSeed);
   // Sample history so CRM and analytics have data (demo only).
-  seedSampleHistory(store);
+  if (state) store.importState(state.store); else seedSampleHistory(store);
   const orders = createOrderService(store);
   const handoffs = createHandoffService(store);
   const crm = createCrm({ store, orders });
@@ -52,7 +56,7 @@ function createDemoBackend() {
   reviews.startTicker(5000);
   // Head office token is "demo"; every outlet's panel PIN is 1234.
   const staffAuth = createStaffAuth({ store, adminToken: 'demo' });
-  for (const o of orders.listOutlets()) staffAuth.setPin(o.id, DEMO_PIN);
+  if (!state) for (const o of orders.listOutlets()) staffAuth.setPin(o.id, DEMO_PIN);
   const stock = createStockService({ store, orders });
   const outletAdmin = createOutletAdmin({ store });
   const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, staffAuth, stock, outletAdmin });
@@ -83,7 +87,9 @@ function createDemoBackend() {
 
   // Demo: a new outlet without a PIN gets the demo PIN so its tablet can sign in.
   const ensureDemoPin = (id) => { if (!store.outletPinHash(id)) staffAuth.setPin(id, DEMO_PIN); };
-  return { request, ensureDemoPin, orders, handoffs, store, dispatcher, assignOutlet, deliveryCharge, delivery: config.delivery, outlets: () => orders.listOutlets(), localities: () => store.localities() };
+  if (state?.outbox) outbox.push(...state.outbox);
+  const snapshot = () => ({ v: 1, store: store.exportState(), outbox });
+  return { request, ensureDemoPin, snapshot, orders, handoffs, store, dispatcher, assignOutlet, deliveryCharge, delivery: config.delivery, outlets: () => orders.listOutlets(), localities: () => store.localities() };
 }
 
 module.exports = { createDemoBackend };

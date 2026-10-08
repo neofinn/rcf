@@ -39,6 +39,7 @@ async function api(path, opts = {}) {
 async function showLogin(err) {
   clearInterval(poll);
   $('dash').classList.add('hidden');
+  if (PANEL === 'outlet' && window.RC_DEMO) $('pinHint').innerHTML = 'Demo: every outlet\'s PIN is <b>1234</b>. Pick the outlet your order went to (shown on the order tracking page).';
   if (PANEL === 'outlet' && !$('loginOutlet').options.length) {
     try {
       const outlets = await (await fetch('/api/outlets')).json();

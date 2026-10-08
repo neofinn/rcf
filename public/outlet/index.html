@@ -22,7 +22,7 @@
         <select id="loginOutlet" required></select>
         <label for="token">PIN</label>
         <input id="token" type="password" inputmode="numeric" autocomplete="current-password" pattern="\d{4,8}" required>
-        <p class="small muted">Head office sets each outlet's PIN.</p>
+        <p class="small muted" id="pinHint">Head office sets each outlet's PIN.</p>
         <p class="error hidden" id="loginError"></p>
         <button class="btn" style="margin-top:12px">Log in</button>
       </form>

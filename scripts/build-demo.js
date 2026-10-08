@@ -5,6 +5,11 @@
 // real code from src/ in the browser on an in-memory store.
 //
 //   npm run build:demo [-- out/file.html]
+//
+// With --pages <dir> it also writes each screen as its own page (order.html,
+// outlet.html, admin.html, whatsapp.html, track.html) for static hosting such
+// as GitHub Pages. The pages share one in-browser backend through a
+// SharedWorker, so an order placed in one tab shows up in the others.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,7 +17,10 @@ const esbuild = require('esbuild');
 
 const root = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
-const out = path.resolve(process.argv[2] || path.join(root, 'dist', 'demo.html'));
+const args = process.argv.slice(2);
+const pagesAt = args.indexOf('--pages');
+const pagesDir = pagesAt >= 0 ? path.resolve(args.splice(pagesAt, 2)[1]) : null;
+const out = path.resolve(args[0] || path.join(root, 'dist', 'demo.html'));
 
 // Swap Node-only modules for browser versions.
 const browserShims = {
@@ -70,11 +78,78 @@ const CHILD_SHIM = `<script>
 })();
 </script>`;
 
-function inlinePage(file) {
+// Standalone pages: talk to the shared demo backend and map server paths to page files.
+const STANDALONE_SHIM = `<script>
+(() => {
+  window.RC_DEMO = true;
+  window.RC_STANDALONE = true;
+  const PAGES = { '/': 'order.html', '/index.html': 'order.html', '/track.html': 'track.html', '/outlet/': 'outlet.html', '/admin/': 'admin.html', '/whatsapp-sim.html': 'whatsapp.html' };
+  const pageUrl = (u) => { const x = new URL(u, 'https://demo.local'); return (PAGES[x.pathname] || x.pathname.slice(1)) + x.search; };
+  window.RC_NAVIGATE = (u) => { location.href = pageUrl(u); };
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a[href^="/"]');
+    if (a) { e.preventDefault(); location.href = pageUrl(a.getAttribute('href')); }
+  }, true);
+
+  let send;
+  const ready = new Promise((resolve) => {
+    if (window.SharedWorker) {
+      try {
+        const pending = new Map();
+        let seq = 0;
+        const w = new SharedWorker('demo-worker.js', { name: 'raju-chinese-demo' });
+        w.port.onmessage = (e) => { const p = pending.get(e.data.id); if (p) { pending.delete(e.data.id); p(e.data); } };
+        w.port.start();
+        send = (msg) => new Promise((r) => { const id = ++seq; pending.set(id, r); w.port.postMessage({ ...msg, id }); });
+        return resolve();
+      } catch (e) { /* fall back below */ }
+    }
+    // No SharedWorker (e.g. Chrome on Android): this tab runs the demo backend
+    // itself; it is still saved in the browser, so other pages pick it up.
+    const load = (src) => new Promise((r) => { const s = document.createElement('script'); s.src = src; s.onload = r; document.head.appendChild(s); });
+    load('demo-backend.js').then(() => load('demo-server.js')).then(() => {
+      send = (m) => RCDemoServer.handle(m);
+      resolve();
+    });
+  });
+  // ?reset starts the demo again from scratch.
+  if (new URLSearchParams(location.search).has('reset')) {
+    ready.then(() => send({ kind: 'reset' })).then(() => {
+      try { for (const k of Object.keys(localStorage)) if (/^(rc\\.|rca\\.|rco\\.|sim\\.)/.test(k)) localStorage.removeItem(k); } catch (e) { /* storage blocked */ }
+      location.replace(location.pathname);
+    });
+  }
+
+  const realFetch = window.fetch.bind(window);
+  window.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (!/^\\/(api|webhooks)\\//.test(u)) return realFetch(url, opts);
+    await ready;
+    const auth = (opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || '';
+    const r = await send({ method: (opts.method || 'GET').toUpperCase(), url: u, body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\\s+/i, '') });
+    const text = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
+    return new Response(text, { status: r.status, headers: { 'Content-Type': 'application/json' } });
+  };
+})();
+</script>`;
+
+// Runs the demo backend once for every open page of the site.
+const WORKER = `importScripts('demo-backend.js', 'demo-server.js');
+onconnect = (e) => {
+  const port = e.ports[0];
+  port.onmessage = async ({ data }) => {
+    const res = await RCDemoServer.handle(data);
+    port.postMessage({ id: data.id, ...res });
+  };
+  port.start();
+};
+`;
+
+function inlinePage(file, shim = CHILD_SHIM) {
   let html = read(file)
     .replace(/<link rel="stylesheet" href="(\/[^"]+)">/g, (_, href) => `<style>${read('public' + href)}</style>`)
     .replace(/<script src="(\/[^"]+)"><\/script>/g, (_, src) => `<script>${read('public' + src).replace(/<\/script/gi, '<\\/script')}</script>`);
-  html = html.replace('<head>', () => `<head>\n${CHILD_SHIM}`);
+  html = html.replace('<head>', () => `<head>\n${shim}`);
   return html;
 }
 
@@ -109,6 +184,22 @@ async function main() {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, html);
   console.log(`Wrote ${path.relative(process.cwd(), out)} (${Math.round(html.length / 1024)} KB)`);
+
+  if (pagesDir) {
+    fs.mkdirSync(pagesDir, { recursive: true });
+    const files = {
+      'order.html': inlinePage('public/index.html', STANDALONE_SHIM),
+      'track.html': inlinePage('public/track.html', STANDALONE_SHIM),
+      'outlet.html': inlinePage('public/outlet/index.html', STANDALONE_SHIM),
+      'admin.html': inlinePage('public/admin/index.html', STANDALONE_SHIM),
+      'whatsapp.html': inlinePage('public/whatsapp-sim.html', STANDALONE_SHIM),
+      'demo-backend.js': backend,
+      'demo-worker.js': WORKER,
+      'demo-server.js': read('demo/standalone-server.js'),
+    };
+    for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(pagesDir, name), text);
+    console.log(`Wrote ${Object.keys(files).length} standalone files to ${path.relative(process.cwd(), pagesDir)}/`);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

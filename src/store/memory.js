@@ -35,7 +35,25 @@ function createMemoryStore(seed) {
   const copy = (x) => (x ? { ...x } : null);
   const byNewest = (a, b) => b.id - a.id;
 
+  // Everything the store holds, so the demo can save and restore itself.
+  const containers = {
+    outlets, items, unavailable, stock, pins, staffSessions, orders, lines, handoffs, handoffMsgs,
+    sessions, deliveries, customers, ledger, priceHistory, events, ratings, comments, jobs,
+  };
+
   return {
+    exportState: () => Object.fromEntries(Object.entries(containers).map(([k, c]) => [k,
+      c instanceof Map ? { map: [...c] } : c instanceof Set ? { set: [...c] } : { list: c }])),
+    importState(state) {
+      for (const [k, c] of Object.entries(containers)) {
+        const v = state[k];
+        if (!v) continue;
+        if (c instanceof Map) { c.clear(); for (const [key, val] of v.map) c.set(key, val); }
+        else if (c instanceof Set) { c.clear(); for (const x of v.set) c.add(x); }
+        else c.splice(0, c.length, ...v.list);
+      }
+    },
+
     outlets: () => outlets.filter((o) => o.active).map(copy),
     outlet: (id) => copy(outlets.find((o) => o.id === Number(id))),
     setAccepting(id, accepting) { const o = outlets.find((x) => x.id === Number(id)); if (o) o.accepting_orders = accepting ? 1 : 0; },
