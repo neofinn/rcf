@@ -7,7 +7,7 @@
 
 /* global RCBackend */
 self.RCDemoServer = (() => {
-  const DB = 'raju-chinese-demo';
+  const DB = `${RCBackend.brandId}-demo`;
   const KEY = 'state';
 
   const open = () => new Promise((resolve, reject) => {
