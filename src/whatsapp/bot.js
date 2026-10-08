@@ -55,7 +55,7 @@ function freshSession() {
   };
 }
 
-function createBot({ orders, sessions, handoffs = null, crm = null, reviews = null, places = () => [], baseUrl = config.publicBaseUrl }) {
+function createBot({ orders, sessions, handoffs = null, crm = null, reviews = null, places = () => [], baseUrl = config.publicBaseUrl, menuImages = null }) {
   function load(phone, now) {
     const s = sessions.get(phone);
     if (!s || now - new Date(s.updatedAt).getTime() > SESSION_TTL_MS) return freshSession();
@@ -142,7 +142,24 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
   function readyMenu(s, intro) {
     s.state = 'browsing';
     if (s.cart.length) return afterOutletKnown(s, intro);
-    return categoriesList(s, intro);
+    return menuView(s, intro);
+  }
+
+  // The menu as pictures, then "just type your order". The full menu doesn't
+  // fit WhatsApp lists (10 rows each), so typing is the main way to order;
+  // the lists stay available under "Browse menu".
+  function menuView(s, intro) {
+    if (!menuImages || !menuImages.available()) return categoriesList(s, intro);
+    return [
+      ...(intro ? [text(intro)] : []),
+      ...menuImages.messages(),
+      buttons('😋 *Just type your order*, the way you would message us. For example:\n'
+        + '_2 half veg steam momo, 1 full chilli potato less spicy, 1 veg manchow soup_\n\n'
+        + "Say *half* or *full* (or I'll ask). I'll arrange it into a proper order with prices before you confirm.", [
+        btn('act:browse', '📋 Browse menu'),
+        btn('act:human', '💬 Talk to us'),
+      ]),
+    ];
   }
 
   // A WhatsApp list holds 10 rows: show 9 and a "More" row when there are more.
@@ -194,11 +211,15 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     return s.cart.filter((l) => menu.has(l.id)).map((l) => ({ ...l, item: menu.get(l.id) }));
   }
 
+  // The cart as a numbered order slip: dish, portion, quantity, price, notes.
   function cartSummary(s) {
     const lines = cartLines(s);
-    const body = lines.map((l) => `${l.qty} × ${describe(l.item.name, l.note)} — ${rupees(l.item.price * l.qty)}`).join('\n');
+    const body = lines.map((l, i) => {
+      const { dish, portion } = portionOf(l.item.name);
+      return `*${i + 1}.* ${dish}${portion ? ` · ${portion}` : ''} × ${l.qty} — *${rupees(l.item.price * l.qty)}*${l.note ? `\n      _${l.note}_` : ''}`;
+    }).join('\n');
     const subtotal = lines.reduce((t, l) => t + l.item.price * l.qty, 0);
-    const notes = s.orderNotes.length ? `\n📝 ${s.orderNotes.join('; ')}` : '';
+    const notes = s.orderNotes.length ? `\n📝 Kitchen note: ${s.orderNotes.join('; ')}` : '';
     return { lines, body: `${body}${notes}`, subtotal };
   }
 
@@ -213,10 +234,12 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     return `🛵 Delivery (${s.distanceKm} km): ${fee ? rupees(fee) : 'FREE'}`;
   }
 
-  function cartView(s, heading = '🛒 *Your cart*') {
+  function cartView(s, heading = '🧾 *Your order so far*') {
     const { lines, body, subtotal } = cartSummary(s);
     if (!lines.length) return [buttons('Your cart is empty 🛒 Type your order or open the menu.', [btn('act:more', '📋 Menu')])];
-    return longButtons(`${heading}\n${body}\n\nItem total: *${rupees(subtotal)}*\n${deliveryLine(s, subtotal)}`, [
+    const outlet = s.outletId ? outletOf(s) : null;
+    const rule = '━━━━━━━━━━━━━━';
+    return longButtons(`${heading}${outlet ? `\n${outlet.name}` : ''}\n${rule}\n${body}\n${rule}\nItem total: *${rupees(subtotal)}*\n${deliveryLine(s, subtotal)}\n\n_Type more items to add, or *remove 2* to take out line 2._`, [
       btn('act:checkout', '✅ Checkout'),
       btn('act:more', '➕ Add more'),
       btn('act:clear', '🗑️ Clear cart'),
@@ -226,7 +249,10 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
   function confirmView(s) {
     const outlet = outletOf(s);
     const qte = orders.quote({ outletId: s.outletId, items: s.cart, fulfilment: s.fulfilment, distanceKm: s.distanceKm || 0 });
-    const lines = qte.lines.map((l) => `${l.qty} × ${describe(l.name, l.note)} — ${rupees(l.price * l.qty)}`).join('\n');
+    const lines = qte.lines.map((l, i) => {
+      const { dish, portion } = portionOf(l.name);
+      return `*${i + 1}.* ${dish}${portion ? ` · ${portion}` : ''} × ${l.qty} — ${rupees(l.price * l.qty)}${l.note ? `\n      _${l.note}_` : ''}`;
+    }).join('\n');
     const charges = [
       `Item total: ${rupees(qte.subtotal)}`,
       `Packing: ${rupees(qte.packing)}`,
@@ -563,7 +589,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       `Started by ${msg.type === 'reply' ? 'tapping "Talk to us"' : `message: "${msg.text}"`}`,
       s.fulfilment ? `Mode: ${s.fulfilment}` : null,
       s.address ? `Address: ${s.address}` : null,
-      s.cart.length ? `Cart:\n${body.replace(/_/g, '')}` : null,
+      s.cart.length ? `Cart:\n${body.replace(/[_*]/g, '')}` : null,
     ].filter(Boolean).join('\n');
     handoffs.open({ phone: msg.from, name: msg.name, outletId, context }, now);
     const outlet = outletId ? orders.getOutlet(outletId) : null;
@@ -626,8 +652,16 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
         return [text("👍 Done. We won't send you offers. You'll still get updates about your orders.")];
       }
       if (['checkout', 'check out', 'place order', 'done', "that's all", 'thats all'].includes(t) && s.cart.length) return checkout(s);
+      // "remove 2" / "hatao 2": drop that line of the order slip.
+      const rm = t.match(/^(?:remove|delete|hatao|hata do|hata|cancel)\s+(?:line\s+|item\s+|no\.?\s*)?(\d{1,2})$/);
+      if (rm && s.cart.length) {
+        const line = cartLines(s)[Number(rm[1]) - 1];
+        if (!line) return [text(`There's no line ${rm[1]} in your order.`), ...cartView(s)];
+        s.cart = s.cart.filter((l) => !(l.id === line.id && (l.note || '') === (line.note || '')));
+        return [text(`Removed ${line.qty} × ${line.item.name} ✅`), ...cartView(s)];
+      }
       if (t === 'cart') return s.outletId || s.cart.length ? cartView(s) : welcome(msg.name);
-      if (['menu', 'order'].includes(t)) return s.outletId ? categoriesList(s) : welcome(msg.name);
+      if (['menu', 'order'].includes(t)) return s.outletId ? menuView(s) : welcome(msg.name);
       if (['change address', 'new address', 'change location'].includes(t)) {
         s.state = 'await_address';
         return [text('🏠 Please type the new delivery address (house/flat no., street, landmark).')];
@@ -725,7 +759,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
         s.distanceKm = null;
         s.state = 'browsing';
         const intro = `🏃 Pickup from *${o.name}*\n${o.address}`;
-        if (!s.cart.length) return categoriesList(s, intro);
+        if (!s.cart.length) return menuView(s, intro);
         return afterOutletKnown(s, intro);
       }
       case 'cat':
@@ -778,6 +812,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       case 'act':
         switch (arg) {
           case 'more': s.state = 'browsing'; return categoriesList(s);
+          case 'browse': s.state = 'browsing'; return categoriesList(s);
           case 'cart': s.state = 'browsing'; return cartView(s);
           case 'clear': s.cart = []; s.orderNotes = []; s.choices = []; s.state = 'browsing'; return [text('Cart cleared. 🗑️'), ...(s.outletId ? categoriesList(s) : welcome(msg.name))];
           case 'checkout': return checkout(s);

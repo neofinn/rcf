@@ -57,3 +57,39 @@ test('WhatsApp: dishes page 9 at a time, then Half or Full, then how many', () =
   const done = tap(half.id);
   assert.match(done[0].text, /Added 1 × Chilli Chicken Boneless (Dry|Gravy) \(Half\)/);
 });
+
+test('WhatsApp with menu pictures: images then "type your order"; order slip; remove a line', () => {
+  const { createMenuImages } = require('../src/whatsapp/menu-image');
+  const { db, orders, store } = helpers.setup({ seed: realSeed });
+  db.exec("UPDATE outlets SET opens = '00:00', closes = '00:00'");
+  const menuImages = createMenuImages({ menuItems: () => store.menuItems(), baseUrl: 'https://order.example' });
+  const bot = createBot({ orders, handoffs: createHandoffService(store), sessions: createSessionStore(store), menuImages });
+  const tap = (id) => bot.handle({ from: '919800000002', name: 'Asha', type: 'reply', replyId: id }, helpers.LUNCH);
+  const say = (t) => bot.handle({ from: '919800000002', name: 'Asha', type: 'text', text: t }, helpers.LUNCH);
+  tap('mode:pickup');
+  const r = tap('outlet:2');
+  const images = r.filter((m) => m.type === 'image');
+  assert.equal(images.length, 4, 'the whole menu on 4 pictures');
+  assert.match(images[0].url, /^https:\/\/order\.example\/menu\/page-1\.png\?v=[0-9a-f]{12}$/);
+  assert.match(images[0].text, /Menu 1\/4: Momos/);
+  assert.match(r.at(-1).text, /Just type your order/);
+  assert.deepEqual(r.at(-1).buttons.map((b) => b.id), ['act:browse', 'act:human']);
+  assert.equal(tap('act:browse')[0].type, 'list', 'lists are still there');
+
+  const slip = say('2 half veg steam momo, 1 full chilli potato less spicy, 1 veg manchow soup');
+  const cart = slip.at(-1).text;
+  assert.match(cart, /\*1\.\* Veg Steam Momo · Half × 2 — \*₹278\*/);
+  assert.match(cart, /\*2\.\* Chilli Potato · Full × 1 — \*₹249\*\n {6}_less spicy_/);
+  assert.match(cart, /\*3\.\* Veg Manchow Soup × 1 — \*₹129\*/);
+  const removed = say('remove 2');
+  assert.match(removed[0].text, /Removed 1 × Chilli Potato \(Full\)/);
+  assert.doesNotMatch(removed.at(-1).text, /Chilli Potato/);
+  assert.match(say('remove 9')[0].text, /no line 9/);
+
+  // Prices change -> new picture version.
+  const before = menuImages.messages()[0].url;
+  store.setPrices([{ id: 1, oldPrice: 13900, newPrice: 14900 }], 'b1', 'test', new Date().toISOString());
+  assert.notEqual(menuImages.messages()[0].url, before);
+  const png = menuImages.png(1);
+  assert.equal(png.subarray(1, 4).toString(), 'PNG');
+});

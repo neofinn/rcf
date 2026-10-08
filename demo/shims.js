@@ -31,4 +31,6 @@ function createHash() {
   return { update(x) { data += x; return this; }, digest: () => fnvBytes(data, 32) };
 }
 
-module.exports = { EventEmitter, randomBytes, scryptSync, createHash };
+const join = (...parts) => parts.join('/');
+
+module.exports = { EventEmitter, randomBytes, scryptSync, createHash, join };

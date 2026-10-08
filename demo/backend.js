@@ -11,6 +11,7 @@ const { createHandoffService } = require('../src/handoff');
 const { authorize, createRoutes, recordOutbox, matchPath } = require('../src/routes/handlers');
 const { createCrm } = require('../src/crm');
 const { createMenuAdmin } = require('../src/menu-admin');
+const { createMenuImages } = require('../src/whatsapp/menu-image');
 const { createStaffAuth } = require('../src/staff-auth');
 const { createStockService } = require('../src/stock');
 const { createOutletAdmin } = require('../src/outlet-admin');
@@ -40,7 +41,9 @@ function createDemoBackend({ state } = {}) {
   const menuAdmin = createMenuAdmin({ store });
   const reviewClient = { send: async (to, replies) => client.send(to, replies) };
   const reviews = createReviews({ store, orders, client: reviewClient, log: { error: () => {}, info: () => {} } });
-  const bot = createBot({ orders, handoffs, crm, reviews, sessions: createSessionStore(store), places: () => store.localities(), baseUrl: 'https://order.rajuchinese.example' });
+  // Menu pictures shown inline in the demo chat (the server sends PNGs).
+  const menuImages = createMenuImages({ menuItems: () => store.menuItems(), baseUrl: null });
+  const bot = createBot({ orders, handoffs, crm, reviews, menuImages, sessions: createSessionStore(store), places: () => store.localities(), baseUrl: 'https://order.rajuchinese.example' });
   const outbox = [];
   const client = recordOutbox({ send: async () => {} }, outbox);
   const quiet = { error: () => {}, info: () => {} };

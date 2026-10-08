@@ -26,7 +26,7 @@ const out = path.resolve(args[0] || path.join(root, 'dist', 'demo.html'));
 const browserShims = {
   name: 'browser-shims',
   setup(build) {
-    build.onResolve({ filter: /^node:(events|crypto)$/ }, () => ({ path: path.join(root, 'demo', 'shims.js') }));
+    build.onResolve({ filter: /^node:(events|crypto|path)$/ }, () => ({ path: path.join(root, 'demo', 'shims.js') }));
     build.onResolve({ filter: /^\.\.?\/config$/ }, (args) => {
       const resolved = path.resolve(args.resolveDir, args.path);
       return resolved === path.join(root, 'src', 'config') ? { path: path.join(root, 'demo', 'config.js') } : undefined;
@@ -165,6 +165,8 @@ async function main() {
     minify: true,
     legalComments: 'none',
     plugins: [browserShims],
+    // Native PNG renderer: server only (the demo shows menu pages as SVG).
+    external: ['@resvg/resvg-js'],
   });
   const backend = bundle.outputFiles[0].text;
 

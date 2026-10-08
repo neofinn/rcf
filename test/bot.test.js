@@ -162,7 +162,7 @@ test('typed order with special instructions, a follow-up question and location',
   r = c.tap(`pick:${idOf(c.orders, 'Chilli Paneer Dry')}`);
   assert.match(r[0].text, /Added 2 × Chilli Paneer Dry _\(less spicy\)_/);
   // Ordered before choosing delivery/pickup: the cart is kept and asked at checkout.
-  assert.match(r[1].text, /Your cart/);
+  assert.match(r[1].text, /Your order so far/);
   r = c.tap('act:checkout');
   assert.deepEqual(allIds(r), ['mode:delivery', 'mode:pickup']);
   assert.equal(c.tap('mode:delivery')[0].type, 'location_request');
@@ -204,13 +204,13 @@ test('catalog cart is routed to the nearest outlet after location', () => {
   const combo = idOf(c.orders, 'Noodles + Manchurian Combo');
   let r = c.say({ type: 'catalog_order', text: 'extra spicy please', items: [{ retailerId: `RC-${combo}`, qty: 2 }] });
   assert.match(r[0].text, /Got your cart: 1 item/);
-  assert.match(r[1].text, /2 × Noodles \+ Manchurian Combo/);
+  assert.match(r[1].text, /Noodles \+ Manchurian Combo × 2/);
   c.tap('act:checkout');
   assert.equal(c.tap('mode:delivery')[0].type, 'location_request');
   r = c.text('House 77, Sector 5, Panchkula');
   assert.match(r[0].text, /We deliver to \*Sector 5, Panchkula\*! \*Raju Chinese - Sector 11 Panchkula\*/);
   assert.match(r.at(-1).text, /Please confirm/);
-  assert.match(r.at(-1).text, /2 × Noodles \+ Manchurian Combo/);
+  assert.match(r.at(-1).text, /Noodles \+ Manchurian Combo × 2/);
 });
 
 test('unknown requests offer a person; handoff relays messages and staff can hand back', () => {
@@ -224,7 +224,7 @@ test('unknown requests offer a person; handoff relays messages and staff can han
   assert.match(r[0].text, /Connecting you to our team at \*Raju Chinese - Sector 17\*/);
   const h = c.handoffs.openForPhone('919876543210');
   assert.equal(h.outlet_id, 1);
-  assert.match(h.messages[0].body, /Cart:\n1 × Veg Fried Rice/);
+  assert.match(h.messages[0].body, /Cart:\n1\. Veg Fried Rice × 1/);
 
   // While a person is on the chat the bot stays quiet and records messages.
   assert.deepEqual(c.text('Also can you do it jain?'), []);

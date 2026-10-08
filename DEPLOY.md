@@ -17,9 +17,39 @@ Prices below are indicative (October 2026). Check the providers' pages before bu
 
 | Option | Fits? | Why |
 |---|---|---|
-| **VPS (KVM 1 or KVM 2)** | **Recommended** | Full control: Node 22, a persistent disk for the SQLite database, background jobs (review requests, Supabase sync) always running. KVM 1 (1 vCPU, 4 GB RAM) is plenty for 7 outlets; KVM 2 gives headroom for growth. |
+| **VPS KVM 2** (2 vCPU, 8 GB) | **Recommended** | Full control: Node 22, a persistent disk for the SQLite database, background jobs (review requests, rider reassignment, Supabase sync) always running. Measured capacity below: even KVM 1 copes, but KVM 2 gives reports their own core, room for backups and menu-picture rendering, and growth to many more outlets. |
 | Business / Cloud web hosting with "Node.js apps" | Possible, not advised | Hostinger's managed Node.js hosting deploys from GitHub and is easy, but this app needs Node **22.5+** (built-in SQLite) and a data folder that survives redeploys, and the timers must keep running. Use it only if the panel offers Node 22+ and you keep `DB_PATH` outside the deployed folder. |
 | Shared hosting (Single/Premium) | No | No long-running Node.js process. |
+
+### How much server this traffic needs (measured)
+
+Today's aggregator volume, ₹50–70 lakh a month, is about 12,500–17,500 orders a month. That is 420–580 a day, and roughly 60–90 in the busiest hour if all of it moved to direct ordering. That is 1–2 orders a minute.
+
+`scripts/loadtest.js` simulates that mix all at once: web customers browsing, quoting, ordering and tracking; WhatsApp conversations of 8 messages each; 7 outlet tablets polling every 5 s; and staff updating orders. I ran it with the server pinned to **one CPU core**, against a database holding **a year of orders (219,000)**:
+
+| | Result |
+|---|---|
+| Orders handled | **≈1,700–2,000 a minute**, with p95 response 70–95 ms, while managers kept reloading analytics and the customer list |
+| Headroom | About **1,000×** the busiest hour |
+| Memory | About 200 MB |
+| Database | About 140 MB per year of orders (the nightly backup is one file) |
+| Analytics over a year of data | About 2.5 s, in a separate worker thread, so it never pauses order taking |
+
+The first run exposed real slowdowns at a year of data, all now fixed:
+- missing indexes;
+- the report loading every order ever;
+- the customer list being rebuilt for one WhatsApp lookup.
+
+Before the fixes, order taking stalled for 2–5 s at a time.
+
+**When to change the setup:** only if Raju Chinese grows into many cities, or one server is no longer enough. At that point move the main database to Postgres (Supabase already holds a live copy) and run two app servers. Re-run the load test before and after any big change:
+
+```bash
+DB_PATH=/tmp/loadtest.db PORT=3456 SHADOWFAX_MODE=simulate node src/server.js &
+node scripts/loadtest.js http://localhost:3456 --seconds 60 --customers 20
+```
+
+**WhatsApp limits.** The Cloud API sends up to 80 messages a second per number, far above ~10 messages per order. The limit that matters is Meta's **messaging tier**: how many different customers a day you may message *first*, with templates such as review requests to web customers and offers. It starts low and rises with business verification and good quality ratings. Replies to customers who messaged you are not limited by it.
 
 ### Set up the VPS (Ubuntu 24.04)
 

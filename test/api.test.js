@@ -270,7 +270,7 @@ test('catalog cart over the webhook, human handoff with staff replies, catalog f
 
   await post('c1', { type: 'order', order: { catalog_id: '1', text: '', product_items: [{ product_retailer_id: firstId, quantity: 3, item_price: 89, currency: 'INR' }] } });
   assert.match(s.sent.at(-1).replies[0].text, /Got your cart/);
-  assert.match(s.sent.at(-1).replies[1].text, /Your cart/);
+  assert.match(s.sent.at(-1).replies[1].text, /Your order so far/);
 
   await post('c2', { type: 'text', text: { body: 'talk to someone please' } });
   assert.match(s.sent.at(-1).replies[0].text, /Connecting you to our team/);

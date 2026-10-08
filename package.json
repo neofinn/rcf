@@ -21,5 +21,8 @@
   },
   "devDependencies": {
     "esbuild": "^0.25.12"
+  },
+  "optionalDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
   }
 }

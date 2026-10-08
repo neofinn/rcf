@@ -28,6 +28,7 @@ const { createStaffAuth } = require('./staff-auth');
 const { createStockService } = require('./stock');
 const { createOutletAdmin } = require('./outlet-admin');
 const { createReports } = require('./reports');
+const { createMenuImages } = require('./whatsapp/menu-image');
 const { computeAnalytics } = require('./analytics');
 
 function safeEqual(a, b) {
@@ -68,7 +69,9 @@ function createApp({
   const baseClient = waClient || createClient({ log });
   const client = enableDevTools ? recordOutbox(baseClient, outbox) : baseClient;
   const reviews = createReviews({ store, orders, client, log });
-  const bot = createBot({ orders, handoffs, crm, reviews, sessions: createSessionStore(store), places: () => store.localities() });
+  // The menu as pictures for WhatsApp, always from the live menu.
+  const menuImages = createMenuImages({ menuItems: () => store.menuItems(), baseUrl: config.publicBaseUrl });
+  const bot = createBot({ orders, handoffs, crm, reviews, menuImages, sessions: createSessionStore(store), places: () => store.localities() });
   notifyOnStatusChange({ orders, client, crm, log });
   relayHandoffReplies({ handoffs, client, log });
   notifyOnPayment({ orders, client, log });
@@ -92,6 +95,15 @@ function createApp({
   // Keep the raw body: Borzo callbacks are verified against it.
   app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { req.rawBody = buf; } }));
   app.get('/healthz', (req, res) => res.json({ ok: true }));
+
+  // Menu pages as PNG for WhatsApp (?v= changes whenever the menu or prices change).
+  app.get('/menu/page-:n.png', (req, res, next) => {
+    try {
+      const png = menuImages.png(req.params.n);
+      if (!png) return res.sendStatus(404);
+      res.type('png').set('Cache-Control', 'public, max-age=86400').send(png);
+    } catch (e) { next(e); }
+  });
 
   // UPI QR image for an order (sent as a WhatsApp image; WhatsApp can't show SVG).
   app.get('/pay/:code/qr.png', async (req, res, next) => {

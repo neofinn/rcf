@@ -7,6 +7,8 @@
   <title>WhatsApp Simulator – Raju Chinese</title>
   <link rel="stylesheet" href="/styles.css">
   <style>
+    /* Menu pictures and QR codes arrive as SVG in the simulator: fit them to the bubble. */
+    #chat svg { max-width: 100%; height: auto; display: block; }
     body { background: #e5ddd5; }
     @media (prefers-color-scheme: dark) { body { background: #0b141a; } }
     .chat { max-width: 520px; margin: 0 auto; padding: 12px 12px 140px; }

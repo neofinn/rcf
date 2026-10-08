@@ -40,6 +40,8 @@ Built on the official **WhatsApp Business Cloud API** (Meta).
 
 At checkout the saved address is used directly (type *change address* to edit it). If someone types an order before choosing, the cart is kept and delivery/pickup is asked at checkout.
 
+**Menu as pictures, order by typing.** 138 dishes don't fit WhatsApp lists (10 rows each), so once the outlet is set the bot sends the menu as **4 pictures** (`src/whatsapp/menu-image.js`). They are drawn from the live menu, so new prices and dishes show at once (served as PNG at `/menu/page-<n>.png`). Then it says "just type your order". The bot arranges what was typed into a numbered **order slip**: dish, Half/Full, quantity, price, the customer's notes, and the total with delivery. The customer can type more, or `remove 2` to drop a line, before confirming. "Browse menu" still opens the tap-through lists.
+
 Customers can order in three ways and mix them freely.
 
 **1. Type it like a message to a person** (`src/whatsapp/nlu.js`)
