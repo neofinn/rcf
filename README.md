@@ -73,6 +73,13 @@ Customers can type `menu`, `cart`, `track` or `reset` at any time. Orders from W
 
 At checkout (web and WhatsApp) the customer picks **💳 Pay now (UPI)** or **💵 Pay on delivery/pickup**.
 
+**Pay now means pay first.** A "Pay now" order waits as *Waiting for payment*. The customer isn't told "order placed", and the outlet sees it only in a separate "Waiting for payment" section marked "don't cook yet", with no Accept button and no rider. It goes to the kitchen (status *placed*, with the customer's confirmation and the outlet's beep) when:
+- WhatsApp confirms the payment, or
+- staff tap **Payment received** after a QR payment (the customer tapped *I've paid*; the outlet beeps for this), or
+- the customer switches to **Pay cash instead**.
+
+If nobody has paid (or said they paid) within `PAYMENT_WINDOW_MINUTES` (15), the order is cancelled as *Not paid in time*: its dishes go back to stock and the customer is told nothing was charged. A payment that lands later still goes through and the order is confirmed. Orders waiting for payment, or never paid, are not counted as sales or as cancellations in reports.
+
 - **Each order gets its own UPI request**, unlike a fixed QR printed or saved in the WhatsApp Business app. The request is for the exact bill amount, with the order code as the reference, and goes to the **UPI ID of the outlet that is cooking it**. Every outlet's own merchant UPI ID is stored on the outlet (`outlets.upi_id`); point them all at one ID if payments are collected centrally.
 - **On WhatsApp, paid inside the chat** (`WHATSAPP_PAYMENTS=on`): the bot sends WhatsApp's own **"Review and pay"** order message (`order_details`, India UPI). It lists the items, packing, GST, "Delivery by Shadowfax" and the total, with the order code as `reference_id`.
   - The customer pays with **WhatsApp's built-in UPI or any UPI app** on the phone.

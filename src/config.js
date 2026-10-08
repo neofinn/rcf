@@ -36,6 +36,11 @@ module.exports = {
     freeDeliveryAbove: int(env.FREE_DELIVERY_ABOVE_PAISE, 0),
   },
 
+  // Online UPI: an order waits this long for payment before it is cancelled.
+  payments: {
+    windowMinutes: num(env.PAYMENT_WINDOW_MINUTES, 15),
+  },
+
   // Loyalty: 1 point for every ₹100 of a completed order.
   loyalty: {
     rupeesPerPoint: num(env.LOYALTY_RUPEES_PER_POINT, 100),

@@ -27,6 +27,7 @@ function createSqliteStore(db) {
     adjustStock: db.prepare('UPDATE outlet_stock SET remaining = MAX(0, remaining + ?), updated_at = ? WHERE outlet_id = ? AND item_id = ?'),
     pinHash: db.prepare('SELECT pin_hash, updated_at FROM outlet_logins WHERE outlet_id = ?'),
     logins: db.prepare('SELECT outlet_id, updated_at FROM outlet_logins'),
+    unpaidBefore: db.prepare("SELECT code FROM orders WHERE status = 'awaiting_payment' AND payment_status = 'pending' AND created_at < ?"),
     setPin: db.prepare(`INSERT INTO outlet_logins (outlet_id, pin_hash, updated_at) VALUES (?, ?, ?)
       ON CONFLICT (outlet_id) DO UPDATE SET pin_hash = excluded.pin_hash, updated_at = excluded.updated_at`),
     addSession: db.prepare('INSERT INTO staff_sessions (token_hash, outlet_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
@@ -60,7 +61,7 @@ function createSqliteStore(db) {
     // INDEXED BY: without it SQLite picks the outlet index for the GROUP BY and
     // scans every order ever placed (seconds with a year of data).
     summary: db.prepare(`SELECT outlet_id, COUNT(*) AS orders, SUM(total) AS revenue FROM orders INDEXED BY orders_created
-      WHERE status != 'cancelled' AND created_at >= ? GROUP BY outlet_id`),
+      WHERE status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') AND created_at >= ? GROUP BY outlet_id`),
 
     openHandoff: db.prepare(`INSERT INTO wa_handoffs (phone, name, outlet_id, status, created_at, updated_at)
       VALUES (?, ?, ?, 'open', ?, ?)`),
@@ -94,18 +95,18 @@ function createSqliteStore(db) {
     ordersForPhone: db.prepare('SELECT * FROM orders WHERE phone = ? ORDER BY id DESC'),
     ordersBetween: db.prepare('SELECT * FROM orders WHERE created_at >= ? AND created_at < ? ORDER BY created_at'),
     // Each customer's first (non-cancelled) order, for customers who ordered in a range.
-    firstOrders: db.prepare(`SELECT p.phone, (SELECT o.created_at FROM orders o WHERE o.phone = p.phone AND o.status <> 'cancelled'
+    firstOrders: db.prepare(`SELECT p.phone, (SELECT o.created_at FROM orders o WHERE o.phone = p.phone AND o.status NOT IN ('cancelled', 'awaiting_payment', 'unpaid')
       ORDER BY o.created_at LIMIT 1) AS first FROM (SELECT DISTINCT phone FROM orders WHERE created_at >= ? AND created_at < ?) p`),
     customerStats: db.prepare(`SELECT phone, COUNT(*) AS orders, SUM(total) AS spent, MIN(created_at) AS first, MAX(created_at) AS last
-      FROM orders WHERE status <> 'cancelled' GROUP BY phone`),
+      FROM orders WHERE status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') GROUP BY phone`),
     customerStatsFor: db.prepare(`SELECT COUNT(*) AS orders, COALESCE(SUM(total), 0) AS spent, MIN(created_at) AS first, MAX(created_at) AS last
-      FROM orders WHERE phone = ? AND status <> 'cancelled'`),
-    favOutletFor: db.prepare(`SELECT outlet_id FROM orders WHERE phone = ? AND status <> 'cancelled' GROUP BY outlet_id ORDER BY COUNT(*) DESC LIMIT 1`),
-    repeatSpends: db.prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM orders WHERE status <> 'cancelled' GROUP BY phone HAVING COUNT(*) >= 2)`),
-    vipCut: db.prepare(`SELECT SUM(total) AS spent FROM orders WHERE status <> 'cancelled' GROUP BY phone HAVING COUNT(*) >= 2
+      FROM orders WHERE phone = ? AND status NOT IN ('cancelled', 'awaiting_payment', 'unpaid')`),
+    favOutletFor: db.prepare(`SELECT outlet_id FROM orders WHERE phone = ? AND status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') GROUP BY outlet_id ORDER BY COUNT(*) DESC LIMIT 1`),
+    repeatSpends: db.prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM orders WHERE status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') GROUP BY phone HAVING COUNT(*) >= 2)`),
+    vipCut: db.prepare(`SELECT SUM(total) AS spent FROM orders WHERE status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') GROUP BY phone HAVING COUNT(*) >= 2
       ORDER BY spent DESC LIMIT 1 OFFSET ?`),
     balanceFor: db.prepare('SELECT COALESCE(SUM(points), 0) AS b FROM loyalty_ledger WHERE phone = ?'),
-    customerOutlets: db.prepare(`SELECT phone, outlet_id, COUNT(*) AS n FROM orders WHERE status <> 'cancelled' GROUP BY phone, outlet_id`),
+    customerOutlets: db.prepare(`SELECT phone, outlet_id, COUNT(*) AS n FROM orders WHERE status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') GROUP BY phone, outlet_id`),
     linesBetween: db.prepare(`SELECT oi.order_id, oi.item_id, oi.name, oi.price, oi.qty, oi.note FROM order_items oi
       JOIN orders o ON o.id = oi.order_id WHERE o.created_at >= ? AND o.created_at < ?`),
     insertItem: db.prepare('INSERT INTO menu_items (category, name, description, price, veg, sort, active) VALUES (?, ?, ?, ?, ?, ?, ?)'),
@@ -161,6 +162,8 @@ function createSqliteStore(db) {
 
     // Orders
     orderCodeExists: (code) => !!q.byCode.get(code),
+    // UPI orders nobody has paid (or said they paid) since before `cutoff`.
+    unpaidBefore: (cutoff) => q.unpaidBefore.all(cutoff),
     insertOrder: (o, lines) => transaction(() => {
       const id = q.insertOrder.run(o.code, o.outlet_id, o.channel, o.fulfilment, o.customer_name, o.phone, o.address,
         o.lat, o.lng, o.distance_km, o.notes, o.subtotal, o.packing, o.gst, o.delivery_fee, o.total, o.payment_method,

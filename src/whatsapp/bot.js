@@ -25,6 +25,7 @@ const { parseOrderText } = require('./nlu');
 const { placeAddress } = require('../geocode');
 const { roadKm } = require('../geo');
 const { qrSvg, orderDetailsReply } = require('../payments');
+const { orderConfirmedText } = require('./notify');
 
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_QTY = 20;
@@ -284,7 +285,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     const o = orders.latestOrderForPhone(phone);
     if (!o) return [text("You don't have any orders yet. Send *hi* to start ordering.")];
     const tracking = text(`📦 Order *${o.code}*: ${o.statusLabel}\nFrom ${o.outlet.name} (${o.outlet.phone})\nTotal ${rupees(o.total)} · ${o.paymentLabel}\n\nTrack: ${baseUrl}/track.html?code=${o.code}`);
-    return o.payment_status === 'pending' ? [tracking, ...payView(o)] : [tracking];
+    return o.payment_status === 'pending' && !['unpaid', 'cancelled'].includes(o.status) ? [tracking, ...payView(o)] : [tracking];
   }
 
   // Ask the customer to pick between variants of something they typed: first
@@ -511,8 +512,12 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
         if (o.payment_status === 'pending') orders.setPayment(o.code, 'claimed', now, 'whatsapp');
         return [text(`We received ${rupees(msg.amount)} for order *${o.code}*, but the bill is ${rupees(o.total)}. ${o.outlet.name} will check and get back to you.`)];
       }
-      orders.setPayment(o.code, 'paid', now, 'whatsapp');
-      return [text(`✅ Payment of ${rupees(o.total)} received for order *${o.code}*${msg.transactionId ? ` (UPI ref ${msg.transactionId})` : ''}. Thank you! 🙏`)];
+      const paid = orders.setPayment(o.code, 'paid', now, 'whatsapp');
+      const ref = msg.transactionId ? ` (UPI ref ${msg.transactionId})` : '';
+      if (paid.status !== 'placed' || !['awaiting_payment', 'unpaid'].includes(o.status)) {
+        return [text(`✅ Payment of ${rupees(o.total)} received for order *${o.code}*${ref}. Thank you! 🙏`)];
+      }
+      return [text(`✅ Payment of ${rupees(o.total)} received${ref}.\n\n${confirmedBody(paid)}`), ...afterConfirm(paid)];
     }
     if (['failed', 'canceled', 'cancelled', 'expired'].includes(msg.status) && ['pending', 'claimed'].includes(o.payment_status)) {
       return [buttons(`⚠️ Your UPI payment for order *${o.code}* didn't go through. No money was taken.\nTry again, or pay ${rupees(o.total)} by cash/UPI ${o.fulfilment === 'delivery' ? 'on delivery' : 'at pickup'}.`, [
@@ -522,6 +527,14 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     }
     return [];
   }
+
+  // Confirmation once an order goes to the kitchen (paid online or switched to cash).
+  function confirmedBody(o) {
+    const willEarn = crm ? crm.pointsFor(o.total) : 0;
+    const loyalty = willEarn ? `\n⭐ You'll earn *${willEarn} loyalty point${willEarn > 1 ? 's' : ''}* when it's ${o.fulfilment === 'delivery' ? 'delivered' : 'picked up'}.` : '';
+    return `${orderConfirmedText(o)}\n\nTrack your order: ${baseUrl}/track.html?code=${o.code}\nOutlet phone: ${o.outlet.phone}${loyalty}`;
+  }
+  const afterConfirm = (o) => (crm && !crm.optedIn(o.phone) ? optInAsk() : []);
 
   // Ask once for permission to send offers (needed for WhatsApp campaigns).
   function optInAsk() {
@@ -541,7 +554,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
 
   function latestUnpaid(phone) {
     const o = orders.latestOrderForPhone(phone);
-    return o && ['pending', 'claimed'].includes(o.payment_status) ? o : null;
+    return o && ['pending', 'claimed'].includes(o.payment_status) && !['unpaid', 'cancelled', 'completed'].includes(o.status) ? o : null;
   }
 
   function place(s, msg, now, paymentMethod = 'cod') {
@@ -566,7 +579,8 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       const loyalty = willEarn ? `\n⭐ You'll earn *${willEarn} loyalty point${willEarn > 1 ? 's' : ''}* when it's delivered.` : '';
       const optIn = crm && !crm.optedIn(order.phone) ? optInAsk() : [];
       if (order.payment_method === 'upi') {
-        return [text(`🎉 Order placed! Your order ID is *${order.code}*.\n\n${order.outlet.name} will ${order.fulfilment === 'delivery' ? `deliver in about ${order.etaMinutes} min` : `have it ready in about ${order.etaMinutes} min`}. Outlet phone: ${order.outlet.phone}${loyalty}`), ...payView(order), ...optIn];
+        // Not placed yet: the kitchen gets it once the payment is in.
+        return [text(`🧾 Your order *${order.code}* is ready to go. *Pay ${rupees(order.total)} to confirm it*: the kitchen starts as soon as your payment arrives.\n\n(Not paid within ${config.payments.windowMinutes} minutes? We cancel it and nothing is charged.)`), ...payView(order)];
       }
       return [text(`🎉 Order placed! Your order ID is *${order.code}*.\n\n${order.outlet.name} will ${order.fulfilment === 'delivery' ? `deliver in about ${order.etaMinutes} min` : `have it ready in about ${order.etaMinutes} min`}.\nPay ${rupees(order.total)} by cash/UPI on ${order.fulfilment === 'delivery' ? 'delivery' : 'pickup'}.${loyalty}\n\nTrack your order: ${baseUrl}/track.html?code=${order.code}\nOutlet phone: ${order.outlet.phone}\n\nWe'll message you here as your order moves along. Thank you! 🙏`), ...optIn];
     } catch (e) {
@@ -829,7 +843,9 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
             const o = latestUnpaid(msg.from);
             if (!o) return [text("You don't have a UPI payment waiting. Type *track* to see your order.")];
             orders.claimPayment(o.code, now);
-            return [text(`🙏 Thank you! ${o.outlet.name} will confirm as soon as ${rupees(o.total)} shows in their UPI account. We'll message you here.`)];
+            return [text(o.status === 'awaiting_payment'
+              ? `🙏 Thank you! ${o.outlet.name} is checking for ${rupees(o.total)} in their UPI account. Your order goes to the kitchen as soon as they see it, and we'll message you here.`
+              : `🙏 Thank you! ${o.outlet.name} will confirm as soon as ${rupees(o.total)} shows in their UPI account. We'll message you here.`)];
           }
           case 'optin_yes':
             if (crm) crm.update(msg.from, { optIn: true });
@@ -844,8 +860,9 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
           case 'pay_cash': {
             const o = latestUnpaid(msg.from);
             if (!o) return [text("You don't have a UPI payment waiting. Type *track* to see your order.")];
-            orders.setPayment(o.code, 'cod', now, 'customer');
-            return [text(`👍 No problem, pay ${rupees(o.total)} by cash/UPI ${o.fulfilment === 'delivery' ? 'when your order arrives' : 'at pickup'}.`)];
+            const cash = orders.setPayment(o.code, 'cod', now, 'customer');
+            const pay = `👍 No problem, pay ${rupees(o.total)} by cash/UPI ${o.fulfilment === 'delivery' ? 'when your order arrives' : 'at pickup'}.`;
+            return o.status === 'awaiting_payment' ? [text(`${pay}\n\n${confirmedBody(cash)}`), ...afterConfirm(cash)] : [text(pay)];
           }
           case 'cancel': s.state = 'browsing'; return [text('No problem, your order was not placed. Your cart is still saved.'), ...cartView(s)];
           case 'track': return trackView(msg.from);

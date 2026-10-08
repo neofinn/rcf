@@ -5,6 +5,11 @@
 .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
 .order { background: var(--card); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); border-top: 4px solid var(--line); }
 .order.placed { border-top-color: var(--brand); animation: pulse 1.5s ease-in-out 3; }
+.order.awaiting_payment { border-top-style: dashed; border-top-color: var(--muted); }
+.order .hold { margin: 6px 0; padding: 8px 10px; border-radius: 8px; font-size: 0.9rem; background: rgba(244, 163, 0, 0.14); border: 1px solid var(--accent); }
+h3.section { margin: 4px 0 8px; font-size: 0.95rem; color: var(--muted); font-weight: 600; }
+.grid.waiting { margin-bottom: 16px; }
+.grid.waiting .order { opacity: 0.92; }
 .order.accepted, .order.preparing { border-top-color: var(--accent); }
 .order.ready, .order.out_for_delivery { border-top-color: var(--ok); }
 @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(214, 40, 40, 0.3); } }

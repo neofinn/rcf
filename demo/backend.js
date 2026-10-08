@@ -60,6 +60,8 @@ function createDemoBackend({ state } = {}) {
   notifyOnDelivery({ dispatcher, client, log: quiet });
   // Demo: check for due review requests every 5 seconds (asked 20 s after delivery).
   reviews.startTicker(5000);
+  // Demo: unpaid UPI orders are cancelled after 3 minutes (see demo/config.js).
+  setInterval(() => orders.expireUnpaid(), 5000);
   // Head office token is "demo"; every outlet's panel PIN is 1234.
   const staffAuth = createStaffAuth({ store, adminToken: 'demo' });
   if (!state) for (const o of orders.listOutlets()) staffAuth.setPin(o.id, DEMO_PIN);

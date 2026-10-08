@@ -20,7 +20,8 @@ const { qrSvg } = require('../payments');
 const { AuthError } = require('../staff-auth');
 const { brand } = require('../brand');
 
-const ACTIVE = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
+// Live orders: UPI orders waiting for payment show too, so staff can confirm a QR payment.
+const ACTIVE = ['awaiting_payment', 'placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
 const IST_OFFSET_MS = 330 * 60 * 1000; // IST is UTC+5:30, no daylight saving
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -224,6 +225,7 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
           total: o.total, paymentMethod: o.payment_method,
           etaMinutes: o.etaMinutes, createdAt: o.created_at, updatedAt: o.updated_at, outlet: o.outlet,
           payment: publicPayment(o),
+          payWithinMinutes: config.payments.windowMinutes,
           delivery: publicDelivery(o.delivery),
           loyalty: crm ? { points: crm.pointsFor(o.total), earned: o.status === 'completed' } : null,
         };
@@ -235,6 +237,16 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
       handle: ({ params }) => {
         const o = orders.claimPayment(params.code);
         return o ? { payment: publicPayment(o) } : notFound('Order not found');
+      },
+    },
+    {
+      // Customer switches a waiting UPI order to cash/UPI on delivery (tracking page).
+      method: 'POST', path: '/api/orders/:code/cash',
+      handle: ({ params }) => {
+        const o = orders.getOrder(params.code);
+        if (!o) return notFound('Order not found');
+        if (!['pending', 'claimed'].includes(o.payment_status)) return { payment: publicPayment(o) };
+        return { payment: publicPayment(orders.setPayment(o.code, 'cod', new Date(), 'customer')) };
       },
     },
 

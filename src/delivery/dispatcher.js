@@ -99,7 +99,8 @@ function createDispatcher({
   /** Book a rider for a delivery order. Safe to call again after a failure (it tries every partner again). */
   async function book(code) {
     const order = orders.getOrder(code);
-    if (!order || order.fulfilment !== 'delivery' || ['completed', 'cancelled'].includes(order.status)) return order;
+    // No rider for orders that are finished, or not yet paid / never paid.
+    if (!order || order.fulfilment !== 'delivery' || ['completed', 'cancelled', 'awaiting_payment', 'unpaid'].includes(order.status)) return order;
     const current = order.delivery;
     if (current && !['FAILED', 'OWN'].includes(current.status) && !FAILED.has(current.status)) return order;
     if (!enabled) return save(order, { provider: 'none', status: 'FAILED', error: 'No delivery partner is configured' }, 'failed');

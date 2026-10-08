@@ -70,8 +70,10 @@ function computeAnalytics(store, filters = {}, now = new Date()) {
   const all = store.ordersBetween(prevIso, toIso);
   const firstOrderAt = store.firstOrders(prevIso, toIso);
 
-  const cur = all.filter((o) => o.created_at >= fromIso && o.created_at < toIso && match(o));
-  const prev = all.filter((o) => o.created_at >= prevIso && o.created_at < fromIso && match(o));
+  // UPI orders that were never paid never reached the kitchen: not orders at all here.
+  const real = (o) => o.status !== 'awaiting_payment' && o.status !== 'unpaid';
+  const cur = all.filter((o) => o.created_at >= fromIso && o.created_at < toIso && match(o) && real(o));
+  const prev = all.filter((o) => o.created_at >= prevIso && o.created_at < fromIso && match(o) && real(o));
   const live = cur.filter((o) => o.status !== 'cancelled');
   const liveIds = new Set(live.map((o) => o.id));
   const lines = store.linesBetween(fromIso, toIso).filter((l) => liveIds.has(l.order_id));

@@ -103,7 +103,7 @@ function quotesLine(d) {
 }
 
 function deliveryBlock(o) {
-  if (o.fulfilment !== 'delivery' || (['completed', 'cancelled'].includes(o.status) && !o.delivery)) return '';
+  if (o.fulfilment !== 'delivery' || ['awaiting_payment', 'unpaid'].includes(o.status) || (['completed', 'cancelled'].includes(o.status) && !o.delivery)) return '';
   const d = o.delivery;
   const book = `<button type="button" data-delivery="${o.code}" data-action="book">🛵 ${d ? 'Try again' : 'Book rider'}</button>`;
   const own = `<button type="button" class="cancel" data-delivery="${o.code}" data-action="own">Own rider</button>`;
@@ -134,10 +134,15 @@ function payActions(o) {
 }
 
 function orderCard(o) {
+  const waiting = o.status === 'awaiting_payment';
+  const hold = waiting ? `<div class="hold">${o.payment_status === 'claimed'
+    ? `💳 Customer says they paid ${rupees(o.total)}. Check your UPI app; the order is confirmed when you tap <b>Payment received</b>.`
+    : '⏳ Waiting for the customer to pay by UPI. <b>Don\'t cook yet.</b> Cancelled automatically if not paid in time.'}</div>` : '';
   const map = o.lat != null ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${o.lat},${o.lng}" target="_blank" rel="noopener">map</a>` : '';
   return `<div class="order ${o.status}">
     <h4><span>${esc(o.code)}</span><span class="chip">${o.fulfilment === 'delivery' ? '🛵 Delivery' : '🏃 Pickup'} · ${o.channel === 'whatsapp' ? 'WhatsApp' : 'Web'}</span></h4>
     <div class="small muted">${ago(o.created_at)} · ${esc(o.statusLabel)}${state.outletId ? '' : ' · ' + esc(BRAND.short(o.outlet.name))}</div>
+    ${hold}
     <ul>${o.items.map((i) => `<li>${i.qty} × ${esc(i.name)}${i.note ? ` <b style="color:var(--brand)">(${esc(i.note)})</b>` : ''}</li>`).join('')}</ul>
     ${o.notes ? `<div class="small"><b>Note:</b> ${esc(o.notes)}</div>` : ''}
     <div class="small"><b>${esc(o.customer_name)}</b> · <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></div>
@@ -155,12 +160,19 @@ async function renderOrders() {
   if (state.view === 'history') q.set('status', 'all');
   const orders = await api('/orders?' + q);
   if (state.view === 'live') {
-    const fresh = orders.filter((o) => o.status === 'placed' && !state.seen.has(o.code));
+    // Beep for a new order to cook, and for a customer saying they paid (staff must check).
+    // A UPI order that was waiting beeps when its payment is confirmed, not before.
+    const key = (o) => `${o.code}:${o.status}:${o.payment_status}`;
+    const fresh = orders.filter((o) => (o.status === 'placed' || o.payment_status === 'claimed') && !state.seen.has(key(o)));
     if (fresh.length && !state.firstLoad) beep();
-    orders.forEach((o) => state.seen.add(o.code));
+    orders.forEach((o) => state.seen.add(key(o)));
     state.firstLoad = false;
   }
-  $('view').innerHTML = orders.length ? `<div class="grid">${orders.map(orderCard).join('')}</div>` : '<p class="muted">No orders here yet.</p>';
+  const waiting = state.view === 'live' ? orders.filter((o) => o.status === 'awaiting_payment') : [];
+  const rest = orders.filter((o) => !waiting.includes(o));
+  $('view').innerHTML = (waiting.length ? `<h3 class="section">Waiting for payment (${waiting.length})</h3><div class="grid waiting">${waiting.map(orderCard).join('')}</div>` : '')
+    + (waiting.length && rest.length ? '<h3 class="section">Orders</h3>' : '')
+    + (rest.length ? `<div class="grid">${rest.map(orderCard).join('')}</div>` : (waiting.length ? '' : '<p class="muted">No orders here yet.</p>'));
 }
 
 function chatCard(h) {

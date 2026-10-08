@@ -103,6 +103,7 @@ test('order status updates refresh the WhatsApp order card', (t) => {
   const { orders, order } = upiOrderOverWhatsApp();
   const sent = [];
   notifyOnStatusChange({ orders, client: { send: async (to, r) => { sent.push(...r); } }, log: { error() {} } });
+  orders.setPayment(order.code, 'paid', new Date(), 'whatsapp');
   orders.updateStatus(order.code, 'accepted');
   assert.equal(sent[0].type, 'order_status');
   assert.equal(sent[0].status, 'processing');
