@@ -3,7 +3,7 @@
 This takes the app from the demo to real orders. Rough order of work:
 
 1. Start the WhatsApp/Meta paperwork first: business verification can take days.
-2. Set up the server (about an hour).
+2. Set up the server: one script, about 15 minutes once DNS points at it.
 3. Add Supabase (about 15 minutes).
 4. Connect WhatsApp, payments and Shadowfax.
 
@@ -51,106 +51,99 @@ node scripts/loadtest.js http://localhost:3456 --seconds 60 --customers 20
 
 **WhatsApp limits.** The Cloud API sends up to 80 messages a second per number, far above ~10 messages per order. The limit that matters is Meta's **messaging tier**: how many different customers a day you may message *first*, with templates such as review requests to web customers and offers. It starts low and rises with business verification and good quality ratings. Replies to customers who messaged you are not limited by it.
 
-### Set up the VPS (Ubuntu 24.04)
+### Set up the VPS (Ubuntu 24.04): one script
 
-In hPanel: **VPS → choose the plain Ubuntu 24.04 template**, set a root password or SSH key, note the server's IP.
+**Before you start:**
+1. Buy the VPS with **Ubuntu 24.04** and note its IP address.
+2. Choose the ordering address, e.g. `order.<your-domain>`. At the domain registrar, add an `A` record from that name to the VPS IP. (`rajuchinesefood.com` did not resolve when checked, so register or renew a domain first.)
+3. Wait until `ping order.<your-domain>` shows the VPS IP, usually a few minutes.
 
-**DNS.** Point a domain at the server: an `A` record, e.g. `order.<your-domain>` → VPS IP. (`rajuchinesefood.com` did not resolve when checked; register or renew a domain first.)
-
-**Install** (SSH in as root):
-
-```bash
-# Node.js 22 LTS, git, nginx, certbot, sqlite3 (for backups)
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt-get install -y nodejs git nginx certbot python3-certbot-nginx sqlite3
-npm install -g pm2
-
-# App user and code
-adduser --disabled-password --gecos "" rcf
-su - rcf -c "git clone https://github.com/neofinn/rcf.git app && cd app && npm ci --omit=dev"
-```
-
-**Configure:**
+**Run the setup** (SSH in as root, then):
 
 ```bash
-su - rcf
-cd app
-cp .env.example .env
-nano .env
+curl -fsSL https://raw.githubusercontent.com/neofinn/rcf/release/v0.20/deploy/setup.sh -o setup.sh
+sudo bash setup.sh order.<your-domain> you@example.com release/v0.20
 ```
 
-In `.env`, set at least:
-- `NODE_ENV=production`
-- `PUBLIC_BASE_URL=https://order.<your-domain>`
-- `ADMIN_TOKEN` (generate one with `openssl rand -hex 24`)
-- `DB_PATH=/home/rcf/data/rcf.db`
+`deploy/setup.sh` does everything below, and is safe to run again; it never overwrites `.env` or the database:
+- installs nginx, certbot, sqlite3, the firewall, Node.js 22 and pm2;
+- creates the app user `rcf`;
+- writes `/home/rcf/shared/.env` with fresh secrets (head office token, WhatsApp verify token, partner callback tokens);
+- installs the release with `deploy.sh` (below), which runs the test suite first;
+- configures nginx (gzip, an API rate limit, a "back in a moment" page during restarts) and a free HTTPS certificate with automatic renewal;
+- sets up start on boot, log rotation, nightly backups and the firewall.
 
-Fill in the WhatsApp, Shadowfax and Supabase settings as you finish those sections below.
+At the end it prints the panel addresses, the **head office token** and the **WhatsApp webhook URL and verify token**, then runs the setup check.
 
-Before the first start, correct the outlets, menu prices and UPI IDs in `clients/raju-chinese/data.js`, or edit them in the admin later. (`CLIENT` in `.env` picks the client profile; see `clients/README.md`.)
+**Layout on the server** (`/home/rcf`):
 
-**Run it with PM2** (restarts on crash and on reboot):
+```
+repo/                 git clone, only used to fetch releases
+releases/<name>/      one folder per installed release (last 5 kept)
+current -> releases/… the live release (pm2 runs this)
+shared/.env           settings and keys (chmod 600)
+shared/data/rcf.db    the database: all orders, customers, menu
+shared/backups/       nightly backups (30 days) + one before every update
+shared/logs/          app, backup and test logs
+```
+
+**Settings.** Fill in the WhatsApp, delivery partner and Supabase keys as you finish those sections below:
 
 ```bash
-pm2 start npm --name rcf -- start
-pm2 save
-exit                                  # back to root
-env PATH=$PATH:/usr/bin pm2 startup systemd -u rcf --hp /home/rcf
+sudo -u rcf nano /home/rcf/shared/.env
+sudo -u rcf pm2 reload rcf
 ```
 
-**Nginx + HTTPS.** HTTPS is required by WhatsApp webhooks and by browser GPS. Create `/etc/nginx/sites-available/rcf`:
+**Setup check.** `sudo -u rcf bash -c 'cd ~/current && npm run check'` lists what is still missing or a placeholder: UPI IDs ending `@example`, outlets without a panel PIN or Shadowfax store code, test-server URLs for delivery partners, the placeholder delivery rate card. In production, the server **refuses to start** on unsafe settings:
+- a short head office token, or a non-https address;
+- WhatsApp connected without its app secret;
+- delivery partners in simulate mode, or a partner without its callback secret.
 
-```nginx
-server {
-  server_name order.your-domain.in;
-  client_max_body_size 1m;
-  location / {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-}
-```
+**Panels.** Open `https://order.<your-domain>/admin/` with the head office token. In **Outlets**, set a PIN for each outlet and fix each outlet's UPI ID and phone number. On each outlet's tablet, open `https://order.<your-domain>/outlet/`, pick the outlet, enter its PIN, and add it to the home screen.
 
-Then enable the site, open the firewall and get a certificate:
+**Uptime alert (free).** At uptimerobot.com, add an HTTPS monitor for `https://order.<your-domain>/healthz` (every 5 minutes) with alerts to your phone. It reports `{"ok":true}` only when the app and the database answer.
+
+**Backups.** Every night at 03:15, `deploy/backup.sh` copies the database (consistent while running), checks it, and keeps 30 days in `shared/backups/`. Every update also takes a backup first. For copies off the server: Supabase (section 2) holds a live copy, and Hostinger's weekly VPS snapshots cover the whole machine. To restore a backup:
 
 ```bash
-ln -s /etc/nginx/sites-available/rcf /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx
-ufw allow OpenSSH && ufw allow 'Nginx Full' && ufw enable
-certbot --nginx -d order.your-domain.in     # free Let's Encrypt certificate, auto-renews
+sudo -u rcf pm2 stop rcf
+sudo -u rcf bash -c 'gunzip -c ~/shared/backups/rcf-2026-11-02-0315.db.gz > ~/shared/data/rcf.db && rm -f ~/shared/data/rcf.db-wal ~/shared/data/rcf.db-shm'
+sudo -u rcf pm2 start rcf
 ```
 
-Check `https://order.your-domain.in/healthz`. It should return `{"ok":true}`.
+Orders placed after that backup are lost, so only do this if the data is damaged.
 
-**Panels.** Open `https://order.your-domain.in/admin/` with the `ADMIN_TOKEN` (head office only). In **Outlets**, set a PIN for each outlet. On each outlet's tablet, open `https://order.your-domain.in/outlet/`, pick the outlet, enter its PIN, and add it to the home screen.
-
-**Backups.** The whole business data is one file. Back it up nightly (as user `rcf`, `crontab -e`):
-
-```
-15 3 * * * mkdir -p ~/backups && sqlite3 ~/data/rcf.db ".backup '$HOME/backups/rcf-$(date +\%F).db'" && find ~/backups -name 'rcf-*.db' -mtime +30 -delete
-```
-
-Two more layers:
-- Turn on Hostinger's weekly VPS backups or snapshots.
-- With Supabase connected (next section), every change is also copied off the server within seconds.
-
-**Updating the app later:**
+**Updating, and rolling back.** Every release is a branch `release/v0.N` on GitHub. To update:
 
 ```bash
-su - rcf
-cd app && git pull && npm ci --omit=dev && pm2 restart rcf
+sudo -u rcf bash /home/rcf/current/deploy/deploy.sh release/v0.21
 ```
 
-**Versions and rolling back.** Every release is kept on GitHub as a branch `release/v0.N` (the full list is on the repo's Branches page), and the server should always run one of them rather than an unnamed commit. Before an update, take a backup, then switch:
+The script:
+1. installs the release into a new folder;
+2. **runs the full test suite** (stops here if anything fails; nothing changes);
+3. backs up the database;
+4. switches over (customers see "back in a moment" for 1–2 seconds);
+5. waits for the health check.
+
+If the new version doesn't come up healthy within 40 seconds, **it switches back to the previous one by itself**. Update outside the lunch and dinner rush.
 
 ```bash
-su - rcf
-sqlite3 ~/data/rcf.db ".backup '$HOME/backups/rcf-before-update.db'"
-cd app && git fetch origin && git checkout -B live origin/release/v0.18 && npm ci --omit=dev && pm2 restart rcf
+sudo -u rcf bash /home/rcf/current/deploy/deploy.sh --list       # installed releases, * = live
+sudo -u rcf bash /home/rcf/current/deploy/deploy.sh --rollback   # back to the one before
 ```
 
-To roll back, run the same command with the earlier version (for example `origin/release/v0.17`). Database changes are only ever additions (new tables and columns), so an older version runs on a newer database and nothing needs restoring. Restore `rcf-before-update.db` only if the new version damaged data. To do that, stop the app, copy the file over `~/data/rcf.db`, and start it again; orders placed since the backup are lost.
+Database changes are only ever additions (new tables and columns), so an older release runs on a newer database and a rollback never needs a restore.
+
+**Everyday commands:**
+
+| What | Command |
+|---|---|
+| Is it running? | `sudo -u rcf pm2 status` |
+| Live log | `sudo -u rcf pm2 logs rcf` |
+| Restart after editing `.env` | `sudo -u rcf pm2 reload rcf` |
+| Health | `curl https://order.<your-domain>/healthz` |
+| Deploy history | `cat /home/rcf/shared/deploys.log` |
 
 | Version | What it added |
 |---|---|
@@ -162,6 +155,8 @@ To roll back, run the same command with the earlier version (for example `origin
 | v0.16 | Performance for a year of data |
 | v0.17 | Several delivery partners with smart selection |
 | v0.18 | WhatsApp menu pictures and order slip |
+| v0.19 | Client profiles (brand per client) |
+| v0.20 | Go-live checks, health check, one-command server setup, safe updates with automatic rollback |
 
 Earlier client demos stay online at `https://neofinn.github.io/rcf/versions.html`.
 

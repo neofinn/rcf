@@ -96,7 +96,16 @@ function createApp({
 
   // Keep the raw body: Borzo callbacks are verified against it.
   app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { req.rawBody = buf; } }));
-  app.get('/healthz', (req, res) => res.json({ ok: true }));
+  // Health check for uptime monitors and the update script: the database must answer.
+  const version = (() => { try { return fs.readFileSync(path.join(__dirname, '..', 'VERSION'), 'utf8').trim(); } catch { return 'dev'; } })();
+  app.get('/healthz', (req, res) => {
+    try {
+      db.prepare('SELECT 1').get();
+      res.json({ ok: true, version });
+    } catch (e) {
+      res.status(503).json({ ok: false, version, error: e.message });
+    }
+  });
 
   // Menu pages as PNG for WhatsApp (?v= changes whenever the menu or prices change).
   app.get('/menu/page-:n.png', (req, res, next) => {
@@ -147,6 +156,9 @@ function createApp({
     });
   }
 
+  // The WhatsApp simulator is a developer tool: not served in production.
+  if (!enableDevTools) app.get(['/whatsapp-sim.html', '/whatsapp-sim'], (req, res) => res.status(404).send('Not found'));
+
   // Pages carry the client's name, logo and colours (see src/brand.js).
   const publicDir = path.join(__dirname, '..', 'public');
   const pages = new Map();
@@ -172,7 +184,7 @@ function createApp({
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock, reports };
+  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock, reports, version };
 }
 
 module.exports = { createApp };

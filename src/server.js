@@ -2,23 +2,53 @@
 
 const config = require('./config');
 const { createApp } = require('./app');
+const { preflight, format } = require('./preflight');
+const { brand } = require('./brand');
 
-if (config.production && config.adminToken === 'change-me') {
-  console.error('Refusing to start: set ADMIN_TOKEN in production.');
+const ctx = createApp();
+const { app, db, store, reviews, sync, dispatcher, reports, version } = ctx;
+
+// Go-live checks: in production, refuse to start on an unsafe setting.
+const report = preflight(config, store);
+if (report.errors.length || report.warnings.length) console.log(`Setup check:\n${format({ ...report, ok: [] })}`);
+if (config.production && report.errors.length) {
+  console.error('Refusing to start in production until the ✗ items above are fixed (see .env).');
   process.exit(1);
 }
 
-const { app, reviews, sync, dispatcher } = createApp();
 // Moves bookings that get no rider in time to the next delivery partner.
 dispatcher.startSweeper(60 * 1000);
 // Sends review requests (30 min after delivery) and other scheduled jobs.
 reviews.startTicker(60 * 1000);
 // Copies new and changed rows to Supabase every few seconds, when configured.
 if (sync) sync.startTicker(5000);
-app.listen(config.port, () => {
-  console.log(`${require('./brand').brand().name} ordering running on http://localhost:${config.port}`);
+
+const server = app.listen(config.port, () => {
+  console.log(`${brand().name} ordering ${version} running on http://localhost:${config.port}`);
   console.log(`  Customer app:       ${config.publicBaseUrl}/`);
-  console.log(`  Outlet dashboard:   ${config.publicBaseUrl}/admin/`);
+  console.log(`  Outlet panel:       ${config.publicBaseUrl}/outlet/`);
+  console.log(`  Head office panel:  ${config.publicBaseUrl}/admin/`);
   if (sync) console.log(`  Supabase copy:      ${config.supabase.url}`);
   if (!config.production) console.log(`  WhatsApp simulator: ${config.publicBaseUrl}/whatsapp-sim.html`);
 });
+
+// Restarts (updates, pm2 reload) finish open requests, send what's waiting for
+// Supabase, and close the database cleanly.
+let stopping = false;
+async function shutdown(signal) {
+  if (stopping) return;
+  stopping = true;
+  console.log(`${signal}: shutting down`);
+  const force = setTimeout(() => process.exit(1), 10000);
+  force.unref();
+  dispatcher.stopSweeper();
+  reviews.stopTicker();
+  if (sync) sync.stopTicker();
+  await new Promise((r) => server.close(r));
+  if (sync) await sync.flush().catch(() => {});
+  reports.close();
+  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); db.close(); } catch { /* already closed */ }
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

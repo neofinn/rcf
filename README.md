@@ -193,7 +193,7 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
 Step-by-step hosting (Hostinger), Supabase and WhatsApp number setup: **[DEPLOY.md](DEPLOY.md)**.
 
 1. **Real outlet data.** `clients/raju-chinese/data.js` has the 7 outlets from public listings, but the coordinates are approximate, and the menu prices, opening hours and UPI IDs (`…@example`, deliberately invalid) are *placeholders*. Fix them before the first start (the seed runs only on an empty database), or edit the `outlets` / `menu_items` tables afterwards. Take each outlet's latitude/longitude from Google Maps (right-click the outlet's pin).
-2. **Hosting.** Any small VPS with a persistent disk for `data/`, behind HTTPS (required by both WhatsApp webhooks and browser geolocation). Set `NODE_ENV=production`, `PUBLIC_BASE_URL` and a long random `ADMIN_TOKEN`.
+2. **Hosting.** `deploy/setup.sh` sets up a fresh Ubuntu VPS in one go (HTTPS, backups, start on boot); `npm run check` lists what's still missing. See DEPLOY.md.
 3. **WhatsApp Business.**
    - Create a Meta Business account and a WhatsApp Business app at developers.facebook.com, and add and verify the business phone number.
    - Copy the permanent access token and phone number ID into `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`, and the app secret into `WHATSAPP_APP_SECRET`.
@@ -220,6 +220,7 @@ src/
   config.js              env settings and pricing rules
   db.js                  SQLite schema
   brand.js               which client this runs for (clients/<id>/: brand, outlets, menu)
+  preflight.js           go-live checks (npm run check; production refuses unsafe settings)
   store/sqlite.js        data access on SQLite
   store/memory.js        same interface in memory (browser demo)
   geo.js                 distance, opening hours, outlet assignment
@@ -247,6 +248,7 @@ public/                  web app, tracking page, simulator
   outlet/, admin/        outlet panel, head office panel
   staff/                 code and styles shared by both panels
 supabase/schema.sql      Postgres tables and reporting views
-demo/, scripts/          browser demo build, Supabase backfill
+demo/, scripts/          browser demo build, Supabase backfill, load test, setup check
+deploy/                  server setup, safe updates with rollback, backups, nginx, pm2 (see DEPLOY.md)
 test/                    node:test suites
 ```
