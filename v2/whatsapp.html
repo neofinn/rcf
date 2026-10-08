@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<script>
+(() => {
+  window.RC_DEMO = true;
+  window.RC_STANDALONE = true;
+  const PAGES = { '/': 'order.html', '/index.html': 'order.html', '/track.html': 'track.html', '/outlet/': 'outlet.html', '/admin/': 'admin.html', '/whatsapp-sim.html': 'whatsapp.html' };
+  const pageUrl = (u) => { const x = new URL(u, 'https://demo.local'); return (PAGES[x.pathname] || x.pathname.slice(1)) + x.search; };
+  window.RC_NAVIGATE = (u) => { location.href = pageUrl(u); };
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a[href^="/"]');
+    if (a) { e.preventDefault(); location.href = pageUrl(a.getAttribute('href')); }
+  }, true);
+
+  let send;
+  const ready = new Promise((resolve) => {
+    if (window.SharedWorker) {
+      try {
+        const pending = new Map();
+        let seq = 0;
+        const w = new SharedWorker('demo-worker.js', { name: 'raju-chinese-demo-v2' });
+        w.port.onmessage = (e) => { const p = pending.get(e.data.id); if (p) { pending.delete(e.data.id); p(e.data); } };
+        w.port.start();
+        send = (msg) => new Promise((r) => { const id = ++seq; pending.set(id, r); w.port.postMessage({ ...msg, id }); });
+        return resolve();
+      } catch (e) { /* fall back below */ }
+    }
+    // No SharedWorker (e.g. Chrome on Android): this tab runs the demo backend
+    // itself; it is still saved in the browser, so other pages pick it up.
+    const load = (src) => new Promise((r) => { const s = document.createElement('script'); s.src = src; s.onload = r; document.head.appendChild(s); });
+    load('demo-backend.js').then(() => load('demo-server.js')).then(() => {
+      send = (m) => RCDemoServer.handle(m);
+      resolve();
+    });
+  });
+  // ?reset starts the demo again from scratch.
+  if (new URLSearchParams(location.search).has('reset')) {
+    ready.then(() => send({ kind: 'reset' })).then(() => {
+      try { for (const k of Object.keys(localStorage)) if (/^(rc\.|rca\.|rco\.|sim\.)/.test(k)) localStorage.removeItem(k); } catch (e) { /* storage blocked */ }
+      location.replace(location.pathname);
+    });
+  }
+
+  const realFetch = window.fetch.bind(window);
+  window.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (!/^\/(api|webhooks)\//.test(u)) return realFetch(url, opts);
+    await ready;
+    const auth = (opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || '';
+    const r = await send({ method: (opts.method || 'GET').toUpperCase(), url: u, body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\s+/i, '') });
+    const text = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
+    return new Response(text, { status: r.status, headers: { 'Content-Type': 'application/json' } });
+  };
+})();
+</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>WhatsApp Simulator – Raju Chinese</title>
+  <style>:root {
+  --brand: #d62828;
+  --brand-dark: #a61e1e;
+  --accent: #f4a300;
+  --bg: #faf7f2;
+  --card: #ffffff;
+  --text: #1f1a17;
+  --muted: #6b625b;
+  --line: #ebe4da;
+  --veg: #1a8a3a;
+  --nonveg: #b3261e;
+  --ok: #1a8a3a;
+  --warn: #9a6200;
+  --radius: 12px;
+  --shadow: 0 2px 10px rgba(31, 26, 23, 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161311;
+    --card: #221d1a;
+    --text: #f3ede6;
+    --muted: #b0a59b;
+    --line: #3a322c;
+    --shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: var(--brand); }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; }
+
+/* Header */
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--brand); color: #fff;
+  padding: 10px 16px;
+  display: flex; align-items: center; gap: 12px;
+  box-shadow: var(--shadow);
+}
+.logo { font-weight: 800; font-size: 1.2rem; letter-spacing: 0.2px; white-space: nowrap; }
+.logo span { color: var(--accent); }
+.loc-chip {
+  margin-left: auto; min-width: 0;
+  background: rgba(255, 255, 255, 0.16); border: 0; color: #fff;
+  border-radius: 999px; padding: 6px 12px; text-align: left;
+  display: flex; flex-direction: column; max-width: 70%;
+}
+.loc-chip b, .loc-chip small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.loc-chip small { opacity: 0.85; font-size: 0.75rem; }
+
+.wrap { max-width: 860px; margin: 0 auto; padding: 0 16px 120px; }
+
+.banner {
+  margin: 14px 0; padding: 12px 14px; border-radius: var(--radius);
+  background: var(--card); box-shadow: var(--shadow); border-left: 4px solid var(--ok);
+}
+.banner.warn { border-left-color: var(--accent); }
+
+/* Category chips */
+.cats {
+  position: sticky; top: 56px; z-index: 10;
+  display: flex; gap: 8px; overflow-x: auto; padding: 10px 0;
+  background: var(--bg); scrollbar-width: none;
+}
+.cats::-webkit-scrollbar { display: none; }
+.cats a {
+  flex: none; text-decoration: none; color: var(--text);
+  border: 1px solid var(--line); background: var(--card);
+  padding: 6px 14px; border-radius: 999px; font-size: 0.9rem;
+}
+.cats a.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+.vegtoggle { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; margin: 6px 0 0; }
+
+/* Menu */
+section.cat h2 { font-size: 1.1rem; margin: 22px 0 8px; scroll-margin-top: 110px; }
+.item {
+  display: flex; gap: 12px; align-items: center;
+  background: var(--card); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px;
+  box-shadow: var(--shadow);
+}
+.item .info { flex: 1; min-width: 0; }
+.item .name { font-weight: 600; }
+.item .desc { color: var(--muted); font-size: 0.85rem; }
+.item .price { font-weight: 600; margin-top: 2px; }
+.item.unavailable { opacity: 0.55; }
+.vegmark {
+  display: inline-block; width: 14px; height: 14px; border: 1.5px solid var(--veg);
+  border-radius: 3px; position: relative; margin-right: 6px; vertical-align: -2px;
+}
+.vegmark::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--veg); }
+.vegmark.non { border-color: var(--nonveg); }
+.vegmark.non::after { background: var(--nonveg); }
+
+.add {
+  min-width: 84px; height: 36px; border-radius: 8px;
+  border: 1.5px solid var(--brand); background: var(--card); color: var(--brand); font-weight: 700;
+}
+.stepper {
+  display: inline-flex; align-items: center; min-width: 84px; height: 36px;
+  border-radius: 8px; background: var(--brand); color: #fff; overflow: hidden;
+}
+.stepper button { width: 30px; height: 100%; border: 0; background: transparent; color: #fff; font-weight: 700; font-size: 1.1rem; }
+.stepper span { flex: 1; text-align: center; font-weight: 700; }
+
+/* Cart bar */
+.cartbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  background: transparent;
+}
+.cartbar button {
+  width: 100%; max-width: 828px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center;
+  background: var(--ok); color: #fff; border: 0; border-radius: var(--radius); padding: 14px 16px; font-weight: 700;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+/* Sheets / modals */
+.overlay {
+  position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.sheet {
+  background: var(--bg); width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto;
+  border-radius: 18px 18px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+}
+@media (min-width: 700px) {
+  .overlay { align-items: center; }
+  .sheet { border-radius: 18px; }
+}
+.sheet h3 { margin: 0 0 12px; }
+.sheet .close { float: right; border: 0; background: none; font-size: 1.5rem; line-height: 1; color: var(--muted); }
+
+.tabs { display: flex; background: var(--card); border-radius: 10px; padding: 4px; margin-bottom: 14px; border: 1px solid var(--line); }
+.tabs button { flex: 1; border: 0; background: none; padding: 8px; border-radius: 8px; font-weight: 600; color: var(--muted); }
+.tabs button.on { background: var(--brand); color: #fff; }
+
+.btn {
+  display: block; width: 100%; border: 0; border-radius: 10px; padding: 12px 14px; font-weight: 700;
+  background: var(--brand); color: #fff;
+}
+.btn:disabled { opacity: 0.6; }
+.btn.secondary { background: var(--card); color: var(--text); border: 1px solid var(--line); }
+.or { text-align: center; color: var(--muted); margin: 12px 0; font-size: 0.85rem; }
+
+label { display: block; font-size: 0.85rem; font-weight: 600; margin: 12px 0 4px; }
+input, select, textarea {
+  width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card);
+}
+textarea { resize: vertical; min-height: 64px; }
+
+.outlet-opt {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+}
+.outlet-opt:disabled { opacity: 0.55; }
+.pill { font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.pill.open { background: rgba(26, 138, 58, 0.15); color: var(--ok); }
+.pill.closed { background: rgba(179, 38, 30, 0.12); color: var(--nonveg); }
+
+.line { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.line .n { flex: 1; min-width: 0; }
+.bill { background: var(--card); border-radius: 10px; padding: 10px 12px; margin: 12px 0; }
+.bill div { display: flex; justify-content: space-between; padding: 3px 0; }
+.bill .total { font-weight: 800; border-top: 1px dashed var(--line); margin-top: 6px; padding-top: 8px; }
+.choice-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.choice-row button { flex: 1 1 auto; }
+.start-card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px 18px; margin: 18px 0; text-align: center; display: grid; gap: 12px; }
+.start-card h2 { margin: 0; font-size: 1.2rem; }
+.start-card .row { display: flex; gap: 10px; }
+.start-card .row .btn { flex: 1; }
+.pill.near { background: rgba(26, 138, 58, 0.15); color: var(--ok); }
+.optin { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 12px 0 0; }
+.payopts { border: 0; padding: 0; margin: 14px 0 0; display: grid; gap: 8px; }
+.payopts legend { font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; padding: 0; }
+.payopt { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 10px 12px; font-weight: 400; background: var(--card); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.payopt input { width: auto; margin-top: 3px; accent-color: var(--brand); }
+.payopt:has(input:checked) { border-color: var(--brand); }
+.paybox { display: grid; gap: 10px; justify-items: center; text-align: center; background: var(--card); border: 1.5px solid var(--accent); border-radius: var(--radius); padding: 16px; margin: 12px 0; }
+.paybox .qr { background: #fff; padding: 6px; border-radius: 10px; line-height: 0; }
+.paybox .qr svg { width: 200px; height: 200px; }
+.paybox .btn { text-decoration: none; text-align: center; }
+.paybox.done { border-color: var(--ok); }
+.error { color: var(--nonveg); font-weight: 600; margin: 8px 0; }
+
+/* Tracking */
+.track-card { background: var(--card); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); margin: 16px 0; }
+.steps { list-style: none; padding: 0; margin: 12px 0; }
+.steps li { padding: 8px 0 8px 28px; position: relative; color: var(--muted); }
+.steps li::before {
+  content: ""; position: absolute; left: 4px; top: 12px; width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--line); background: var(--bg);
+}
+.steps li.done { color: var(--text); }
+.steps li.done::before { background: var(--ok); border-color: var(--ok); }
+.steps li.current { font-weight: 700; }
+</style>
+  <style>
+    body { background: #e5ddd5; }
+    @media (prefers-color-scheme: dark) { body { background: #0b141a; } }
+    .chat { max-width: 520px; margin: 0 auto; padding: 12px 12px 140px; }
+    .msg { max-width: 85%; padding: 8px 10px; border-radius: 10px; margin: 6px 0; white-space: pre-wrap; box-shadow: var(--shadow); overflow-wrap: anywhere; }
+    .bot { background: var(--card); }
+    .me { background: #d9fdd3; color: #111; margin-left: auto; }
+    .opts { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+    .opts button { border: 0; border-top: 1px solid var(--line); background: none; color: #128c7e; font-weight: 600; padding: 6px; text-align: left; }
+    .opts small { display: block; color: var(--muted); font-weight: 400; }
+    .ocard { background: var(--bg); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; font-size: 0.9rem; }
+    .ocard .ohead { font-weight: 700; margin-bottom: 4px; }
+    .ocard .row { display: flex; justify-content: space-between; gap: 10px; }
+    .ocard .total { font-weight: 700; border-top: 1px dashed var(--line); margin-top: 4px; padding-top: 4px; }
+    .compose { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); padding: 10px 12px; border-top: 1px solid var(--line); }
+    .compose form, .compose .row { display: flex; gap: 8px; max-width: 520px; margin: 0 auto; }
+    .compose .row { margin-top: 8px; }
+    .compose button { width: auto; flex: none; }
+    .topbar { background: #075e54; }
+  </style>
+</head>
+<body>
+  <header class="topbar"><div class="logo">WhatsApp simulator</div><span class="small" style="margin-left:auto;opacity:.8">dev only</span></header>
+  <div class="chat" id="chat"></div>
+  <div class="compose">
+    <form id="f"><input id="t" placeholder='Try: 2 chilli paneer less spicy, 1 veg noodles' autocomplete="off"><button class="btn" style="width:auto">Send</button></form>
+    <div class="row">
+      <select id="loc"><option value="">📍 Share a location…</option></select>
+      <button class="btn secondary" type="button" id="gps">My GPS</button>
+      <button class="btn secondary" type="button" id="catalog" title="Send a cart from the WhatsApp catalog">🛍️ Catalog cart</button>
+    </div>
+  </div>
+  <script>
+  'use strict';
+  const chat = document.getElementById('chat');
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (s) => esc(s).replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/_([^_\n]+)_/g, '<i>$1</i>');
+  const from = '91' + (() => {
+    try {
+      const saved = localStorage.getItem('sim.phone');
+      if (saved) return saved;
+    } catch { /* storage unavailable */ }
+    const p = '98' + String(Math.floor(Math.random() * 1e8)).padStart(8, '0');
+    try { localStorage.setItem('sim.phone', p); } catch { /* storage unavailable */ }
+    return p;
+  })();
+
+  function bubble(html, who) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + who;
+    d.innerHTML = html;
+    chat.appendChild(d);
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+
+  const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', p % 100 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {});
+
+  // WhatsApp's "Review and pay" order card. The buttons stand in for paying in
+  // WhatsApp: they send what WhatsApp's payment webhook would.
+  function orderCard(r) {
+    const o = r.order;
+    const rows = o.items.map((i) => `<div class="row"><span>${i.quantity} × ${esc(i.name)}</span><span>${rupees(i.amount.value * i.quantity)}</span></div>`).join('');
+    return `<div class="ocard">
+      <div class="ohead">🧾 Order ${esc(r.referenceId)}</div>
+      ${rows}
+      <div class="row muted"><span>Subtotal</span><span>${rupees(o.subtotal)}</span></div>
+      <div class="row muted"><span>${esc(o.tax.description)}</span><span>${rupees(o.tax.value)}</span></div>
+      ${o.shipping ? `<div class="row muted"><span>${esc(o.shipping.description)}</span><span>${rupees(o.shipping.value)}</span></div>` : ''}
+      <div class="row total"><span>Total</span><span>${rupees(r.total)}</span></div>
+    </div>${fmt(r.text)}
+    <div class="opts">
+      <button data-pay="success" data-ref="${esc(r.referenceId)}" data-amount="${r.total}" data-how="WhatsApp UPI">💳 Review and pay · WhatsApp UPI</button>
+      <button data-pay="success" data-ref="${esc(r.referenceId)}" data-amount="${r.total}" data-how="another UPI app">📲 Pay with another UPI app</button>
+      <button data-pay="failed" data-ref="${esc(r.referenceId)}" data-amount="${r.total}" data-how="">✖ Simulate a failed payment</button>
+    </div>`;
+  }
+
+  function render(r) {
+    let html = fmt(r.text);
+    if (r.type === 'order_details') html = orderCard(r);
+    if (r.type === 'order_status') html = `${fmt(r.text)}<div class="small muted" style="margin-top:6px">🧾 Order card updated: ${esc(r.status)}</div>`;
+    if (r.type === 'buttons') html += '<div class="opts">' + r.buttons.map((b) => `<button data-id="${esc(b.id)}" data-title="${esc(b.title)}">${esc(b.title)}</button>`).join('') + '</div>';
+    if (r.type === 'list') html += `<div class="small muted" style="margin-top:6px">☰ ${esc(r.button)}</div><div class="opts">` + r.sections.flatMap((s) => s.rows).map((x) => `<button data-id="${esc(x.id)}" data-title="${esc(x.title)}">${esc(x.title)}${x.description ? `<small>${esc(x.description)}</small>` : ''}</button>`).join('') + '</div>';
+    if (r.type === 'image') html = `<div style="background:#fff;border-radius:8px;line-height:0;margin-bottom:6px">${r.svg || `<img src="${esc(r.url)}" alt="" style="width:100%">`}</div>${fmt(r.text || '')}`;
+    if (r.type === 'location_request') html += '<div class="opts"><button data-loc="1">📍 Send location (use picker below)</button></div>';
+    bubble(html, 'bot');
+  }
+
+  // Messages the business sends on its own: staff replies, order status updates.
+  let outboxSeq = null;
+  async function pollOutbox() {
+    try {
+      const r = await (await fetch(`/api/dev/whatsapp/outbox?from=${from}&after=${outboxSeq ?? 1e12}`)).json();
+      if (outboxSeq !== null) r.messages.forEach(render);
+      outboxSeq = r.last;
+    } catch { /* server restarting */ }
+    setTimeout(pollOutbox, 2500);
+  }
+  pollOutbox();
+
+  async function send(msg, echo) {
+    bubble(echo, 'me');
+    const res = await fetch('/api/dev/whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, name: 'Guest', ...msg }) });
+    const replies = await res.json();
+    if (!res.ok) return bubble('⚠️ ' + esc(replies.error || 'error'), 'bot');
+    replies.forEach(render);
+  }
+
+  document.getElementById('f').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const t = document.getElementById('t');
+    if (!t.value.trim()) return;
+    send({ type: 'text', text: t.value }, esc(t.value));
+    t.value = '';
+  });
+  chat.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.loc) return document.getElementById('loc').focus();
+    if (b.dataset.pay) {
+      const amount = Number(b.dataset.amount);
+      const ok = b.dataset.pay === 'success';
+      return send({ type: 'payment', referenceId: b.dataset.ref, status: b.dataset.pay, amount, transactionId: ok ? 'UPI' + Math.floor(Math.random() * 1e10) : null },
+        ok ? `💳 Paid ${rupees(amount)} with ${esc(b.dataset.how)}` : '✖ Payment failed');
+    }
+    send({ type: 'reply', replyId: b.dataset.id }, esc(b.dataset.title));
+  });
+  fetch('/api/localities').then((r) => r.json()).then((ls) => {
+    document.getElementById('loc').innerHTML += ls.map((l) => `<option value="${l.lat},${l.lng}">${esc(l.name)}, ${esc(l.city)}</option>`).join('')
+      + '<option value="30.9010,75.8573">Ludhiana (out of range)</option>';
+  });
+  document.getElementById('loc').addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    const [lat, lng] = e.target.value.split(',').map(Number);
+    send({ type: 'location', location: { lat, lng } }, '📍 ' + esc(e.target.selectedOptions[0].textContent));
+    e.target.value = '';
+  });
+  document.getElementById('catalog').addEventListener('click', async () => {
+    const menu = (await (await fetch('/api/menu')).json()).flatMap((c) => c.items);
+    const pick = [menu[5], menu[17], menu[32]].filter(Boolean);
+    const items = pick.map((i, n) => ({ retailerId: 'RC-' + i.id, qty: n === 0 ? 2 : 1 }));
+    send({ type: 'catalog_order', items, text: '' }, '🛍️ Catalog cart: ' + pick.map((i, n) => `${items[n].qty} × ${esc(i.name)}`).join(', '));
+  });
+  document.getElementById('gps').addEventListener('click', () => navigator.geolocation?.getCurrentPosition((p) =>
+    send({ type: 'location', location: { lat: p.coords.latitude, lng: p.coords.longitude } }, '📍 Current location')));
+  </script>
+</body>
+</html>
