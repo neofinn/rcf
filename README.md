@@ -45,15 +45,16 @@ Customers can order in three ways and mix them freely.
 **1. Type it like a message to a person** (`src/whatsapp/nlu.js`)
 
 ```
-"2 chilli paneer less spicy, ek veg chowmein no onion. Call before coming"
-→ Got it 👍  • 1 × Veg Hakka Noodles (no onion)
+"2 kurkure veg momo less spicy, ek full veg chowmein no onion. Call before coming"
+→ Got it 👍  • 1 × Veg Noodles (Full) (no onion)
   📝 Noted for the kitchen: call before coming
-  Which chilli paneer would you like? (×2) (less spicy)  [Dry] [Gravy] [Combo]
+  Kurkure Veg Momo (×2) (less spicy) — Half or Full?  [Half · ₹159] [Full · ₹249]
 ```
 
 - Understands English and Hinglish quantities (`2`, `2x`, `do`, `ek`, `teen`), common spellings (chowmein, manchuriyan, shezwan, chilly, momo…) and small typos.
 - Special instructions stay attached to the item they belong to (`less spicy`, `no onion`, `jain`, `sauce alag`, `extra crispy`…) and print on the outlet's order card. Requests for the whole order (`call before coming`, `everything less spicy`, `cutlery`) become an order note.
-- When a dish has variants ("chilli paneer", "momos"), the bot asks which one instead of guessing.
+- When a dish has variants ("chilli chicken", "momos"), the bot asks which one instead of guessing, then Half or Full unless the customer said it ("half", "full", "chhota", "bada").
+- **Menu:** the real dine-in menu (138 dishes, most in Half and Full) in 10 categories. Each portion is its own item (price, stock, sales); the web app shows both on one card, WhatsApp lists dishes 9 per page and then asks Half or Full.
 - Items sold out at the customer's outlet are reported, not added.
 
 **2. Tap through the menu:** menu list → item → quantity (or type "2 less spicy") → cart → checkout.

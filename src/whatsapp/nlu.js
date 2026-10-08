@@ -39,6 +39,10 @@ const ALIASES = {
   kurkure: 'kurkure', crispy: 'crispy',
 };
 
+// Portion words: "half plate veg noodles", "2 full chilli potato", "chhota/bada".
+const PORTION_WORDS = /\b(half|full|small|large|big|chhota|chota|bada|badi)\b/;
+const portionFor = (w) => (/half|small|chh?ota/.test(w) ? 'Half' : 'Full');
+
 // Words that carry no meaning for matching.
 const STOPWORDS = new Set(('i want need would like to please pls plz send me give get order bhaiya bhai bhaiyya ji sir '
   + 'and aur also plus with of the my for can you have kindly chahiye dena de bhej bhejo dedo dijiye '
@@ -122,7 +126,9 @@ function matchItem(queryWords, index) {
   const best = scored.filter((s) => s.query === scored[0].query);
   // Every word of an item's name mentioned: that's the one ("veg manchurian gravy").
   const exact = best.filter((s) => s.cover === 1);
-  return (exact.length === 1 ? exact : best).map((s) => s.item);
+  // Half and Full of the same dish count as one match ("chilli potato").
+  const exactDishes = new Set(exact.map((s) => s.item.name.replace(/\s*\((Half|Full)\)$/, '')));
+  return (exact.length && exactDishes.size === 1 ? exact : best).map((s) => s.item);
 }
 
 function extractQty(segment) {
@@ -175,14 +181,22 @@ function parseOrderText(text, menu) {
     const orderNote = ORDER_NOTE_PATTERNS.find((re) => re.test(seg));
     if (orderNote) { out.orderNotes.push(seg); continue; }
 
-    const { notes, rest } = extractNotes(seg, NOTE_PATTERNS);
+    const { notes, rest: withPortion } = extractNotes(seg, NOTE_PATTERNS);
+    const p = withPortion.match(PORTION_WORDS);
+    const portion = p ? portionFor(p[1]) : null;
+    const rest = p ? withPortion.replace(PORTION_WORDS, ' ').replace(/\s+/g, ' ').trim() : withPortion;
     const { qty, rest: query } = extractQty(rest);
     const words = tokens(query);
-    const matches = matchItem(words, index);
+    let matches = matchItem(words, index);
+    // "half"/"full" picks that portion of dishes sold in both.
+    if (portion && matches.length > 1) {
+      const fits = matches.filter((m) => !/\((Half|Full)\)$/.test(m.name) || m.name.endsWith(`(${portion})`));
+      if (fits.length) matches = fits;
+    }
     const note = notes.join(', ');
 
     if (matches.length === 1) out.lines.push({ id: matches[0].id, qty, note });
-    else if (matches.length > 1) out.choices.push({ qty, note, query: words.join(' '), options: matches.slice(0, 10) });
+    else if (matches.length > 1) out.choices.push({ qty, note, query: words.join(' '), options: matches.slice(0, 20) });
     else if (!words.length && notes.length) out.orderNotes.push(note);
     else if (words.length) out.unknown.push(seg);
   }
@@ -190,4 +204,4 @@ function parseOrderText(text, menu) {
   return out;
 }
 
-module.exports = { parseOrderText, segments, tokens };
+module.exports = { parseOrderText, segments, tokens, PORTION_WORDS };

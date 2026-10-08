@@ -36,7 +36,7 @@ function seedSampleHistory(store, { days = 90, now = new Date() } = {}) {
   const localities = store.localities();
   const menu = store.menuItems().map((i) => ({ ...i, available: true }));
   // Popular dishes sell more.
-  const itemWeight = (i) => (/Momos|Hakka|Chilli Paneer Dry|Manchurian Gravy|Fried Rice|Honey Chilli/.test(i.name) ? 6 : /Combo/.test(i.name) ? 4 : /Coke|Lemonade|Soup/.test(i.name) ? 3 : 1.5);
+  const itemWeight = (i) => (/Momo \(|Hakka|Chilli Chicken|Manchurian|Fried Rice|Honey Chilli|Chilli Potato/.test(i.name) ? 6 : /Platter|Kurkure/.test(i.name) ? 4 : /Soup|Spring Roll/.test(i.name) ? 3 : 1.2);
   const itemPairs = menu.map((i) => [i, itemWeight(i)]);
   const outletPairs = outlets.map((o, k) => [o, [1.6, 1.2, 0.9, 1.4, 0.7, 1, 1.1][k] || 1]);
 
@@ -117,7 +117,7 @@ function seedSampleHistory(store, { days = 90, now = new Date() } = {}) {
       }
       // About a third of customers rate their order after delivery.
       if (!cancelled && rand() < 0.35) {
-        const quality = (it) => (/Momos|Honey Chilli|Chilli Paneer Dry|Manchurian/.test(it.name) ? 4.5 : /Soup|Coke/.test(it.name) ? 4.0 : 4.2) - (rushy > 1.3 ? 0.4 : 0);
+        const quality = (it) => (/Momo|Honey Chilli|Chilli Chicken|Manchurian/.test(it.name) ? 4.5 : /Soup|Pasta/.test(it.name) ? 4.0 : 4.2) - (rushy > 1.3 ? 0.4 : 0);
         const dishStars = priced.lines.map((l) => {
           const it = menu.find((m) => m.id === l.item_id);
           return { id: l.item_id, name: l.name, stars: Math.max(1, Math.min(5, Math.round(quality(it) + (rand() - 0.5) * 2.2))) };
@@ -147,7 +147,7 @@ function seedSampleHistory(store, { days = 90, now = new Date() } = {}) {
   // A few redemptions.
   for (const c of customers.slice(0, 40)) {
     const bal = store.pointsBalances().get(c.phone) || 0;
-    if (bal >= 20 && rand() < 0.5) store.addPoints({ phone: c.phone, points: -20, kind: 'redeem', note: 'Free Masala Lemonade', at: new Date(now.getTime() - 3 * 864e5).toISOString() });
+    if (bal >= 20 && rand() < 0.5) store.addPoints({ phone: c.phone, points: -20, kind: 'redeem', note: 'Free half plate of veg momos', at: new Date(now.getTime() - 3 * 864e5).toISOString() });
   }
   return seq;
 }

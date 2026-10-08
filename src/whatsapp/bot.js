@@ -9,9 +9,10 @@
 //
 // Customers can order three ways, and mix them freely:
 //   1. Tapping through menu lists and buttons.
-//   2. Typing like they'd text a person: "2 chilli paneer dry less spicy, ek
-//      veg chowmein no onion" (see nlu.js). Special instructions stay attached
-//      to each item; ambiguous items ("chilli paneer") get a follow-up question.
+//   2. Typing like they'd text a person: "2 half kurkure veg momo less spicy,
+//      ek full veg hakka noodles no onion" (see nlu.js). Special instructions
+//      stay attached to each item; ambiguous items ("chilli chicken") get a
+//      follow-up question, and so does Half or Full when it isn't said.
 //   3. Sending a cart from the WhatsApp Business catalog.
 // Whatever the route, the outlet is chosen from the customer's location.
 // Anything the bot can't handle goes to a person at the outlet (handoff).
@@ -29,6 +30,8 @@ const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_QTY = 20;
 
 // WhatsApp interactive message limits.
+const { portionOf, groupDishes } = require('../portions');
+
 const clip = (s, n) => (s.length <= n ? s : s.slice(0, n - 1) + '…');
 const btn = (id, title) => ({ id, title: clip(title, 20) });
 const row = (id, title, description) => ({ id, title: clip(title, 24), ...(description ? { description: clip(description, 72) } : {}) });
@@ -75,7 +78,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       buttons(`Namaste${name ? ' ' + name : ''}! 🙏 Welcome to *Raju Chinese* 🥡\n\n`
         + '*Delivery or pickup?*\n\n'
         + 'Once we know where you are, you can tap through the menu or just type your order, like:\n'
-        + '_"2 chilli paneer dry less spicy and 1 veg noodles no onion"_\n\n'
+        + '_"2 half kurkure veg momo less spicy and 1 full veg hakka noodles no onion"_\n\n'
         + 'Type *track* for your order status.', [
         btn('mode:delivery', '🛵 Delivery'),
         btn('mode:pickup', '🏃 Pickup'),
@@ -142,21 +145,48 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     return categoriesList(s, intro);
   }
 
-  function categoriesList(s, intro) {
-    const cats = orders.categories(s.outletId).filter((c) => c.items.some((i) => i.available));
-    const rows = cats.slice(0, 10).map((c) => {
-      const from = Math.min(...c.items.filter((i) => i.available).map((i) => i.price));
-      return row(`cat:${c.name}`, c.name, `${c.items.length} items · from ${rupees(from)}`);
-    });
-    return [list(`${intro ? intro + '\n\n' : ''}What would you like to eat? 😋 Pick from the menu or just type your order.`, 'View menu', [{ title: 'Menu', rows }])];
+  // A WhatsApp list holds 10 rows: show 9 and a "More" row when there are more.
+  function page(rows, n, moreId, moreTitle) {
+    const start = (n - 1) * 9;
+    if (rows.length <= 10 && n === 1) return rows;
+    const slice = rows.slice(start, start + 9);
+    return start + 9 < rows.length ? [...slice, row(moreId, moreTitle, `${rows.length - start - 9} more`)] : slice;
   }
 
-  function itemsList(s, category) {
+  const priceText = (d) => d.items.map((i) => `${portionOf(i.name).portion ? `${portionOf(i.name).portion} ` : ''}${rupees(i.price)}`).join(' · ');
+
+  function categoriesList(s, intro, n = 1) {
+    const cats = orders.categories(s.outletId).filter((c) => c.items.some((i) => i.available));
+    const rows = cats.map((c) => {
+      const avail = c.items.filter((i) => i.available);
+      return row(`cat:${c.name}`, c.name, `${groupDishes(avail).length} dishes · from ${rupees(Math.min(...avail.map((i) => i.price)))}`);
+    });
+    return [list(`${intro ? intro + '\n\n' : ''}What would you like to eat? 😋 Pick from the menu or just type your order.`, 'View menu',
+      [{ title: 'Menu', rows: page(rows, n, `cats:${n + 1}`, 'More categories ➡️') }])];
+  }
+
+  // arg: "<category>" or "<category>|<page>"
+  function itemsList(s, arg) {
+    const [category, p] = String(arg).split('|');
+    const n = Math.max(1, Number(p) || 1);
     const cat = orders.categories(s.outletId).find((c) => c.name === category);
     if (!cat) return categoriesList(s);
-    const rows = cat.items.filter((i) => i.available).slice(0, 10)
-      .map((i) => row(`item:${i.id}`, i.name, `${i.veg ? '🟢 Veg' : '🔴 Non-veg'} · ${rupees(i.price)}${i.name.length > 24 ? ' · ' + i.name : ''}`));
-    return [list(`*${cat.name}*\nPick an item to add to your cart.`, 'Choose item', [{ title: clip(cat.name, 24), rows }])];
+    const rows = groupDishes(cat.items.filter((i) => i.available)).map((d) => row(
+      d.items.length > 1 ? `dish:${d.items[0].id}` : `item:${d.items[0].id}`, d.dish,
+      `${d.veg ? '🟢' : '🔴'} ${priceText(d)}${d.dish.length > 24 ? ' · ' + d.dish : ''}`,
+    ));
+    return [list(`*${cat.name}*${n > 1 ? ` (page ${n})` : ''}\nPick a dish to add to your cart.`, 'Choose dish',
+      [{ title: clip(cat.name, 24), rows: page(rows, n, `cat:${category}|${n + 1}`, 'More dishes ➡️') }])];
+  }
+
+  // Half or Full? Buttons for the portions of one dish (tapping goes on to "how many").
+  function portionButtons(s, itemId, idPrefix = 'item') {
+    const menu = orders.menuFor(s.outletId);
+    const first = menu.find((i) => i.id === Number(itemId));
+    if (!first) return null;
+    const { dish } = portionOf(first.name);
+    const options = menu.filter((i) => i.available && portionOf(i.name).dish === dish);
+    return { dish, options, reply: buttons(`*${dish}*\nHalf or Full?`, options.map((i) => btn(`${idPrefix}:${i.id}`, `${portionOf(i.name).portion || 'Regular'} · ${rupees(i.price)}`))) };
   }
 
   function cartLines(s) {
@@ -230,15 +260,24 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     return o.payment_status === 'pending' ? [tracking, ...payView(o)] : [tracking];
   }
 
-  // Ask the customer to pick between variants of something they typed.
+  // Ask the customer to pick between variants of something they typed: first
+  // the dish ("veg steam momo" or "veg fried momo"), then Half or Full.
   function choiceView(s) {
     const c = s.choices[0];
     s.state = 'await_choice';
-    const prompt = `Which *${c.query}* would you like?${c.qty > 1 ? ` (×${c.qty})` : ''}${c.note ? ` _(${c.note})_` : ''}`;
-    if (c.options.length <= 3) {
-      return [buttons(prompt, c.options.map((o) => btn(`pick:${o.id}`, o.name.replace(/\s*\(.*?\)/g, ''))))];
+    const ask = `${c.qty > 1 ? ` (×${c.qty})` : ''}${c.note ? ` _(${c.note})_` : ''}`;
+    const dishes = groupDishes(c.options);
+    if (dishes.length === 1) {
+      const d = dishes[0];
+      return [buttons(`*${d.dish}*${ask}\nHalf or Full?`, d.items.map((o) => btn(`pick:${o.id}`, `${portionOf(o.name).portion || 'Regular'} · ${rupees(o.price)}`)))];
     }
-    return [list(prompt, 'Choose', [{ title: 'Options', rows: c.options.map((o) => row(`pick:${o.id}`, o.name, `${o.veg ? '🟢 Veg' : '🔴 Non-veg'} · ${rupees(o.price)}`)) }])];
+    const prompt = `Which *${c.query}* would you like?${ask}`;
+    if (dishes.length <= 3 && dishes.every((d) => d.items.length === 1)) {
+      return [buttons(prompt, dishes.map((d) => btn(`pick:${d.items[0].id}`, d.dish)))];
+    }
+    const rows = dishes.slice(0, 10).map((d) => row(d.items.length > 1 ? `pickdish:${d.items[0].id}` : `pick:${d.items[0].id}`, d.dish,
+      `${d.veg ? '🟢' : '🔴'} ${priceText(d)}${d.dish.length > 24 ? ' · ' + d.dish : ''}`));
+    return [list(prompt, 'Choose', [{ title: 'Options', rows }])];
   }
 
   // After items are added by text or catalog: resolve questions, then show the
@@ -328,7 +367,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     ])];
   }
 
-  // Free-text order: "2 chilli paneer dry less spicy, 1 veg noodles no onion".
+  // Free-text order: "2 half kurkure veg momo less spicy, 1 full veg noodles no onion".
   function onTypedOrder(s, parsed) {
     const menu = menuMap(s);
     const added = [];
@@ -691,6 +730,14 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       }
       case 'cat':
         return itemsList(s, arg);
+      case 'cats':
+        return categoriesList(s, '', Math.max(1, Number(arg) || 1));
+      case 'dish': {
+        const p = portionButtons(s, arg);
+        if (!p || !p.options.length) return [text('Sorry, that dish is not available right now.'), ...categoriesList(s)];
+        if (p.options.length === 1) return route(s, { ...msg, type: 'reply', replyId: `item:${p.options[0].id}` }, now);
+        return [p.reply];
+      }
       case 'item': {
         const item = orders.menuFor(s.outletId).find((i) => i.id === Number(arg));
         if (!item || !item.available) return [text('Sorry, that item is not available right now.'), ...categoriesList(s)];
@@ -712,6 +759,14 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       case 'rev_skip':
         s.state = 'browsing';
         return reviews ? reviews.thanks() : [];
+      case 'pickdish': {
+        // A dish picked from a typed-order question: narrow to its portions.
+        const c = s.choices[0];
+        const chosen = c && c.options.find((o) => o.id === Number(arg));
+        if (!chosen) return s.outletId ? cartView(s) : welcome(msg.name);
+        c.options = c.options.filter((o) => portionOf(o.name).dish === portionOf(chosen.name).dish);
+        return choiceView(s);
+      }
       case 'pick': {
         const c = s.choices.shift();
         if (!c) return s.outletId ? cartView(s) : welcome(msg.name);

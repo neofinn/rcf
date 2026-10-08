@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseOrderText } = require('../src/whatsapp/nlu');
-const seed = require('../src/seed');
+const seed = require('./fixtures/seed');
 
 const menu = seed.menu.map((m, i) => ({ ...m, id: i + 1, available: true }));
 const name = (id) => menu.find((m) => m.id === id).name;

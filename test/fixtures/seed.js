@@ -1,8 +1,9 @@
 'use strict';
 
-// Fixed outlets for tests (independent of the real outlet list in src/seed.js,
-// which will change as the business grows). Menu and localities are shared.
+// Fixed outlets and menu for tests (independent of the real data in src/seed.js,
+// which will change as the business grows). Localities are shared.
 const real = require('../../src/seed');
+const menu = require('./menu');
 
 const outlets = [
   { slug: 'sec-17-chd', upiId: 'rc-sec-17-chd@example', waPaymentConfig: 'rc-sec-17-chd', name: 'Raju Chinese - Sector 17', city: 'Chandigarh', address: 'SCO 00, Sector 17-C, Chandigarh', lat: 30.7410, lng: 76.7790, phone: '+910000000001', radiusKm: 20, opens: '11:00', closes: '23:00' },
@@ -14,4 +15,4 @@ const outlets = [
   { slug: 'sec-11-pkl', upiId: 'rc-sec-11-pkl@example', waPaymentConfig: 'rc-sec-11-pkl', name: 'Raju Chinese - Sector 11 Panchkula', city: 'Panchkula', address: 'SCO 00, Sector 11, Panchkula', lat: 30.6960, lng: 76.8480, phone: '+910000000007', radiusKm: 20, opens: '11:00', closes: '23:00' },
 ];
 
-module.exports = { ...real, outlets };
+module.exports = { ...real, outlets, menu };

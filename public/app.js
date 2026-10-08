@@ -216,6 +216,19 @@ async function loadMenu() {
   renderMenu();
 }
 
+// Dishes sold in two portions are two items, "<dish> (Half)" and "<dish> (Full)".
+const PORTION = /\s*\((Half|Full)\)$/;
+const portionOf = (name) => { const m = name.match(PORTION); return { dish: name.replace(PORTION, ''), portion: m ? m[1] : null }; };
+function groupDishes(items) {
+  const byDish = new Map();
+  for (const i of items) {
+    const { dish } = portionOf(i.name);
+    if (!byDish.has(dish)) byDish.set(dish, { dish, veg: i.veg, items: [] });
+    byDish.get(dish).items.push(i);
+  }
+  return [...byDish.values()];
+}
+
 const findItem = (id) => state.menu.flatMap((c) => c.items).find((i) => i.id === Number(id));
 
 function qtyControl(item) {
@@ -251,15 +264,24 @@ function renderMenu() {
   $('cats').innerHTML = cats.map((c) => `<a href="#${slug(c.name)}">${esc(c.name)}</a>`).join('');
   $('menu').innerHTML = cats.map((c) => `
     <section class="cat"><h2 id="${slug(c.name)}">${esc(c.name)}</h2>
-      ${c.items.map((i) => `
-        <div class="item ${i.available ? '' : 'unavailable'}">
-          <div class="info">
-            <div class="name"><span class="vegmark ${i.veg ? '' : 'non'}" title="${i.veg ? 'Veg' : 'Non-veg'}"></span>${esc(i.name)}</div>
-            ${i.description ? `<div class="desc">${esc(i.description)}</div>` : ''}
-            <div class="price">${rupees(i.price)}</div>
-          </div>
-          <div data-ctl="${i.id}">${qtyControl(i)}</div>
-        </div>`).join('')}
+      ${groupDishes(c.items).map((d) => {
+        const mark = `<span class="vegmark ${d.veg ? '' : 'non'}" title="${d.veg ? 'Veg' : 'Non-veg'}"></span>`;
+        const desc = d.items[0].description ? `<div class="desc">${esc(d.items[0].description)}</div>` : '';
+        if (d.items.length === 1) {
+          const i = d.items[0];
+          return `<div class="item ${i.available ? '' : 'unavailable'}">
+            <div class="info"><div class="name">${mark}${esc(i.name)}</div>${desc}<div class="price">${rupees(i.price)}</div></div>
+            <div data-ctl="${i.id}">${qtyControl(i)}</div>
+          </div>`;
+        }
+        // Half and Full on one card.
+        return `<div class="item multi ${d.items.some((i) => i.available) ? '' : 'unavailable'}">
+          <div class="info"><div class="name">${mark}${esc(d.dish)}</div>${desc}</div>
+          <div class="portions">${d.items.map((i) => `<div class="portion ${i.available ? '' : 'unavailable'}">
+            <span><span class="small muted">${esc(portionOf(i.name).portion)}</span><br><b>${rupees(i.price)}</b></span>
+            <div data-ctl="${i.id}">${qtyControl(i)}</div></div>`).join('')}</div>
+        </div>`;
+      }).join('')}
     </section>`).join('');
   renderCartBar();
 }
