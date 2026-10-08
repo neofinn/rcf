@@ -155,6 +155,12 @@ section.cat h2 { font-size: 1.1rem; margin: 22px 0 8px; scroll-margin-top: 110px
 .item .desc { color: var(--muted); font-size: 0.85rem; }
 .item .price { font-weight: 600; margin-top: 2px; }
 .item.unavailable { opacity: 0.55; }
+.item.multi { flex-wrap: wrap; }
+.item.multi .info { flex-basis: 100%; }
+.portions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+.portion { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.portion.unavailable { opacity: 0.55; }
+.portion .add, .portion .stepper { min-width: 72px; }
 .vegmark {
   display: inline-block; width: 14px; height: 14px; border: 1.5px solid var(--veg);
   border-radius: 3px; position: relative; margin-right: 6px; vertical-align: -2px;
@@ -291,7 +297,7 @@ textarea { resize: vertical; min-height: 64px; }
   <header class="topbar"><div class="logo">WhatsApp simulator</div><span class="small" style="margin-left:auto;opacity:.8">dev only</span></header>
   <div class="chat" id="chat"></div>
   <div class="compose">
-    <form id="f"><input id="t" placeholder='Try: 2 chilli paneer less spicy, 1 veg noodles' autocomplete="off"><button class="btn" style="width:auto">Send</button></form>
+    <form id="f"><input id="t" placeholder='Try: 2 half kurkure veg momo less spicy, 1 full veg noodles' autocomplete="off"><button class="btn" style="width:auto">Send</button></form>
     <div class="row">
       <select id="loc"><option value="">📍 Share a location…</option></select>
       <button class="btn secondary" type="button" id="gps">My GPS</button>
