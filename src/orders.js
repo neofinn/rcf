@@ -67,6 +67,9 @@ const STATUS_LABELS = {
 
 const MAX_QTY_PER_ITEM = 20;
 
+// Online payments go through the gateway when Razorpay keys are set.
+const gatewayOn = () => Boolean(config.razorpay?.keyId);
+
 /** Normalise an Indian mobile number to +91XXXXXXXXXX, or return null. */
 function normalisePhone(raw) {
   const digits = String(raw || '').replace(/\D/g, '');
@@ -230,7 +233,7 @@ function createOrderService(store) {
     }
 
     const payUpi = input.paymentMethod === 'upi';
-    if (payUpi && !outlet.upi_id) throw new ValidationError(`${outlet.name} doesn't take UPI payments online yet. Please choose cash/UPI on ${fulfilment}.`, 'no_upi');
+    if (payUpi && !gatewayOn() && !outlet.upi_id) throw new ValidationError(`${outlet.name} doesn't take UPI payments online yet. Please choose cash/UPI on ${fulfilment}.`, 'no_upi');
 
     const code = newCode();
     const ts = now.toISOString();
@@ -263,7 +266,11 @@ function createOrderService(store) {
       outlet: outlet && { id: outlet.id, name: outlet.name, phone: outlet.phone, address: outlet.address, lat: outlet.lat, lng: outlet.lng },
       paymentLabel: PAYMENT_LABELS[row.payment_status],
       delivery: presentDelivery(row),
-      upi: row.payment_method === 'upi' && outlet?.upi_id ? {
+      // Gateway: our /pay/<code> page (UPI, QR, cards; confirms itself). Otherwise
+      // a upi:// request straight to the outlet's UPI ID (staff confirm).
+      upi: row.payment_method !== 'upi' ? null : gatewayOn() ? {
+        gateway: true, upiId: null, payee: brand().name, link: `${config.publicBaseUrl}/pay/${row.code}`,
+      } : outlet?.upi_id ? {
         upiId: outlet.upi_id,
         payee: outlet.upi_name || brand().name,
         link: upiLink({ upiId: outlet.upi_id, payee: outlet.upi_name || brand().name, amountPaise: row.total, code: row.code }),
@@ -278,6 +285,8 @@ function createOrderService(store) {
     claimed: ['paid', 'pending', 'cod'],
     // A WhatsApp/UPI payment can still land after the customer chose cash.
     cod: ['paid'],
+    // Gateway refund after the outlet cancelled a paid order.
+    paid: ['refunded'],
   };
 
   // by: 'staff' (dashboard), 'customer' (WhatsApp/web) or 'gateway' (future

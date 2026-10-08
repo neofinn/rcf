@@ -241,6 +241,28 @@ CREATE TABLE IF NOT EXISTS wa_processed (
   message_id TEXT PRIMARY KEY,
   at TEXT NOT NULL
 );
+
+-- Payment gateway (Razorpay): one payment link per attempt to pay an order.
+CREATE TABLE IF NOT EXISTS payment_links (
+  id TEXT PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id),
+  provider TEXT NOT NULL,
+  url TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  expires_at TEXT NOT NULL,
+  status TEXT NOT NULL,
+  payment_id TEXT,
+  refund_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS payment_links_order ON payment_links(order_id);
+
+-- Gateway webhook deliveries already handled (they can arrive more than once).
+CREATE TABLE IF NOT EXISTS gateway_events (
+  event_id TEXT PRIMARY KEY,
+  at TEXT NOT NULL
+);
 `;
 
 function openDb(file, { seed = client() } = {}) {

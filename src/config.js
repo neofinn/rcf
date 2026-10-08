@@ -41,6 +41,17 @@ module.exports = {
     windowMinutes: num(env.PAYMENT_WINDOW_MINUTES, 15),
   },
 
+  // Payment gateway: with Razorpay keys, "Pay now" uses a Razorpay payment link
+  // (UPI apps, QR, cards) and payments confirm themselves via its webhook; cancelled
+  // paid orders are refunded. Without keys: plain UPI to each outlet, confirmed by staff.
+  razorpay: {
+    keyId: env.RAZORPAY_KEY_ID || '',
+    keySecret: env.RAZORPAY_KEY_SECRET || '',
+    // Webhook secret set in Razorpay Dashboard > Webhooks (signs every callback).
+    webhookSecret: env.RAZORPAY_WEBHOOK_SECRET || '',
+    baseUrl: env.RAZORPAY_BASE_URL || 'https://api.razorpay.com/v1',
+  },
+
   // Loyalty: 1 point for every ₹100 of a completed order.
   loyalty: {
     rupeesPerPoint: num(env.LOYALTY_RUPEES_PER_POINT, 100),

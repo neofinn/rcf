@@ -27,6 +27,12 @@ function createSqliteStore(db) {
     adjustStock: db.prepare('UPDATE outlet_stock SET remaining = MAX(0, remaining + ?), updated_at = ? WHERE outlet_id = ? AND item_id = ?'),
     pinHash: db.prepare('SELECT pin_hash, updated_at FROM outlet_logins WHERE outlet_id = ?'),
     logins: db.prepare('SELECT outlet_id, updated_at FROM outlet_logins'),
+    paymentLinks: db.prepare('SELECT * FROM payment_links WHERE order_id = ? ORDER BY created_at, rowid'),
+    paymentLinkById: db.prepare('SELECT * FROM payment_links WHERE id = ?'),
+    insertPaymentLink: db.prepare(`INSERT INTO payment_links (id, order_id, provider, url, amount, expires_at, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    updatePaymentLink: db.prepare('UPDATE payment_links SET status = ?, payment_id = COALESCE(?, payment_id), refund_id = COALESCE(?, refund_id), updated_at = ? WHERE id = ?'),
+    gatewayEventSeen: db.prepare('INSERT OR IGNORE INTO gateway_events (event_id, at) VALUES (?, ?)'),
     unpaidBefore: db.prepare("SELECT code FROM orders WHERE status = 'awaiting_payment' AND payment_status = 'pending' AND created_at < ?"),
     setPin: db.prepare(`INSERT INTO outlet_logins (outlet_id, pin_hash, updated_at) VALUES (?, ?, ?)
       ON CONFLICT (outlet_id) DO UPDATE SET pin_hash = excluded.pin_hash, updated_at = excluded.updated_at`),
@@ -162,6 +168,13 @@ function createSqliteStore(db) {
 
     // Orders
     orderCodeExists: (code) => !!q.byCode.get(code),
+    // Gateway payment links for an order (oldest first).
+    paymentLinks: (orderId) => q.paymentLinks.all(orderId),
+    paymentLinkById: (id) => q.paymentLinkById.get(id) || null,
+    insertPaymentLink: (l) => q.insertPaymentLink.run(l.id, l.order_id, l.provider, l.url, l.amount, l.expires_at, l.status, l.created_at, l.created_at),
+    updatePaymentLink: (id, { status, payment_id = null, refund_id = null }, ts) => q.updatePaymentLink.run(status, payment_id, refund_id, ts, id),
+    /** Record a gateway webhook event id; false if it was handled before. */
+    gatewayEventSeen: (eventId, ts) => q.gatewayEventSeen.run(eventId, ts).changes === 0,
     // UPI orders nobody has paid (or said they paid) since before `cutoff`.
     unpaidBefore: (cutoff) => q.unpaidBefore.all(cutoff),
     insertOrder: (o, lines) => transaction(() => {

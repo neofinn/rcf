@@ -6,8 +6,9 @@
 //
 // The QR code and the upi:// link open any UPI app (GPay, PhonePe, Paytm,
 // BHIM) with payee, amount and note filled in. Confirmation is manual (staff
-// tap "Paid" once it shows in their UPI app) until a payment gateway is added,
-// whose webhook would call orders.confirmPayment() instead.
+// tap "Paid" once it shows in their UPI app). With a payment gateway
+// configured (src/gateway.js), the link is our /pay/<code> page instead and the
+// gateway's webhook confirms the payment.
 
 const QRCode = require('qrcode');
 const { brand } = require('./brand');
@@ -16,7 +17,8 @@ const PAYMENT_LABELS = {
   cod: 'Cash/UPI on delivery',
   pending: 'UPI payment pending',
   claimed: 'Customer says paid, check UPI app',
-  paid: 'Paid by UPI',
+  paid: 'Paid online',
+  refunded: 'Refunded',
 };
 
 /** upi:// payment link (NPCI deep-link format). */

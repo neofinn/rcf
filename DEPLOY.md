@@ -157,6 +157,8 @@ Database changes are only ever additions (new tables and columns), so an older r
 | v0.18 | WhatsApp menu pictures and order slip |
 | v0.19 | Client profiles (brand per client) |
 | v0.20 | Go-live checks, health check, one-command server setup, safe updates with automatic rollback |
+| v0.21 | "Pay now" orders reach the kitchen only once paid; unpaid ones are cancelled after 15 minutes |
+| v0.22 | Razorpay payment gateway: self-confirming payments, automatic refunds; separate demo links |
 
 Earlier client demos stay online at `https://neofinn.github.io/rcf/versions.html`.
 
@@ -235,6 +237,37 @@ The WhatsApp Business **Platform** (Cloud API, which the bot uses) needs a phone
    - Without this, customers get the order's UPI QR and pay-link instead.
 
 **Costs.** Replies to customers within the 24-hour window are free. Templates are charged per message by category: in India, utility costs roughly ₹0.1–0.2 and marketing roughly ₹0.8–1. Check Meta's current rate card. There is no monthly fee when you connect directly to Meta like this. A provider (Interakt, AiSensy, Gupshup and similar) adds a monthly fee and isn't needed.
+
+---
+
+## Online payments: Razorpay (recommended)
+
+Without a gateway, "Pay now" goes straight to each outlet's UPI ID, and staff confirm every payment by hand. With Razorpay:
+- payments confirm themselves;
+- paid orders that the outlet cancels are refunded automatically.
+
+Hosting, WhatsApp and gateway options are compared in [docs/GO-LIVE-OPTIONS.md](docs/GO-LIVE-OPTIONS.md).
+
+1. Sign up at razorpay.com with the business's PAN, GST and bank account, and complete KYC. Payments settle to that bank account.
+2. Dashboard → **Account & Settings → API keys**: generate a key. Start with the **Test mode** key (`rzp_test_…`), then switch to the **Live** key after a test order.
+3. Dashboard → **Webhooks → Add new webhook**:
+   - URL `https://order.<your-domain>/webhooks/razorpay`;
+   - a secret you choose (`openssl rand -hex 24`);
+   - event **`payment_link.paid`**.
+4. In `/home/rcf/shared/.env`, set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET`, then `sudo -u rcf pm2 reload rcf`. `npm run check` confirms the setup, and production refuses to start if the webhook secret is missing.
+5. **Test with a test key:**
+   - place a "Pay now" order;
+   - open its pay link and pay with Razorpay's test UPI (`success@razorpay`);
+   - the order should move to the outlet panel by itself and WhatsApp should confirm it;
+   - cancel it from the outlet panel and check the refund appears in the dashboard.
+6. **Optional, for paying inside WhatsApp:**
+   - in WhatsApp Manager → Payments (India), create a payment configuration connected to Razorpay;
+   - set `WHATSAPP_PAYMENTS=on`;
+   - put the configuration's name on each outlet.
+
+   Customers then see "Review and pay" in the chat, with our Razorpay link as the fallback.
+
+Fees: Razorpay's standard rate is 2% + GST per payment, and you can negotiate it at this volume (see docs/GO-LIVE-OPTIONS.md). Pay-on-delivery orders cost nothing.
 
 ---
 

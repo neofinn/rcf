@@ -479,6 +479,18 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     const page = `${baseUrl}/track.html?code=${order.code}`;
     const outlet = orders.getOutlet(order.outlet_id);
     const qrImage = (text) => ({ type: 'image', url: `${baseUrl}/pay/${order.code}/qr.png`, svg: qrSvg(order.upi.link), text });
+    // Payment gateway: one link (UPI app, QR or card) that confirms itself. WhatsApp's
+    // own "Review and pay" still comes first where it is set up.
+    if (order.upi.gateway) {
+      const inChat = config.whatsapp.payments && outlet?.wa_payment_config;
+      return [
+        ...(inChat ? [orderDetailsReply(order, outlet, { goodsType: config.whatsapp.goodsType })] : []),
+        qrImage(`Paying from another phone? Scan to pay ${rupees(order.total)} · Order ${order.code}`),
+        buttons(`💳 *Pay ${rupees(order.total)}*${inChat ? ' with *Review and pay* above, or here' : ''}:\n👉 ${order.upi.link}\n\nAny UPI app (GPay, PhonePe, Paytm, BHIM) or a card. Your order is confirmed here automatically the moment you pay.`, [
+          btn('act:pay_cash', '💵 Pay cash instead'),
+        ]),
+      ];
+    }
     if (config.whatsapp.payments && outlet?.wa_payment_config) {
       // In-chat payment: WhatsApp's own UPI or any UPI app, confirmed by WhatsApp.
       // The dynamic QR (this order, this amount) covers paying from another phone.

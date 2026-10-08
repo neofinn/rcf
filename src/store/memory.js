@@ -24,6 +24,8 @@ function createMemoryStore(seed) {
   const pins = new Map();
   const staffSessions = new Map();
   const orders = [];
+  const links = [];
+  const gatewayEvents = new Set();
   const lines = new Map();
   const handoffs = [];
   const handoffMsgs = new Map();
@@ -133,6 +135,14 @@ function createMemoryStore(seed) {
     localities: () => seed.localities.map(copy),
 
     orderCodeExists: (code) => orders.some((o) => o.code === code),
+    paymentLinks: (orderId) => links.filter((l) => l.order_id === orderId).map(copy),
+    paymentLinkById: (id) => copy(links.find((l) => l.id === id) || null),
+    insertPaymentLink: (l) => { links.push({ ...l, payment_id: null, refund_id: null, updated_at: l.created_at }); },
+    updatePaymentLink(id, { status, payment_id = null, refund_id = null }, ts) {
+      const l = links.find((x) => x.id === id);
+      if (l) Object.assign(l, { status, payment_id: payment_id ?? l.payment_id, refund_id: refund_id ?? l.refund_id, updated_at: ts });
+    },
+    gatewayEventSeen: (eventId) => { if (gatewayEvents.has(eventId)) return true; gatewayEvents.add(eventId); return false; },
     unpaidBefore: (cutoff) => orders.filter((o) => o.status === 'awaiting_payment' && o.payment_status === 'pending' && o.created_at < cutoff).map((o) => ({ code: o.code })),
     insertOrder(o, ls) {
       const id = orders.length + 1;

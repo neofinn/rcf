@@ -74,6 +74,8 @@ function notifyOnPayment({ orders, client, log = console }) {
         ? { type: 'buttons', text: body, buttons: [{ id: 'act:pay_again', title: '🔁 Pay again' }, { id: 'act:pay_cash', title: '💵 Pay cash instead' }] }
         : { type: 'text', text: `${body} Or pay by cash/UPI when your order arrives.` };
       client.send(o.phone.replace(/^\+/, ''), [reply]).catch((e) => log.error('[whatsapp] notify failed', e));
+    } else if (o.payment_status === 'refunded') {
+      text = `💸 We've refunded ${rupees(o.total)} for order *${o.code}*. It reaches your account in 5–7 working days.`;
     } else if (o.payment_status === 'cod' && previous !== 'cod') {
       text = `👍 No problem, pay ${rupees(o.total)} by cash/UPI ${o.fulfilment === 'delivery' ? 'when your order arrives' : 'at pickup'}.${confirmed ? ` ${orderConfirmedText(o)}` : ''}`;
     }

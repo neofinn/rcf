@@ -20,6 +20,8 @@ const { createDispatcher } = require('./delivery/dispatcher');
 const { createShadowfaxClient } = require('./delivery/shadowfax');
 const { createSimulatedFleet } = require('./delivery/simulator');
 const { createPorterClient } = require('./delivery/porter');
+const { createRazorpayClient, validRazorpaySignature, parseRazorpayWebhook } = require('./razorpay');
+const { createGateway } = require('./gateway');
 const { createBorzoClient, validBorzoSignature } = require('./delivery/borzo');
 const { createSelector } = require('./delivery/selector');
 const { qrPng } = require('./payments');
@@ -51,6 +53,7 @@ function deliveryProviders({ onUpdate }) {
 
 function createApp({
   dbPath = config.dbPath, waClient, enableDevTools = !config.production, log = console, deliveryPartner, seed, supabase = config.supabase, fetchImpl,
+  paymentClient,
 } = {}) {
   const db = openDb(dbPath, seed ? { seed } : {});
   // Optional copy of the data in Supabase; off unless both settings are given.
@@ -87,6 +90,14 @@ function createApp({
   });
   notifyOnDelivery({ dispatcher, client, log });
 
+  // Payment gateway (Razorpay) when its keys are set; tests pass their own client.
+  const gatewayClient = paymentClient || (config.razorpay.keyId
+    ? createRazorpayClient({ keyId: config.razorpay.keyId, keySecret: config.razorpay.keySecret, baseUrl: config.razorpay.baseUrl, fetchImpl })
+    : null);
+  const gateway = gatewayClient
+    ? createGateway({ client: gatewayClient, store, orders, publicBaseUrl: config.publicBaseUrl, windowMinutes: config.payments.windowMinutes, log })
+    : null;
+
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
@@ -113,6 +124,30 @@ function createApp({
       const png = menuImages.png(req.params.n);
       if (!png) return res.sendStatus(404);
       res.type('png').set('Cache-Control', 'public, max-age=86400').send(png);
+    } catch (e) { next(e); }
+  });
+
+  // Pay page: forwards to the gateway's payment page for this order (made on first use).
+  app.get('/pay/:code', async (req, res, next) => {
+    try {
+      const code = String(req.params.code).toUpperCase();
+      if (!gateway) return res.redirect(302, `/track.html?code=${encodeURIComponent(code)}`);
+      const r = await gateway.linkFor(code);
+      if (!r) return res.status(404).send('Order not found');
+      res.redirect(302, r.url || `/track.html?code=${encodeURIComponent(code)}`);
+    } catch (e) {
+      log.error('[payments] could not open payment page', e.message);
+      res.status(502).type('html').send('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><p style="font:16px system-ui;padding:16px">Sorry, online payment is not available right now. Please try again in a minute, or choose cash on delivery on your order page.</p>');
+    }
+  });
+
+  // Razorpay webhook: signed with HMAC-SHA256 of the raw body.
+  app.post('/webhooks/razorpay', async (req, res, next) => {
+    if (!gateway) return res.sendStatus(404);
+    if (!validRazorpaySignature(req.rawBody, req.get('x-razorpay-signature'), config.razorpay.webhookSecret)) return res.sendStatus(401);
+    try {
+      const result = await gateway.handleWebhook(parseRazorpayWebhook(req.body), req.get('x-razorpay-event-id'));
+      res.json({ ok: true, result });
     } catch (e) { next(e); }
   });
 
@@ -184,7 +219,7 @@ function createApp({
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock, reports, version };
+  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock, reports, version, gateway };
 }
 
 module.exports = { createApp };

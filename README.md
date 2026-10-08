@@ -91,7 +91,15 @@ If nobody has paid (or said they paid) within `PAYMENT_WINDOW_MINUTES` (15), the
 - **On the web** the tracking page shows the same QR and button straight after ordering.
 - **Outlet staff** see `UPI payment pending` / `Customer says paid` on the order card and tap **Payment received** once it shows in their UPI app (or **Not received** / **Take cash instead**). WhatsApp customers are told either way.
 - QR and web payments are confirmed by staff because plain UPI QR codes don't report back; payments made through WhatsApp's "Review and pay" confirm themselves. For automatic confirmation, add a payment gateway (Razorpay, PayU, Cashfree) or Meta's *Payments on WhatsApp (India)*. Their webhook calls `orders.setPayment(code, 'paid', now, 'gateway')`, and the rest of the flow stays as is.
-- Outlets without a UPI ID only offer pay on delivery.
+- Outlets without a UPI ID only offer pay on delivery (unless the payment gateway is on).
+
+**Payment gateway (Razorpay, `src/gateway.js`, `src/razorpay.js`).** With `RAZORPAY_*` keys set:
+- **Pay link:** every "Pay now" order is paid through `https://<domain>/pay/<code>`, which creates a Razorpay payment link for the exact amount (UPI apps, QR, cards). The WhatsApp message, the tracking page and the order QR all use this address.
+- **Confirmation:** Razorpay's signed webhook (`/webhooks/razorpay`) marks the order paid and sends it to the kitchen, with no staff check. Repeated webhooks are ignored.
+- **Safety:** a wrong amount goes to staff, and a second payment for the same order is refunded.
+- **Refunds:** an order the outlet cancels after payment is refunded automatically, and the customer is told.
+
+Setup: DEPLOY.md. Options and costs: [docs/GO-LIVE-OPTIONS.md](docs/GO-LIVE-OPTIONS.md).
 
 ## Delivery riders: several partners, picked per order (`src/delivery/`)
 
@@ -228,6 +236,7 @@ src/
   db.js                  SQLite schema
   brand.js               which client this runs for (clients/<id>/: brand, outlets, menu)
   preflight.js           go-live checks (npm run check; production refuses unsafe settings)
+  razorpay.js, gateway.js  payment links, webhook confirmation, refunds (Razorpay)
   store/sqlite.js        data access on SQLite
   store/memory.js        same interface in memory (browser demo)
   geo.js                 distance, opening hours, outlet assignment

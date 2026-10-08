@@ -272,9 +272,9 @@ test('UPI: pay now sends QR and link for the exact amount to the cooking outlet'
   assert.equal(c.orders.getOrder(o.code).payment_status, 'claimed');
   assert.equal(c.orders.getOrder(o.code).status, 'awaiting_payment', 'a claim alone does not place it');
   const paid = c.orders.setPayment(o.code, 'paid');
-  assert.equal(paid.paymentLabel, 'Paid by UPI');
+  assert.equal(paid.paymentLabel, 'Paid online');
   assert.equal(paid.status, 'placed', 'staff seeing the money sends it to the kitchen');
-  assert.match(c.text('track')[0].text, /Paid by UPI/);
+  assert.match(c.text('track')[0].text, /Paid online/);
 });
 
 test('UPI: screenshot counts as a claim; customer can switch to cash', () => {

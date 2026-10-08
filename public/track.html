@@ -38,15 +38,19 @@
 
   function payHtml(o) {
     const p = o.payment;
-    if (p.status === 'paid') return `<div class="paybox done"><b>✅ Paid ${rupees(o.total)} by UPI</b></div>`;
+    if (p.status === 'paid') return `<div class="paybox done"><b>✅ Paid ${rupees(o.total)}</b></div>`;
+    if (p.status === 'refunded') return `<div class="paybox done"><b>💸 ${rupees(o.total)} refunded</b><span class="small">It reaches your account in 5–7 working days.</span></div>`;
     if (p.status === 'cod') return `<p class="small">💵 Pay <b>${rupees(o.total)}</b> by cash or UPI ${o.fulfilment === 'delivery' ? 'when your order arrives' : 'at pickup'}.</p>`;
     const claimed = p.status === 'claimed';
     const waiting = o.status === 'awaiting_payment';
     return `<div class="paybox">
       <b>${claimed ? '⏳ Checking your payment' : `💳 Pay ${rupees(o.total)} by UPI${waiting ? ' to confirm your order' : ''}`}</b>
       ${waiting ? `<span class="small">${claimed ? 'Your order goes to the kitchen as soon as the outlet sees your payment.' : `The kitchen starts as soon as your payment arrives. Not paid within ${o.payWithinMinutes} minutes? The order is cancelled and nothing is charged.`}</span>` : ''}
-      <span class="small muted">To ${esc(p.payee)} · UPI ID <b>${esc(p.upiId)}</b> · Ref ${esc(o.code)}</span>
-      ${claimed ? '<span class="small">Thanks! The outlet will confirm as soon as it shows in their UPI account.</span>' : `
+      <span class="small muted">To ${esc(p.payee)}${p.upiId ? ` · UPI ID <b>${esc(p.upiId)}</b>` : ''} · Ref ${esc(o.code)}</span>
+      ${claimed ? '<span class="small">Thanks! The outlet will confirm as soon as it shows in their UPI account.</span>' : p.gateway ? `
+        <a class="btn" href="${esc(p.link)}">Pay now</a>
+        <span class="small muted">Any UPI app or a card. This page updates by itself once you've paid. On a computer, scan this QR with your phone:</span>
+        <div class="qr">${p.qrSvg}</div>` : `
         <a class="btn" href="${esc(p.link)}">Pay with UPI app</a>
         <span class="small muted">Opens GPay, PhonePe, Paytm or BHIM with the amount filled in. On a computer, scan this QR with your phone:</span>
         <div class="qr">${p.qrSvg}</div>
@@ -81,7 +85,7 @@
     card.innerHTML = `
       <h2 style="margin:0">Order ${esc(o.code)}</h2>
       <p class="muted small">Thanks, ${esc(o.customerName)}! ${o.status === 'completed' || ended || o.status === 'awaiting_payment' ? '' : `Estimated ${o.fulfilment === 'delivery' ? 'delivery' : 'ready'} time: about <b>${o.etaMinutes} min</b> from ordering.`}</p>
-      ${ended ? '' : payHtml(o)}
+      ${ended && o.payment.status !== 'refunded' ? '' : payHtml(o)}
       ${stepsHtml}
       ${riderHtml(o)}
       ${o.loyalty && o.loyalty.points && !ended ? `<p class="small">⭐ ${o.loyalty.earned ? `You earned <b>${o.loyalty.points} loyalty points</b> on this order.` : `You'll earn <b>${o.loyalty.points} loyalty points</b> when this order is ${o.fulfilment === 'delivery' ? 'delivered' : 'picked up'}.`}</p>` : ''}

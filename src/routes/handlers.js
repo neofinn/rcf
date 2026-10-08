@@ -32,12 +32,12 @@ const csvCell = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '
 const publicOutlet = (o, now) => ({
   id: o.id, slug: o.slug, name: o.name, city: o.city, address: o.address, lat: o.lat, lng: o.lng,
   phone: o.phone, deliveryRadiusKm: rangeKm(o), opens: o.opens, closes: o.closes, open: isOpen(o, now),
-  upi: !!o.upi_id,
+  upi: Boolean(config.razorpay?.keyId) || !!o.upi_id,
 });
 
 const publicPayment = (o) => ({
   method: o.payment_method, status: o.payment_status, label: o.paymentLabel,
-  ...(o.upi && o.payment_status !== 'cod' ? { upiId: o.upi.upiId, payee: o.upi.payee, link: o.upi.link, qrSvg: qrSvg(o.upi.link) } : {}),
+  ...(o.upi && o.payment_status !== 'cod' ? { upiId: o.upi.upiId, payee: o.upi.payee, link: o.upi.link, gateway: Boolean(o.upi.gateway), qrSvg: qrSvg(o.upi.link) } : {}),
 });
 
 const publicDelivery = (d) => d && {

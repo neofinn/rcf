@@ -69,6 +69,17 @@ function preflight(config, store) {
     warnings.push('Delivery charge is still the placeholder rate card (₹40 for 3 km + ₹10/km); set DELIVERY_BASE_FEE_PAISE, DELIVERY_BASE_KM and DELIVERY_PER_KM_PAISE to the contract rates.');
   }
 
+  // ---- Online payments -----------------------------------------------------
+  const rp = config.razorpay || {};
+  if (rp.keyId) {
+    if (!rp.keySecret) need.push('RAZORPAY_KEY_SECRET is not set: payment links can\'t be created.');
+    if (!rp.webhookSecret) need.push('RAZORPAY_WEBHOOK_SECRET is not set: payments can\'t be confirmed automatically.');
+    if (/^rzp_test_/.test(rp.keyId)) (prod ? warnings : ok).push('Razorpay is in test mode (rzp_test_ key): no real money moves. Use the live key to take payments.');
+    else if (rp.keySecret && rp.webhookSecret) ok.push('Razorpay connected: online payments confirm themselves; cancelled paid orders are refunded.');
+  } else {
+    warnings.push('No payment gateway: "Pay now" goes straight to each outlet\'s UPI ID and staff confirm every payment by hand. Set RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET / RAZORPAY_WEBHOOK_SECRET for automatic confirmation.');
+  }
+
   if (!config.supabase.url) warnings.push('Supabase copy is off (optional; gives an off-server copy of the data).');
   else ok.push('Supabase copy on.');
 
@@ -82,8 +93,8 @@ function preflight(config, store) {
     const noPin = outlets.filter((o) => !withPin.has(o.id));
     const noSfx = sfx.mode === 'live' ? outlets.filter((o) => !o.sfx_store_code) : [];
     const names = (list) => list.map((o) => o.name).join(', ');
-    if (placeholderUpi.length) warnings.push(`Placeholder UPI IDs (…@example) at: ${names(placeholderUpi)}. Online UPI payment is offered there but can't succeed; set real IDs in Head office → Outlets.`);
-    if (noUpi.length) warnings.push(`No UPI ID (pay on delivery only) at: ${names(noUpi)}.`);
+    if (placeholderUpi.length && !rp.keyId) warnings.push(`Placeholder UPI IDs (…@example) at: ${names(placeholderUpi)}. Online UPI payment is offered there but can't succeed; set real IDs in Head office → Outlets.`);
+    if (noUpi.length && !rp.keyId) warnings.push(`No UPI ID (pay on delivery only) at: ${names(noUpi)}.`);
     if (fakePhone.length) warnings.push(`Placeholder phone numbers at: ${names(fakePhone)}.`);
     if (noPin.length) warnings.push(`No outlet panel PIN yet for: ${names(noPin)} (set in Head office → Outlets).`);
     if (noSfx.length) warnings.push(`No Shadowfax store code for: ${names(noSfx)}.`);
