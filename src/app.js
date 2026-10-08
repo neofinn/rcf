@@ -16,7 +16,10 @@ const { createWebhookRouter } = require('./whatsapp/webhook');
 const { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment, notifyOnDelivery } = require('./whatsapp/notify');
 const { createDispatcher } = require('./delivery/dispatcher');
 const { createShadowfaxClient } = require('./delivery/shadowfax');
-const { createSimulatedShadowfax } = require('./delivery/simulator');
+const { createSimulatedFleet } = require('./delivery/simulator');
+const { createPorterClient } = require('./delivery/porter');
+const { createBorzoClient, validBorzoSignature } = require('./delivery/borzo');
+const { createSelector } = require('./delivery/selector');
 const { qrPng } = require('./payments');
 const { createCrm } = require('./crm');
 const { createMenuAdmin } = require('./menu-admin');
@@ -33,10 +36,14 @@ function safeEqual(a, b) {
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 }
 
-function deliveryProvider({ shadowfax, onCallback }) {
-  if (shadowfax.mode === 'live') return createShadowfaxClient({ token: shadowfax.token, baseUrl: shadowfax.baseUrl });
-  if (shadowfax.mode === 'simulate') return createSimulatedShadowfax({ onCallback });
-  return null;
+/** Every delivery partner we have credentials for (or the simulated three). */
+function deliveryProviders({ onUpdate }) {
+  if (config.shadowfax.mode === 'simulate') return createSimulatedFleet({ onUpdate });
+  const list = [];
+  if (config.shadowfax.mode === 'live') list.push(createShadowfaxClient({ token: config.shadowfax.token, baseUrl: config.shadowfax.baseUrl }));
+  if (config.porter.apiKey) list.push(createPorterClient({ apiKey: config.porter.apiKey, baseUrl: config.porter.baseUrl }));
+  if (config.borzo.token) list.push(createBorzoClient({ token: config.borzo.token, baseUrl: config.borzo.baseUrl }));
+  return list;
 }
 
 function createApp({
@@ -67,9 +74,12 @@ function createApp({
   notifyOnPayment({ orders, client, log });
 
   let dispatcher;
-  const provider = deliveryPartner !== undefined ? deliveryPartner
-    : deliveryProvider({ shadowfax: config.shadowfax, onCallback: (p) => dispatcher.handleCallback(p) });
-  dispatcher = createDispatcher({ orders, store, provider, bookOn: config.shadowfax.bookOn, log });
+  const providers = deliveryPartner !== undefined ? (deliveryPartner ? [deliveryPartner] : [])
+    : deliveryProviders({ onUpdate: (name, u) => dispatcher.handleUpdate(name, u) });
+  const selector = createSelector({ store, minuteValue: config.dispatch.minuteValue });
+  dispatcher = createDispatcher({
+    orders, store, providers, selector, bookOn: config.shadowfax.bookOn, reassignMinutes: config.dispatch.reassignMinutes, log,
+  });
   notifyOnDelivery({ dispatcher, client, log });
 
   const app = express();
@@ -79,7 +89,8 @@ function createApp({
   // Webhook needs the raw body for signature checks, so mount it before JSON parsing.
   app.use('/webhooks/whatsapp', createWebhookRouter({ db, bot, client, log }));
 
-  app.use(express.json({ limit: '100kb' }));
+  // Keep the raw body: Borzo callbacks are verified against it.
+  app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { req.rawBody = buf; } }));
   app.get('/healthz', (req, res) => res.json({ ok: true }));
 
   // UPI QR image for an order (sent as a WhatsApp image; WhatsApp can't show SVG).
@@ -91,11 +102,17 @@ function createApp({
     } catch (e) { next(e); }
   });
 
-  // Shadowfax sends a shared secret in a custom header we agree with them at
-  // onboarding. Without one configured, callbacks are only accepted outside production.
-  const partnerAuthorized = (req) => (config.shadowfax.callbackToken
-    ? safeEqual(req.get('x-callback-token'), config.shadowfax.callbackToken)
-    : !config.production);
+  // Delivery partner callbacks. Shadowfax and Porter: a shared secret we agree
+  // at onboarding (header, or ?token= in the URL we give them). Borzo signs the
+  // body with HMAC-SHA256. Without a secret configured, callbacks are only
+  // accepted outside production.
+  const partnerAuthorized = (req, partner) => {
+    if (partner === 'borzo') {
+      return config.borzo.callbackSecret ? validBorzoSignature(req.rawBody, req.get('x-dv-signature'), config.borzo.callbackSecret) : !config.production;
+    }
+    const secret = partner === 'porter' ? config.porter.callbackToken : config.shadowfax.callbackToken;
+    return secret ? safeEqual(req.get('x-callback-token') || req.query.token, secret) : !config.production;
+  };
 
   for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports })) {
     if (route.dev && !enableDevTools) continue;
@@ -105,7 +122,7 @@ function createApp({
       const token = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
       const auth = route.admin || route.outlet ? staffAuth.resolve(token) : null;
       if (!authorize(route, auth)) return res.status(401).json({ error: 'Unauthorized' });
-      if (route.partner && !partnerAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+      if (route.partner && !partnerAuthorized(req, route.partner)) return res.status(401).json({ error: 'Unauthorized' });
       let out;
       try {
         out = await route.handle({ params: req.params, query: req.query, body: req.body || {}, auth, token });

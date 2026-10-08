@@ -19,7 +19,7 @@ const { createReviews } = require('../src/reviews');
 const { createBot, createSessionStore } = require('../src/whatsapp/bot');
 const { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment, notifyOnDelivery } = require('../src/whatsapp/notify');
 const { createDispatcher } = require('../src/delivery/dispatcher');
-const { createSimulatedShadowfax } = require('../src/delivery/simulator');
+const { createSimulatedFleet } = require('../src/delivery/simulator');
 const { assignOutlet } = require('../src/geo');
 
 const DEMO_PIN = '1234';
@@ -47,10 +47,12 @@ function createDemoBackend({ state } = {}) {
   notifyOnStatusChange({ orders, client, crm, log: quiet });
   relayHandoffReplies({ handoffs, client, log: quiet });
   notifyOnPayment({ orders, client, log: quiet });
-  // Pretend Shadowfax: riders are booked when an outlet accepts a delivery order.
   let dispatcher;
-  const shadowfax = createSimulatedShadowfax({ onCallback: (p) => dispatcher.handleCallback(p) });
-  dispatcher = createDispatcher({ orders, store, provider: shadowfax, log: quiet });
+  // Pretend Shadowfax, Porter and Borzo: the selector picks the best quote for each order,
+  // and a booking with no rider moves to the next partner after 20 seconds (8 min in real life).
+  const fleet = createSimulatedFleet({ onUpdate: (name, u) => dispatcher.handleUpdate(name, u) });
+  dispatcher = createDispatcher({ orders, store, providers: fleet, reassignMinutes: 1 / 3, log: quiet });
+  dispatcher.startSweeper(5000);
   notifyOnDelivery({ dispatcher, client, log: quiet });
   // Demo: check for due review requests every 5 seconds (asked 20 s after delivery).
   reviews.startTicker(5000);

@@ -39,7 +39,7 @@ const publicPayment = (o) => ({
 });
 
 const publicDelivery = (d) => d && {
-  partner: d.provider, status: d.status, label: d.label, riderName: d.rider_name, riderPhone: d.rider_phone,
+  partner: d.providerLabel || d.provider, status: d.status, label: d.label, riderName: d.rider_name, riderPhone: d.rider_phone,
   riderLat: d.rider_lat, riderLng: d.rider_lng, trackUrl: d.track_url,
 };
 
@@ -92,7 +92,7 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
         : notFound('Order not found')),
     },
     {
-      // Delivery partner: (re)book a Shadowfax rider, or deliver with the outlet's own rider.
+      // Delivery partner: (re)book a rider (best partner by price and speed), or use the outlet's own rider.
       method: 'POST', path: `${base}/orders/:code/delivery`, ...flag,
       handle: async ({ params, body, auth }) => {
         if (!ownOrder(auth, params.code)) return notFound('Order not found');
@@ -294,11 +294,19 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
     },
     {
       // Partner callbacks (Shadowfax). Mounted by the server with its own auth check.
-      method: 'POST', path: '/webhooks/shadowfax', partner: true,
+      method: 'POST', path: '/webhooks/shadowfax', partner: 'shadowfax',
       handle: ({ body }) => {
         dispatcher.handleCallback(body);
         return { ok: true };
       },
+    },
+    {
+      method: 'POST', path: '/webhooks/porter', partner: 'porter',
+      handle: ({ body }) => { dispatcher.handleWebhook('porter', body); return { ok: true }; },
+    },
+    {
+      method: 'POST', path: '/webhooks/borzo', partner: 'borzo',
+      handle: ({ body }) => { dispatcher.handleWebhook('borzo', body); return { ok: true }; },
     },
     { method: 'GET', path: '/api/admin/outlets', admin: true, handle: () => orders.listOutlets() },
 

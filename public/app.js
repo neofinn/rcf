@@ -177,7 +177,7 @@ let siteConfig = null;
 function rateCardText() {
   const d = siteConfig?.delivery;
   if (!d) return '';
-  return `Delivery by ${d.partner}: ${rupees(d.baseFee)} for the first ${d.baseKm} km, then ${rupees(d.perKmFee)} per km.`;
+  return `Delivery: ${rupees(d.baseFee)} for the first ${d.baseKm} km, then ${rupees(d.perKmFee)} per km.`;
 }
 
 function renderHeader() {
@@ -198,7 +198,7 @@ function renderHeader() {
   b.classList.remove('hidden', 'warn');
   b.innerHTML = l.fulfilment === 'delivery'
     ? `🛵 Delivering from <b>${esc(l.outlet.name)}</b> (${l.distanceKm} km) in about <b>${l.etaMinutes} min</b>.`
-      + (l.deliveryCharge != null ? ` Delivery by ${esc(siteConfig?.delivery?.partner || 'Shadowfax')}: <b>${rupees(l.deliveryCharge)}</b>.` : '')
+      + (l.deliveryCharge != null ? ` Delivery: <b>${rupees(l.deliveryCharge)}</b>.` : '')
     : `🏃 Pick up from <b>${esc(l.outlet.name)}</b>, ${esc(l.outlet.address)}. Ready in about <b>20 min</b>.`;
 }
 
@@ -349,7 +349,7 @@ async function renderCart() {
       <div><span>Item total</span><span>${rupees(q.subtotal)}</span></div>
       <div><span>Packing</span><span>${rupees(q.packing)}</span></div>
       <div><span>GST (5%)</span><span>${rupees(q.gst)}</span></div>
-      ${l.fulfilment === 'delivery' ? `<div><span>Delivery by ${esc(q.deliveryPartner)} (${q.deliveryKm} km)</span><span>${q.deliveryFee ? rupees(q.deliveryFee) : `FREE <s class="muted">${rupees(q.deliveryCharge)}</s>`}</span></div>` : ''}
+      ${l.fulfilment === 'delivery' ? `<div><span>Delivery (${q.deliveryKm} km)</span><span>${q.deliveryFee ? rupees(q.deliveryFee) : `FREE <s class="muted">${rupees(q.deliveryCharge)}</s>`}</span></div>` : ''}
       <div class="total"><span>To pay</span><span>${rupees(q.total)}</span></div>
       ${l.fulfilment === 'delivery' && q.deliveryFee && q.freeDeliveryAbove > 0 && q.subtotal < q.freeDeliveryAbove ? `<p class="small muted">Add ${rupees(q.freeDeliveryAbove - q.subtotal)} more for free delivery.</p>` : ''}
       ${short ? `<p class="error">Minimum order for delivery is ${rupees(q.minDeliveryOrder)}.</p>` : ''}`;

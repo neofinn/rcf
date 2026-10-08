@@ -295,16 +295,16 @@ test('long carts keep button messages within WhatsApp limits', () => {
   assert.equal(r.at(-1).type, 'buttons');
 });
 
-test('WhatsApp shows the Shadowfax delivery charge before ordering', () => {
+test('WhatsApp shows the delivery charge before ordering', () => {
   const c = chat();
   let r = c.text('3 veg fried rice');
-  assert.match(r.at(-1).text, /Delivery by Shadowfax: ₹40 for the first 3 km \+ ₹10\/km/);
+  assert.match(r.at(-1).text, /Delivery: ₹40 for the first 3 km \+ ₹10\/km/);
   c.tap('act:checkout');
   c.tap('mode:delivery');
   r = c.say({ type: 'location', location: PLACES.panchkula5 });
-  assert.match(r[0].text, /Delivery by Shadowfax: \*₹\d+\*/);
+  assert.match(r[0].text, /Delivery: \*₹\d+\*/);
   r = c.text('House 77, Sector 5, Panchkula');
-  assert.match(r.at(-1).text, /Delivery by Shadowfax \([\d.]+ km\): ₹\d+/);
+  assert.match(r.at(-1).text, /Delivery \([\d.]+ km\): ₹\d+/);
   c.tap('act:place');
   const o = c.orders.latestOrderForPhone('919876543210');
   assert.ok(o.delivery_fee >= 4000);
@@ -316,7 +316,7 @@ test('delivery by typed address: area found, ambiguous area, or ask for a pin', 
   c.tap('mode:delivery');
   let r = c.text('House 12, sec 22-B, Chandigarh near gurudwara');
   assert.match(r[0].text, /We deliver to \*Sector 22, Chandigarh\*! \*Raju Chinese - Sector 17\*/);
-  assert.match(r[0].text, /Delivery by Shadowfax/);
+  assert.match(r[0].text, /Delivery: /);
   assert.ok(allIds(r).includes('cat:Noodles'), 'menu follows');
 
   // Same sector number in two cities: ask which.

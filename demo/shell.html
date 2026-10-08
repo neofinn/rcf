@@ -177,7 +177,7 @@
       <div class="phone"><iframe id="f-whatsapp" title="WhatsApp chat"></iframe></div>
     </div>
     <div class="surface dash" data-panel="dash">
-      <header><h2>Outlet panel</h2><p class="muted">The counter tablet at one outlet, signed in with that outlet's PIN. It sees <b>only its own orders and chats</b>; stock is read-only. A new order switches this tablet to the outlet that got it. Accept a delivery order and a simulated Shadowfax rider is booked.</p></header>
+      <header><h2>Outlet panel</h2><p class="muted">The counter tablet at one outlet, signed in with that outlet's PIN. It sees <b>only its own orders and chats</b>; stock is read-only. A new order switches this tablet to the outlet that got it. Accept a delivery order and the best of three simulated delivery partners (Shadowfax, Porter, Borzo) is booked; if no rider comes, the next one takes over.</p></header>
       <div class="desk"><div class="bar"><i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i><span>Outlet tablet · /outlet</span><select id="tabletOutlet" aria-label="Which outlet's tablet"></select></div><iframe id="f-outlet" title="Outlet panel"></iframe></div>
     </div>
     <div class="surface dash hq" data-panel="hq">
@@ -201,10 +201,10 @@
         <li>Measure road distance (straight line × 1.3) from the customer to every outlet.</li>
         <li>Keep outlets that are open and taking orders. Every outlet delivers up to <b>20 km by road</b>, so there is no blind spot anywhere in the tricity or its outskirts (New Chandigarh, Pinjore, Dera Bassi, Banur).</li>
         <li>The nearest one cooks. If it is paused or closed, the next nearest takes over.</li>
-        <li>The customer sees the <b>Shadowfax delivery charge</b> for their distance before ordering: ₹40 for the first 3 km, then ₹10 per km (placeholder rate card).</li>
+        <li>The customer sees the <b>delivery charge</b> for their distance before ordering: ₹40 for the first 3 km, then ₹10 per km (placeholder rate card).</li>
         <li>Further than 20 km, or every outlet closed? The customer is offered pickup.</li>
         <li>A catalog cart sent on WhatsApp is held until the customer shares a location, then routed the same way.</li>
-        <li>When the outlet accepts a delivery order, a Shadowfax rider is booked from that outlet. Rider updates move the order along and reach the customer on WhatsApp. (Simulated here.)</li>
+        <li>When the outlet accepts a delivery order, every delivery partner is asked for a quote; the best mix of price and rider wait wins. No rider in time, or the partner cancels? The next partner is booked automatically. Rider updates reach the customer on WhatsApp. (Simulated here.)</li>
       </ol>
       <div>
         <h2 style="font-size:1rem;margin-bottom:8px">Live activity</h2>
@@ -363,17 +363,20 @@ function wireEvents() {
   be.dispatcher.events.on('delivery', (o, change) => {
     const d = o.delivery;
     const where = esc(short(o.outlet.name));
+    const who = esc(d.providerLabel || d.provider);
+    const compared = (d.quotes || []).map((q) => (q.reason ? `${esc(q.label)}: ${esc(q.reason)}` : `${esc(q.label)} ${rupees(q.price)}`)).join(', ');
     const msg = {
-      booked: `Shadowfax rider requested for <b>${o.code}</b> from ${where}`,
-      allotted: `Shadowfax assigned <b>${esc(d.rider_name || 'a rider')}</b> to <b>${o.code}</b>`,
+      booked: `<b>${who}</b> picked for <b>${o.code}</b> from ${where}${compared ? ` (compared: ${compared})` : ''}${(d.tried || []).length > 1 ? ' · moved from the previous partner' : ''}`,
+      waiting: `${who}: ${esc(d.error || 'still looking for a rider')}`,
+      allotted: `${who} assigned <b>${esc(d.rider_name || 'a rider')}</b> to <b>${o.code}</b>`,
       arrived: `Rider ${esc(d.rider_name || '')} reached ${where} for <b>${o.code}</b>`,
       dispatched: `Rider picked up <b>${o.code}</b>; order is out for delivery`,
       arrived_customer_doorstep: `Rider is at the customer's door with <b>${o.code}</b>`,
-      delivered: `<b>${o.code}</b> delivered by Shadowfax; order completed`,
+      delivered: `<b>${o.code}</b> delivered by ${who}; order completed`,
       failed: `Rider booking failed for <b>${o.code}</b>: ${esc(d.error || '')}`,
       own: `${where} will deliver <b>${o.code}</b> with its own rider`,
     }[change];
-    if (msg) log('Shadowfax', 'sfx', msg);
+    if (msg) log('Delivery', 'sfx', msg);
     drawRiders();
     if (change !== 'location' && o.channel === 'whatsapp') flagTab('whatsapp');
   });

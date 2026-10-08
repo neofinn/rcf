@@ -297,7 +297,7 @@
             <tr><td>Item sales</td><td class="n">${rupees(d.summary.itemSales)}</td></tr>
             <tr><td>Packing</td><td class="n">${rupees(d.summary.packing)}</td></tr>
             <tr><td>GST</td><td class="n">${rupees(d.summary.gst)}</td></tr>
-            <tr><td>Delivery charges (Shadowfax)</td><td class="n">${rupees(d.summary.deliveryFees)}</td></tr>
+            <tr><td>Delivery charges</td><td class="n">${rupees(d.summary.deliveryFees)}</td></tr>
             <tr><th>Gross sales</th><th class="n">${rupees(d.summary.grossSales)}</th></tr>
             <tr><td>Confirmed UPI payments</td><td class="n">${rupees(d.summary.upiPaid)}</td></tr>
           </tbody></table></div>

@@ -14,6 +14,8 @@ const DELIVERY_LABELS = {
   CANCELLED_BY_CUSTOMER: 'Customer cancelled', RETURNED_TO_SELLER: 'Returned to outlet', UNDELIVERED: 'Not delivered',
   FAILED: 'Rider booking failed', OWN: 'Outlet rider',
 };
+const PROVIDER_LABELS = { shadowfax: 'Shadowfax', porter: 'Porter', borzo: 'Borzo', own: 'Outlet rider', selecting: 'Choosing a partner', none: 'No partner' };
+const parseJson = (s, d) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
 
 class ValidationError extends Error {
   constructor(message, code = 'invalid') {
@@ -62,7 +64,7 @@ function normalisePhone(raw) {
   return /^[6-9]\d{9}$/.test(local) ? `+91${local}` : null;
 }
 
-/** What Shadowfax charges for a delivery of this road distance (rate card). */
+/** Delivery charge for this road distance (our published rate card, whichever partner delivers). */
 function deliveryCharge(distanceKm) {
   const d = config.delivery;
   return d.baseFee + Math.ceil(Math.max(0, (distanceKm || 0) - d.baseKm)) * d.perKmFee;
@@ -113,7 +115,7 @@ function priceCart(menuList, items, fulfilment, distanceKm) {
   const fee = delivery ? deliveryFee(subtotal, distanceKm) : 0;
   return {
     lines, subtotal, packing, gst, deliveryFee: fee, total: subtotal + packing + gst + fee,
-    // Shown on the bill: "Delivery by Shadowfax (6.2 km)", with the partner charge even when it's free.
+    // Shown on the bill: "Delivery (6.2 km)", with the charge even when it's free.
     deliveryKm: delivery ? distanceKm : null,
     deliveryCharge: delivery ? deliveryCharge(distanceKm) : 0,
     deliveryPartner: delivery ? config.delivery.partner : null,
@@ -292,7 +294,10 @@ function createOrderService(store) {
   function presentDelivery(row) {
     const d = store.getDelivery(row.id);
     if (!d) return null;
-    return { ...d, label: DELIVERY_LABELS[d.status] || d.status, collect: row.payment_status === 'paid' ? 0 : row.total };
+    return {
+      ...d, label: DELIVERY_LABELS[d.status] || d.status, collect: row.payment_status === 'paid' ? 0 : row.total,
+      providerLabel: PROVIDER_LABELS[d.provider] || d.provider, quotes: parseJson(d.quotes, []), tried: parseJson(d.tried, []),
+    };
   }
 
   const getOrderById = (id) => present(store.orderById(id));

@@ -1,28 +1,50 @@
 'use strict';
 
-// Books delivery riders and keeps our orders in step with the delivery
-// partner (Shadowfax). Provider-agnostic: anything with book(order, outlet)
-// and cancel(ref, reason) works, including the simulator used in the demo.
+// Books delivery riders across several partners (Shadowfax, Porter, Borzo, …)
+// and keeps our orders in step with them.
 //
-// Flow: outlet accepts a delivery order -> book a rider -> partner callbacks
-// update rider details; "DISPATCHED" moves our order to out for delivery and
-// "DELIVERED" completes it. If booking fails or the partner cancels, staff see
-// it on the dashboard and can retry or use their own rider.
+// Flow: the outlet accepts a delivery order -> the selector (selector.js) asks
+// every partner for a quote and ranks them by price, expected wait for a rider
+// and recent reliability -> we book the best one, falling through the list if
+// a booking is refused. Partner updates (webhooks, or the simulator) arrive as
+// normalised updates: "DISPATCHED" moves our order to out for delivery,
+// "DELIVERED" completes it.
+//
+// Fallbacks, so one partner's bad hour doesn't strand food:
+// - no rider assigned within reassignMinutes -> cancel there, book the next partner;
+// - the partner cancels -> book the next partner automatically;
+// - nobody can take it -> staff see why on the dashboard and can retry or use
+//   their own rider.
+//
+// A provider: { name, label, supportsCod, ready(outlet), quote(order, outlet),
+// book(order, outlet), cancel(ref, reason), parseCallback(body) }. quote/ready
+// are optional (a provider without them is always tried, at no known price).
 
 const { EventEmitter } = require('node:events');
 const { DELIVERY_LABELS } = require('../orders');
+const { createSelector } = require('./selector');
+const { parseShadowfaxCallback } = require('./shadowfax');
 
-const RIDER_ASSIGNED = new Set(['ALLOTTED', 'ALLOTED']);
 const FAILED = new Set(['CANCELLED', 'CANCELLED_BY_CUSTOMER', 'RETURNED_TO_SELLER', 'UNDELIVERED', 'FAILED']);
+const WAITING = new Set(['BOOKING', 'ACCEPTED', 'UNASSIGNED']);
+const RIDER_STATUSES = new Set(['ALLOTTED', 'ARRIVED', 'DISPATCHED', 'ARRIVED_CUSTOMER_DOORSTEP', 'DELIVERED']);
 
 const label = (status) => DELIVERY_LABELS[status === 'ALLOTED' ? 'ALLOTTED' : status] || status;
+// tried comes parsed from orders.getOrder(), or as JSON straight from the store.
+const parseList = (v) => { if (Array.isArray(v)) return v; try { return JSON.parse(v || '[]'); } catch { return []; } };
 
 // Walk our order forward to a target status through allowed steps.
 const DELIVERY_PATH = ['placed', 'accepted', 'preparing', 'out_for_delivery', 'completed'];
 
-function createDispatcher({ orders, store, provider, bookOn = 'accepted', log = console }) {
+function createDispatcher({
+  orders, store, provider, providers, selector, bookOn = 'accepted', reassignMinutes = 8, log = console,
+}) {
   const events = new EventEmitter();
-  const enabled = Boolean(provider);
+  const list = providers || (provider ? [provider] : []);
+  const byName = new Map(list.map((p) => [p.name, p]));
+  const enabled = list.length > 0;
+  const pick = selector || createSelector({ store });
+  let sweeper = null;
 
   function save(order, fields, change) {
     store.upsertDelivery(order.id, { ...fields, updated_at: new Date().toISOString() });
@@ -42,28 +64,68 @@ function createDispatcher({ orders, store, provider, bookOn = 'accepted', log = 
     return o;
   }
 
-  /** Book a rider for a delivery order. Safe to call again after a failure. */
+  const quoteSummary = (ranked, rejected) => JSON.stringify([
+    ...ranked.map((r) => ({ name: r.provider.name, label: r.provider.label || r.provider.name, price: r.price, etaMin: r.etaMin, score: r.score })),
+    ...rejected.map((r) => ({ name: r.name, label: r.label || r.name, reason: r.reason })),
+  ]);
+
+  // Try the ranked partners in order until one accepts the booking.
+  async function bookRanked(order, outlet, ranked, rejected, tried) {
+    const quotes = quoteSummary(ranked, rejected);
+    const reasons = rejected.filter((r) => r.reason !== 'already tried for this order').map((r) => `${r.label || r.name}: ${r.reason}`);
+    for (const r of ranked) {
+      const p = r.provider;
+      tried = [...new Set([...tried, p.name])];
+      try {
+        const res = await p.book(order, outlet);
+        const now = new Date().toISOString();
+        return save(order, {
+          provider: p.name, ref: res.ref, status: res.status || 'ACCEPTED', track_url: res.trackUrl || null, error: null,
+          rider_name: res.rider?.name || null, rider_phone: res.rider?.phone || null, rider_lat: null, rider_lng: null,
+          price: res.price ?? r.price ?? null, booked_at: now, allotted_at: res.rider ? now : null,
+          tried: JSON.stringify(tried), quotes,
+        }, res.rider ? 'rider_assigned' : 'booked');
+      } catch (e) {
+        log.error(`[delivery] ${p.name} booking failed`, e.message);
+        reasons.push(`${p.label || p.name}: ${e.message}`);
+      }
+    }
+    return save(order, {
+      provider: ranked[0]?.provider.name || list[0]?.name || 'none', ref: null, status: 'FAILED',
+      error: reasons.length ? reasons.join('; ') : 'No delivery partner is available', tried: JSON.stringify(tried), quotes,
+    }, 'failed');
+  }
+
+  /** Book a rider for a delivery order. Safe to call again after a failure (it tries every partner again). */
   async function book(code) {
     const order = orders.getOrder(code);
     if (!order || order.fulfilment !== 'delivery' || ['completed', 'cancelled'].includes(order.status)) return order;
     const current = order.delivery;
     if (current && !['FAILED', 'OWN'].includes(current.status) && !FAILED.has(current.status)) return order;
-    if (!provider) return save(order, { provider: 'none', status: 'FAILED', error: 'No delivery partner is configured' }, 'failed');
+    if (!enabled) return save(order, { provider: 'none', status: 'FAILED', error: 'No delivery partner is configured' }, 'failed');
     const outlet = store.outlet(order.outlet_id);
-    if (!outlet.sfx_store_code && !provider.simulated) {
-      return save(order, { provider: provider.name, status: 'FAILED', error: `${outlet.name} has no Shadowfax store code yet` }, 'failed');
+    save(order, { provider: 'selecting', ref: null, status: 'BOOKING', error: null, rider_name: null, rider_phone: null, rider_lat: null, rider_lng: null, track_url: null, tried: '[]' }, 'booking');
+    const { ranked, rejected } = await pick.rank(order, outlet, list, []);
+    return bookRanked(order, outlet, ranked, rejected, []);
+  }
+
+  /**
+   * Move a booking to the next partner (no rider in time, or the partner
+   * cancelled). Leaves it alone when no other partner can take it.
+   */
+  async function reassign(order, why) {
+    const d = order.delivery;
+    const tried = parseList(d.tried).concat(d.provider);
+    const outlet = store.outlet(order.outlet_id);
+    const { ranked, rejected } = await pick.rank(order, outlet, list, tried);
+    if (!ranked.length) {
+      if (WAITING.has(d.status)) save(order, { error: `${why}; no other partner can take it, still waiting` }, 'waiting');
+      return orders.getOrder(order.code);
     }
-    save(order, { provider: provider.name, ref: null, status: 'BOOKING', error: null, rider_name: null, rider_phone: null, rider_lat: null, rider_lng: null, track_url: null }, 'booking');
-    try {
-      const r = await provider.book(order, outlet);
-      return save(order, {
-        provider: provider.name, ref: r.ref, status: r.status || 'ACCEPTED', track_url: r.trackUrl || null, error: null,
-        rider_name: r.rider?.name || null, rider_phone: r.rider?.phone || null,
-      }, r.rider ? 'rider_assigned' : 'booked');
-    } catch (e) {
-      log.error('[delivery] booking failed', e.message);
-      return save(order, { provider: provider.name, status: 'FAILED', error: e.message }, 'failed');
-    }
+    const p = byName.get(d.provider);
+    if (d.ref && p && !FAILED.has(d.status)) p.cancel(d.ref, why).catch((e) => log.error('[delivery] cancel failed', e.message));
+    log.error?.(`[delivery] ${order.code}: ${why}; moving from ${d.provider} to the next partner`);
+    return bookRanked(orders.getOrder(order.code), outlet, ranked, rejected, tried);
   }
 
   /** Staff deliver it themselves. */
@@ -71,41 +133,71 @@ function createDispatcher({ orders, store, provider, bookOn = 'accepted', log = 
     const order = orders.getOrder(code);
     if (!order) return null;
     const d = order.delivery;
-    if (d?.ref && provider && !FAILED.has(d.status) && d.status !== 'DELIVERED') {
-      provider.cancel(d.ref, 'Outlet delivering with own rider').catch((e) => log.error('[delivery] cancel failed', e.message));
+    const p = d && byName.get(d.provider);
+    if (d?.ref && p && !FAILED.has(d.status) && d.status !== 'DELIVERED') {
+      p.cancel(d.ref, 'Outlet delivering with own rider').catch((e) => log.error('[delivery] cancel failed', e.message));
     }
     return save(order, { provider: 'own', status: 'OWN', error: null }, 'own');
   }
 
   /**
-   * Partner callback (Shadowfax POSTs/PUTs JSON). Returns the updated order,
-   * or null if it doesn't match one of ours.
+   * A normalised partner update: { ref, clientOrderId, status, rider: {name, phone, lat, lng}, trackUrl, error }.
+   * Returns the updated order, or null if it isn't one of ours (or is from a
+   * partner we already moved away from).
    */
-  function handleCallback(payload) {
-    const ref = payload.sfx_order_id != null ? String(payload.sfx_order_id) : null;
-    const d = (ref && store.deliveryByRef(ref)) || null;
-    const order = d ? orders.getOrderById(d.order_id) : orders.getOrder(payload.client_order_id);
-    if (!order || !order.delivery || order.delivery.status === 'OWN') return null;
+  function handleUpdate(providerName, u) {
+    const byRef = u.ref ? store.deliveryByRef(u.ref) : null;
+    const order = byRef ? orders.getOrderById(byRef.order_id) : (u.clientOrderId ? orders.getOrder(u.clientOrderId) : null);
+    const cur = order?.delivery;
+    if (!order || !cur || cur.status === 'OWN') return null;
+    if (providerName && cur.provider !== providerName) return null; // a late update from an earlier partner
+    if (u.ref && cur.ref && u.ref !== cur.ref) return null;
 
-    const status = String(payload.order_status || payload.status || order.delivery.status).toUpperCase();
-    const masked = payload.masked_rider_contact;
+    const status = u.status ? (u.status === 'ALLOTED' ? 'ALLOTTED' : u.status) : cur.status;
+    const r = u.rider || {};
     const fields = {
-      ref: ref || order.delivery.ref,
-      status: status === 'ALLOTED' ? 'ALLOTTED' : status,
-      rider_name: payload.rider_name || order.delivery.rider_name,
-      rider_phone: payload.rider_contact || (masked && (masked.number || masked.contact)) || order.delivery.rider_phone,
-      rider_lat: payload.rider_latitude != null ? Number(payload.rider_latitude) : order.delivery.rider_lat,
-      rider_lng: payload.rider_longitude != null ? Number(payload.rider_longitude) : order.delivery.rider_lng,
-      track_url: payload.track_url || order.delivery.track_url,
-      error: FAILED.has(status) ? (payload.comments || payload.cancel_reason || label(status)) : null,
+      ref: u.ref || cur.ref,
+      status,
+      rider_name: r.name || cur.rider_name,
+      rider_phone: r.phone || cur.rider_phone,
+      rider_lat: r.lat != null ? r.lat : cur.rider_lat,
+      rider_lng: r.lng != null ? r.lng : cur.rider_lng,
+      track_url: u.trackUrl || cur.track_url,
+      error: FAILED.has(status) ? (u.error || label(status)) : null,
+      allotted_at: cur.allotted_at || (RIDER_STATUSES.has(status) ? new Date().toISOString() : null),
     };
-    const statusChanged = fields.status !== order.delivery.status;
+    const statusChanged = fields.status !== cur.status;
     let updated = save(order, fields, statusChanged ? fields.status.toLowerCase() : 'location');
     if (!statusChanged) return updated;
 
     if (status === 'DISPATCHED') updated = advance(updated, 'out_for_delivery') || updated;
     if (status === 'DELIVERED') updated = advance(updated, 'completed') || updated;
+    // The partner gave up before pickup: try the next one.
+    if (FAILED.has(status) && !['completed', 'cancelled', 'out_for_delivery'].includes(updated.status)) {
+      reassign(updated, `${byName.get(cur.provider)?.label || cur.provider} cancelled`).catch((e) => log.error('[delivery] reassign failed', e.message));
+    }
     return updated;
+  }
+
+  /** Shadowfax callback body (kept for the existing webhook and tests). */
+  const handleCallback = (payload) => handleUpdate('shadowfax', parseShadowfaxCallback(payload));
+
+  /** Partner webhook body -> update. */
+  function handleWebhook(providerName, body) {
+    const p = byName.get(providerName);
+    const parse = p?.parseCallback || (providerName === 'shadowfax' ? parseShadowfaxCallback : null);
+    return parse ? handleUpdate(providerName, parse(body)) : null;
+  }
+
+  /** Bookings with no rider after reassignMinutes move to the next partner. */
+  async function sweep(now = new Date()) {
+    const cutoff = new Date(now.getTime() - reassignMinutes * 60000).toISOString();
+    for (const d of store.staleDeliveries(cutoff)) {
+      const order = orders.getOrderById(d.order_id);
+      if (!order || ['completed', 'cancelled'].includes(order.status)) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await reassign(order, `No rider from ${byName.get(d.provider)?.label || d.provider} in ${reassignMinutes} min`);
+    }
   }
 
   // Book automatically when the outlet accepts (or starts preparing) a delivery order;
@@ -113,13 +205,20 @@ function createDispatcher({ orders, store, provider, bookOn = 'accepted', log = 
   orders.events.on('status', (o, meta = {}) => {
     if (o.fulfilment !== 'delivery' || meta.by === 'delivery') return;
     if (enabled && o.status === bookOn && !o.delivery) book(o.code);
-    if (o.status === 'cancelled' && o.delivery?.ref && provider && !FAILED.has(o.delivery.status)) {
-      provider.cancel(o.delivery.ref, 'Order cancelled by outlet').catch((e) => log.error('[delivery] cancel failed', e.message));
+    const p = o.delivery && byName.get(o.delivery.provider);
+    if (o.status === 'cancelled' && o.delivery?.ref && p && !FAILED.has(o.delivery.status)) {
+      p.cancel(o.delivery.ref, 'Order cancelled by outlet').catch((e) => log.error('[delivery] cancel failed', e.message));
       save(o, { status: 'CANCELLED', error: 'Order cancelled by outlet' }, 'cancelled');
     }
   });
 
-  return { events, enabled, book, useOwnRider, handleCallback, label };
+  return {
+    events, enabled, providers: list, book, reassign, useOwnRider, handleUpdate, handleCallback, handleWebhook, sweep, label,
+    startSweeper(intervalMs = 60000) {
+      if (!sweeper && enabled) { sweeper = setInterval(() => { sweep().catch((e) => log.error('[delivery] sweep failed', e.message)); }, intervalMs); sweeper.unref?.(); }
+    },
+    stopSweeper() { clearInterval(sweeper); sweeper = null; },
+  };
 }
 
 module.exports = { createDispatcher };

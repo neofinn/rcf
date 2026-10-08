@@ -207,10 +207,10 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     if (s.fulfilment === 'pickup') return '🏃 Pickup: no delivery charge';
     const d = config.delivery;
     if (!s.outletId || s.distanceKm == null) {
-      return `🛵 Delivery by ${d.partner}: ${rupees(d.baseFee)} for the first ${d.baseKm} km + ${rupees(d.perKmFee)}/km, worked out at checkout from your location`;
+      return `🛵 Delivery: ${rupees(d.baseFee)} for the first ${d.baseKm} km + ${rupees(d.perKmFee)}/km, worked out at checkout from your location`;
     }
     const fee = deliveryFee(subtotal, s.distanceKm);
-    return `🛵 Delivery by ${d.partner} (${s.distanceKm} km): ${fee ? rupees(fee) : 'FREE'}`;
+    return `🛵 Delivery (${s.distanceKm} km): ${fee ? rupees(fee) : 'FREE'}`;
   }
 
   function cartView(s, heading = '🛒 *Your cart*') {
@@ -231,7 +231,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       `Item total: ${rupees(qte.subtotal)}`,
       `Packing: ${rupees(qte.packing)}`,
       `GST (5%): ${rupees(qte.gst)}`,
-      ...(s.fulfilment === 'delivery' ? [`Delivery by ${qte.deliveryPartner} (${qte.deliveryKm} km): ${qte.deliveryFee ? rupees(qte.deliveryFee) : `FREE (saves ${rupees(qte.deliveryCharge)})`}`] : []),
+      ...(s.fulfilment === 'delivery' ? [`Delivery (${qte.deliveryKm} km): ${qte.deliveryFee ? rupees(qte.deliveryFee) : `FREE (saves ${rupees(qte.deliveryCharge)})`}`] : []),
     ].join('\n');
     const notes = s.orderNotes.length ? `\n📝 Note for kitchen: ${s.orderNotes.join('; ')}\n` : '';
     const where = s.fulfilment === 'delivery'
@@ -322,7 +322,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     if (a.outlet) {
       s.outletId = a.outlet.id;
       s.distanceKm = a.distanceKm;
-      const intro = `✅ We deliver to ${area ? `*${area}*` : 'you'}! *${a.outlet.name}* (${a.distanceKm} km away) will cook your order, about ${etaMinutes('delivery', a.distanceKm)} min.\n🛵 Delivery by ${config.delivery.partner}: *${rupees(deliveryCharge(a.distanceKm))}*`
+      const intro = `✅ We deliver to ${area ? `*${area}*` : 'you'}! *${a.outlet.name}* (${a.distanceKm} km away) will cook your order, about ${etaMinutes('delivery', a.distanceKm)} min.\n🛵 Delivery: *${rupees(deliveryCharge(a.distanceKm))}*`
         + (area ? '\n_(Placed from your address. Share your location pin anytime for the exact spot.)_' : '');
       if (pin && !s.address) {
         // Location pin only: get the house/flat details for the rider now.

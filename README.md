@@ -84,15 +84,17 @@ At checkout (web and WhatsApp) the customer picks **💳 Pay now (UPI)** or **�
 - QR and web payments are confirmed by staff because plain UPI QR codes don't report back; payments made through WhatsApp's "Review and pay" confirm themselves. For automatic confirmation, add a payment gateway (Razorpay, PayU, Cashfree) or Meta's *Payments on WhatsApp (India)*. Their webhook calls `orders.setPayment(code, 'paid', now, 'gateway')`, and the rest of the flow stays as is.
 - Outlets without a UPI ID only offer pay on delivery.
 
-## Delivery riders: Shadowfax (`src/delivery/`)
+## Delivery riders: several partners, picked per order (`src/delivery/`)
 
-Delivery orders are handed to **Shadowfax Hyperlocal** riders using their *Dedicated Store* integration, where each outlet is a registered Shadowfax store.
+Supported partners: **Shadowfax** (`shadowfax.js`), **Porter** (`porter.js`; two-wheelers, prepaid only) and **Borzo** (`borzo.js`; motorbikes, cash on delivery). Each is switched on by setting its key; one partner is enough to run, more partners mean fewer orders waiting for a rider.
 
-1. When the outlet taps **Accept** on a delivery order (or **Start preparing**, with `SHADOWFAX_BOOK_ON=preparing`), we check Shadowfax serviceability for that store and drop point, then place a Shadowfax order. It carries the customer's coordinates, the items with their notes, and `paid` (a UPI order already marked paid) or the amount the rider should collect.
-2. Shadowfax calls `/webhooks/shadowfax` as the delivery moves. *Rider allotted* sends the customer the rider's name, number and live tracking link on WhatsApp. *Dispatched* moves our order to **Out for delivery**, *at doorstep* sends a "rider is at your door" message, and *delivered* completes the order.
-3. The dashboard shows the rider, their number and the amount to collect on each order card. If booking fails (no store code, not serviceable, Shadowfax error) or Shadowfax cancels, the card turns red with **Retry Shadowfax rider** and **Own rider**. Cancelling an order cancels its Shadowfax booking.
-
-Setup: get API access from Shadowfax (Dedicated Store model). Put each outlet's store code in `outlets.sfx_store_code`, set `SHADOWFAX_TOKEN` and `SHADOWFAX_BASE_URL` (staging `https://hlbackend.staging.shadowfax.in`, production `https://api.shadowfax.in`), and give Shadowfax your callback URL `https://<your-domain>/webhooks/shadowfax` with the header `X-Callback-Token: <SHADOWFAX_CALLBACK_TOKEN>`. The API paths are in `src/delivery/shadowfax.js` and follow Shadowfax's public docs. Confirm them, especially cancel, during onboarding. `SHADOWFAX_MODE=simulate` runs a pretend Shadowfax for local testing; the demo uses the same simulator.
+- **Smart selection** (`selector.js`). When an outlet accepts a delivery order, every partner is asked for a quote at the same time (4 s timeout each). Partners that can't serve the address, aren't set up for the outlet, or can't collect cash on an unpaid order drop out. The rest are ranked by price + expected wait for a rider × ₹3/min (`DELIVERY_MINUTE_VALUE_PAISE`) + a penalty for their recent failure rate. Expected wait is the partner's own estimate, or its average time to assign a rider over the last 7 days from our own records. So a partner ₹5 cheaper but 10 minutes slower loses in the rush.
+- **Fallbacks** (`dispatcher.js`). If a booking is refused, the next partner is booked straight away. If no rider is assigned within 8 minutes (`DELIVERY_REASSIGN_MINUTES`), or the partner cancels before pickup, the booking moves to the next partner automatically. Only when every partner has failed does it land with outlet staff, who can retry or use their own rider.
+- **What staff see:** the partner, its price and the comparison on each order card ("Porter ₹54 ✓ · Borzo ₹62 · Shadowfax: no cash on delivery").
+- **Customers** see one delivery charge (our rate card, `DELIVERY_*` settings) whichever partner delivers. The partner and rider show on tracking.
+- **Webhooks:** `/webhooks/shadowfax`, `/webhooks/porter` and `/webhooks/borzo`. Borzo's are checked with its HMAC signature, the others with a shared secret.
+- **Simulation:** `SHADOWFAX_MODE=simulate` runs pretend Shadowfax, Porter and Borzo with different prices and rider availability (used by the demo).
+- **To confirm at onboarding:** Porter's exact paths and field names (`porter.js` follows its published shapes; test in Porter's UAT), Shadowfax's quote/serviceability endpoint, and Borzo's signature encoding on a live test callback.
 
 ## Two staff panels
 

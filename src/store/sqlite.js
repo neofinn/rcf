@@ -4,6 +4,9 @@
 // implements the same interface in memory (src/store/memory.js), so the order,
 // handoff and WhatsApp logic run unchanged in both.
 
+const DELIVERY_COLS = ['provider', 'ref', 'status', 'rider_name', 'rider_phone', 'rider_lat', 'rider_lng', 'track_url', 'error',
+  'price', 'booked_at', 'allotted_at', 'tried', 'quotes', 'updated_at'];
+
 function createSqliteStore(db) {
   const q = {
     outlets: db.prepare('SELECT * FROM outlets WHERE active = 1 ORDER BY id'),
@@ -46,6 +49,13 @@ function createSqliteStore(db) {
     setPayment: db.prepare('UPDATE orders SET payment_status = ?, updated_at = ? WHERE id = ? AND payment_status = ?'),
     byId: db.prepare('SELECT * FROM orders WHERE id = ?'),
     getDelivery: db.prepare('SELECT * FROM deliveries WHERE order_id = ?'),
+    upsertDelivery: db.prepare(`INSERT INTO deliveries (order_id, ${DELIVERY_COLS.join(', ')}) VALUES (?, ${DELIVERY_COLS.map(() => '?').join(', ')})
+      ON CONFLICT(order_id) DO UPDATE SET ${DELIVERY_COLS.map((c) => `${c} = excluded.${c}`).join(', ')}`),
+    deliveryStats: db.prepare(`SELECT provider, COUNT(*) AS booked,
+      SUM(CASE WHEN status IN ('FAILED', 'CANCELLED', 'UNDELIVERED') THEN 1 ELSE 0 END) AS failed,
+      AVG(CASE WHEN allotted_at IS NOT NULL THEN (julianday(allotted_at) - julianday(booked_at)) * 1440 END) AS assign_min
+      FROM deliveries WHERE booked_at >= ? GROUP BY provider`),
+    staleDeliveries: db.prepare(`SELECT * FROM deliveries WHERE status IN ('BOOKING', 'ACCEPTED', 'UNASSIGNED') AND booked_at < ?`),
     deliveryByRef: db.prepare('SELECT * FROM deliveries WHERE ref = ? ORDER BY updated_at DESC LIMIT 1'),
     // INDEXED BY: without it SQLite picks the outlet index for the GROUP BY and
     // scans every order ever placed (seconds with a year of data).
@@ -182,14 +192,13 @@ function createSqliteStore(db) {
     deliveryByRef: (ref) => q.deliveryByRef.get(ref) || null,
     upsertDelivery(orderId, fields) {
       const cur = q.getDelivery.get(orderId);
-      const row = { provider: 'none', ref: null, status: 'FAILED', rider_name: null, rider_phone: null, rider_lat: null, rider_lng: null, track_url: null, error: null, ...cur, ...fields, order_id: orderId };
-      db.prepare(`INSERT INTO deliveries (order_id, provider, ref, status, rider_name, rider_phone, rider_lat, rider_lng, track_url, error, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(order_id) DO UPDATE SET provider = excluded.provider, ref = excluded.ref, status = excluded.status,
-          rider_name = excluded.rider_name, rider_phone = excluded.rider_phone, rider_lat = excluded.rider_lat,
-          rider_lng = excluded.rider_lng, track_url = excluded.track_url, error = excluded.error, updated_at = excluded.updated_at`)
-        .run(orderId, ...['provider', 'ref', 'status', 'rider_name', 'rider_phone', 'rider_lat', 'rider_lng', 'track_url', 'error', 'updated_at'].map((k) => row[k] ?? null));
+      const row = { provider: 'none', ref: null, status: 'FAILED', ...cur, ...fields, order_id: orderId };
+      q.upsertDelivery.run(orderId, ...DELIVERY_COLS.map((k) => row[k] ?? null));
     },
+    /** Per partner since a time: bookings, failures, average minutes to assign a rider. */
+    deliveryStats: (sinceIso) => q.deliveryStats.all(sinceIso),
+    /** Bookings still without a rider, booked before the cutoff. */
+    staleDeliveries: (cutoffIso) => q.staleDeliveries.all(cutoffIso),
 
     // WhatsApp handoffs to staff
     openHandoff: ({ phone, name, outletId, ts }) => Number(q.openHandoff.run(phone, name || null, outletId || null, ts, ts).lastInsertRowid),

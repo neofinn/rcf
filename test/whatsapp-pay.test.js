@@ -52,7 +52,7 @@ test('pay now sends WhatsApp "Review and pay" for the exact order plus a dynamic
   assert.equal(sumItems, params.order.subtotal.value);
   assert.equal(params.order.subtotal.value + params.order.tax.value + params.order.shipping.value, params.total_amount.value);
   assert.equal(params.total_amount.value, order.total);
-  assert.match(params.order.shipping.description, /Delivery by Shadowfax/);
+  assert.match(params.order.shipping.description, /^Delivery \(/);
   assert.ok(params.order.items.some((i) => i.name === 'Veg Hakka Noodles (no onion)'));
 });
 

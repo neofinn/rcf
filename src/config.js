@@ -73,7 +73,30 @@ module.exports = {
     // Shared secret Shadowfax sends back in a custom header on callbacks.
     callbackToken: env.SHADOWFAX_CALLBACK_TOKEN || '',
     // Book the rider when the outlet accepts ('accepted') or starts cooking ('preparing').
+    // Applies to every partner. SHADOWFAX_MODE=simulate runs pretend Shadowfax,
+    // Porter and Borzo (demo/local) instead of the real ones.
     bookOn: env.SHADOWFAX_BOOK_ON === 'preparing' ? 'preparing' : 'accepted',
+  },
+
+  // More delivery partners; each is used when its key is set. The selector
+  // (src/delivery/selector.js) quotes all of them for every order.
+  porter: {
+    apiKey: env.PORTER_API_KEY || '',
+    baseUrl: env.PORTER_BASE_URL || 'https://pfe-apigw-uat.porter.in',
+    // Secret we add to the webhook URL we give Porter (?token=…), or send as X-Callback-Token.
+    callbackToken: env.PORTER_CALLBACK_TOKEN || '',
+  },
+  borzo: {
+    token: env.BORZO_TOKEN || '',
+    baseUrl: env.BORZO_BASE_URL || 'https://robotapitest-in.borzodelivery.com/api/business/1.8',
+    // "Callback Secret Key" from the Borzo dashboard; signs every callback.
+    callbackSecret: env.BORZO_CALLBACK_SECRET || '',
+  },
+  // How partners are compared: a minute of waiting for a rider is worth this
+  // much (paise); a booking with no rider after this many minutes moves on.
+  dispatch: {
+    minuteValue: int(env.DELIVERY_MINUTE_VALUE_PAISE, 300),
+    reassignMinutes: num(env.DELIVERY_REASSIGN_MINUTES, 8),
   },
 
   // Optional copy of the data in Supabase (Postgres) for Power BI, campaigns

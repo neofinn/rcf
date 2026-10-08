@@ -132,6 +132,11 @@ CREATE TABLE IF NOT EXISTS deliveries (
   rider_lng REAL,
   track_url TEXT,
   error TEXT,
+  price INTEGER, -- what the partner quoted (paise)
+  booked_at TEXT,
+  allotted_at TEXT, -- when a rider was assigned (partner speed history)
+  tried TEXT, -- JSON list of partners already tried for this order
+  quotes TEXT, -- JSON of the last comparison, for the dashboard
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS deliveries_ref ON deliveries(ref);
@@ -265,6 +270,10 @@ function migrate(db, seed) {
     db.exec('ALTER TABLE outlets ADD COLUMN wa_payment_config TEXT');
     const set = db.prepare('UPDATE outlets SET wa_payment_config = ? WHERE slug = ?');
     for (const o of seed.outlets) set.run(o.waPaymentConfig || null, o.slug);
+  }
+  const deliveryCols = db.prepare('PRAGMA table_info(deliveries)').all().map((c) => c.name);
+  for (const [col, type] of [['price', 'INTEGER'], ['booked_at', 'TEXT'], ['allotted_at', 'TEXT'], ['tried', 'TEXT'], ['quotes', 'TEXT']]) {
+    if (!deliveryCols.includes(col)) db.exec(`ALTER TABLE deliveries ADD COLUMN ${col} ${type}`);
   }
   const orderCols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
   if (!orderCols.includes('payment_status')) db.exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'cod'");

@@ -14,6 +14,8 @@
 // particular) with the Shadowfax team during onboarding. They can be
 // overridden through config.shadowfax.paths.
 
+const { deliveryCharge } = require('../orders');
+
 const DEFAULT_PATHS = {
   serviceability: '/api/v2/store_serviceability/',
   createOrder: '/api/v2/stores/orders/',
@@ -55,6 +57,28 @@ function buildOrderPayload(order, outlet) {
 
 class ShadowfaxError extends Error {}
 
+const STATUS_ALIASES = { ALLOTED: 'ALLOTTED' };
+
+/** A Shadowfax callback body -> our normalised update (see dispatcher.handleUpdate). */
+function parseShadowfaxCallback(payload) {
+  const raw = String(payload.order_status || payload.status || '').toUpperCase();
+  const masked = payload.masked_rider_contact;
+  const hasRider = payload.rider_name || payload.rider_contact || masked || payload.rider_latitude != null;
+  return {
+    ref: payload.sfx_order_id != null ? String(payload.sfx_order_id) : null,
+    clientOrderId: payload.client_order_id || null,
+    status: raw ? (STATUS_ALIASES[raw] || raw) : null,
+    rider: hasRider ? {
+      name: payload.rider_name || null,
+      phone: payload.rider_contact || (masked && (masked.number || masked.contact)) || null,
+      lat: payload.rider_latitude != null ? Number(payload.rider_latitude) : null,
+      lng: payload.rider_longitude != null ? Number(payload.rider_longitude) : null,
+    } : null,
+    trackUrl: payload.track_url || null,
+    error: payload.comments || payload.cancel_reason || null,
+  };
+}
+
 function createShadowfaxClient({ token, baseUrl, paths = {}, fetchImpl = globalThis.fetch, timeoutMs = 10000 }) {
   const p = { ...DEFAULT_PATHS, ...paths };
 
@@ -83,6 +107,20 @@ function createShadowfaxClient({ token, baseUrl, paths = {}, fetchImpl = globalT
 
   return {
     name: 'shadowfax',
+    label: 'Shadowfax',
+    supportsCod: true,
+    // Each outlet needs a Shadowfax store code (from onboarding).
+    ready: (outlet) => Boolean(outlet.sfx_store_code),
+
+    /**
+     * Shadowfax answers serviceability but not a price; the price is the
+     * contract rate card (config.delivery), which is what we pay them.
+     */
+    async quote(order, outlet) {
+      if (!(await this.isServiceable(order, outlet))) return { ok: false, reason: 'Shadowfax: no rider for this address right now' };
+      return { ok: true, price: deliveryCharge(order.distance_km), etaMin: null };
+    },
+    parseCallback: parseShadowfaxCallback,
 
     async isServiceable(order, outlet) {
       const r = await call('PUT', p.serviceability, {
@@ -115,4 +153,4 @@ function createShadowfaxClient({ token, baseUrl, paths = {}, fetchImpl = globalT
   };
 }
 
-module.exports = { createShadowfaxClient, buildOrderPayload, ShadowfaxError, DEFAULT_PATHS };
+module.exports = { createShadowfaxClient, buildOrderPayload, parseShadowfaxCallback, ShadowfaxError, DEFAULT_PATHS };

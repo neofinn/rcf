@@ -155,6 +155,19 @@ function createMemoryStore(seed) {
     orderById: (id) => copy(orders.find((o) => o.id === id)),
     getDelivery: (orderId) => copy(deliveries.get(orderId)),
     deliveryByRef: (ref) => copy([...deliveries.values()].find((d) => d.ref === ref)),
+    deliveryStats(sinceIso) {
+      const by = new Map();
+      for (const d of deliveries.values()) {
+        if (!d.booked_at || d.booked_at < sinceIso) continue;
+        const s = by.get(d.provider) || { provider: d.provider, booked: 0, failed: 0, mins: [] };
+        s.booked += 1;
+        if (['FAILED', 'CANCELLED', 'UNDELIVERED'].includes(d.status)) s.failed += 1;
+        if (d.allotted_at) s.mins.push((Date.parse(d.allotted_at) - Date.parse(d.booked_at)) / 60000);
+        by.set(d.provider, s);
+      }
+      return [...by.values()].map(({ mins, ...s }) => ({ ...s, assign_min: mins.length ? mins.reduce((a, b) => a + b, 0) / mins.length : null }));
+    },
+    staleDeliveries: (cutoffIso) => [...deliveries.values()].filter((d) => ['BOOKING', 'ACCEPTED', 'UNASSIGNED'].includes(d.status) && d.booked_at && d.booked_at < cutoffIso).map(copy),
     upsertDelivery(orderId, fields) {
       deliveries.set(orderId, { provider: 'none', ref: null, status: 'FAILED', ...deliveries.get(orderId), ...fields, order_id: orderId });
     },

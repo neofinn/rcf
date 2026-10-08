@@ -100,7 +100,7 @@ test('dispatcher: booking failure and partner cancellation leave the order with 
   const { db, orders, store } = setup();
   withOutletsOpen(db);
   let fail = true;
-  const provider = { name: 'shadowfax', book: async () => { if (fail) throw new Error('Shadowfax has no rider for this address right now'); return { ref: 'R2', status: 'ACCEPTED' }; }, cancel: async () => {} };
+  const provider = { name: 'shadowfax', label: 'Shadowfax', ready: (outlet) => Boolean(outlet.sfx_store_code), book: async () => { if (fail) throw new Error('Shadowfax has no rider for this address right now'); return { ref: 'R2', status: 'ACCEPTED' }; }, cancel: async () => {} };
   const d = createDispatcher({ orders, store, provider, log: { error() {} } });
   const o = deliveryOrder(orders, 'upi');
   orders.updateStatus(o.code, 'accepted');
@@ -122,7 +122,7 @@ test('dispatcher: booking failure and partner cancellation leave the order with 
   db.exec('UPDATE outlets SET sfx_store_code = NULL');
   const o2 = deliveryOrder(orders);
   await d.book(o2.code);
-  assert.match(orders.getOrder(o2.code).delivery.error, /no Shadowfax store code/);
+  assert.match(orders.getOrder(o2.code).delivery.error, /has no Shadowfax store code/);
 });
 
 test('simulator replays a full Shadowfax delivery', async () => {

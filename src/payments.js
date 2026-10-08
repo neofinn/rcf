@@ -80,7 +80,7 @@ function orderDetailsReply(order, outlet, { goodsType = 'digital-goods', now = n
       items,
       subtotal: order.subtotal + (order.packing || 0),
       tax: { value: order.gst, description: 'GST 5%' },
-      ...(order.delivery_fee ? { shipping: { value: order.delivery_fee, description: `Delivery by Shadowfax${order.distance_km != null ? ` (${order.distance_km} km)` : ''}` } } : {}),
+      ...(order.delivery_fee ? { shipping: { value: order.delivery_fee, description: `Delivery${order.distance_km != null ? ` (${order.distance_km} km)` : ''}` } } : {}),
       // Unpaid requests expire after an hour; the QR and cash stay available.
       expiration: { timestamp: Math.floor(now.getTime() / 1000) + 3600, description: 'Payment request expired. Pay by QR or cash.' },
     },

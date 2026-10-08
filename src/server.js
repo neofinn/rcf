@@ -8,7 +8,9 @@ if (config.production && config.adminToken === 'change-me') {
   process.exit(1);
 }
 
-const { app, reviews, sync } = createApp();
+const { app, reviews, sync, dispatcher } = createApp();
+// Moves bookings that get no rider in time to the next delivery partner.
+dispatcher.startSweeper(60 * 1000);
 // Sends review requests (30 min after delivery) and other scheduled jobs.
 reviews.startTicker(60 * 1000);
 // Copies new and changed rows to Supabase every few seconds, when configured.
