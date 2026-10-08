@@ -5,6 +5,7 @@
 
 const { rupees } = require('../format');
 const config = require('../config');
+const { brand } = require('../brand');
 const { WA_ORDER_STATUS } = require('../payments');
 
 const STATUS_MESSAGES = {
@@ -12,7 +13,7 @@ const STATUS_MESSAGES = {
   preparing: (o) => `👨‍🍳 Your order *${o.code}* is being prepared.`,
   out_for_delivery: (o) => `🛵 Your order *${o.code}* is out for delivery!${o.delivery?.rider_name ? ` ${o.delivery.rider_name} is bringing it.` : ''}${o.payment_status === 'paid' ? '' : ` Please keep ${rupees(o.total)} ready (cash/UPI).`}${o.delivery?.track_url ? `\nLive tracking: ${o.delivery.track_url}` : ''}`,
   ready: (o) => `🥡 Your order *${o.code}* is ready for pickup at ${o.outlet.name}, ${o.outlet.address}.`,
-  completed: (o) => `🙏 Thank you for ordering from Raju Chinese! Hope you enjoyed order *${o.code}*. Send *hi* to order again.`,
+  completed: (o) => `🙏 Thank you for ordering from ${brand().name}! Hope you enjoyed order *${o.code}*. Send *hi* to order again.`,
   cancelled: (o) => `❌ Sorry, your order *${o.code}* was cancelled by the outlet. Please call ${o.outlet.phone} for help.`,
 };
 

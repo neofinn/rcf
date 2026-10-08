@@ -1,10 +1,12 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
 const config = require('./config');
 const { openDb } = require('./db');
+const { brandPage } = require('./brand');
 const { createSupabaseSync, dropTriggers } = require('./sync/supabase');
 const { createSqliteStore } = require('./store/sqlite');
 const { createOrderService, ValidationError } = require('./orders');
@@ -145,7 +147,20 @@ function createApp({
     });
   }
 
-  app.use(express.static(path.join(__dirname, '..', 'public'), { extensions: ['html'] }));
+  // Pages carry the client's name, logo and colours (see src/brand.js).
+  const publicDir = path.join(__dirname, '..', 'public');
+  const pages = new Map();
+  app.get(/(\/|\.html|^\/[^.]*)$/, (req, res, next) => {
+    let rel = req.path.endsWith('/') ? `${req.path}index.html` : req.path;
+    if (!rel.endsWith('.html')) rel += '.html';
+    const file = path.join(publicDir, rel);
+    if (!file.startsWith(publicDir + path.sep)) return next();
+    if (!pages.has(file)) {
+      try { pages.set(file, brandPage(fs.readFileSync(file, 'utf8'))); } catch { return next(); }
+    }
+    res.type('html').send(pages.get(file));
+  });
+  app.use(express.static(publicDir, { extensions: ['html'] }));
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 

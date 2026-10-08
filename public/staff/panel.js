@@ -137,7 +137,7 @@ function orderCard(o) {
   const map = o.lat != null ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${o.lat},${o.lng}" target="_blank" rel="noopener">map</a>` : '';
   return `<div class="order ${o.status}">
     <h4><span>${esc(o.code)}</span><span class="chip">${o.fulfilment === 'delivery' ? '🛵 Delivery' : '🏃 Pickup'} · ${o.channel === 'whatsapp' ? 'WhatsApp' : 'Web'}</span></h4>
-    <div class="small muted">${ago(o.created_at)} · ${esc(o.statusLabel)}${state.outletId ? '' : ' · ' + esc(o.outlet.name.replace('Raju Chinese - ', ''))}</div>
+    <div class="small muted">${ago(o.created_at)} · ${esc(o.statusLabel)}${state.outletId ? '' : ' · ' + esc(BRAND.short(o.outlet.name))}</div>
     <ul>${o.items.map((i) => `<li>${i.qty} × ${esc(i.name)}${i.note ? ` <b style="color:var(--brand)">(${esc(i.note)})</b>` : ''}</li>`).join('')}</ul>
     ${o.notes ? `<div class="small"><b>Note:</b> ${esc(o.notes)}</div>` : ''}
     <div class="small"><b>${esc(o.customer_name)}</b> · <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a></div>
@@ -167,7 +167,7 @@ function chatCard(h) {
   const outlet = state.outlets.find((o) => o.id === h.outlet_id);
   return `<div class="chat">
     <h4 style="margin:0;display:flex;justify-content:space-between;gap:8px"><span>💬 ${esc(h.name || 'Customer')} · <a href="tel:+${esc(h.phone)}">+${esc(h.phone)}</a></span>
-      <span class="chip">${outlet ? esc(outlet.name.replace('Raju Chinese - ', '')) : 'No outlet yet'}</span></h4>
+      <span class="chip">${outlet ? esc(BRAND.short(outlet.name)) : 'No outlet yet'}</span></h4>
     <div class="small muted">Opened ${ago(h.created_at)}</div>
     <div class="bubbles">${h.messages.map((m) => `<div class="b ${m.direction}">${esc(m.body)}</div>`).join('')}</div>
     <form data-chat="${h.id}"><input name="text" placeholder="Reply on WhatsApp…" autocomplete="off" required><button class="btn">Send</button></form>
@@ -199,7 +199,7 @@ async function renderChats(chats) {
 
 async function renderStats() {
   const rows = await api('/summary');
-  const name = (id) => (state.outlets.find((o) => o.id === id)?.name || '').replace('Raju Chinese - ', '');
+  const name = (id) => BRAND.short(state.outlets.find((o) => o.id === id)?.name);
   const shown = state.outletId ? rows.filter((r) => r.outlet_id === Number(state.outletId)) : rows;
   const total = shown.reduce((t, r) => ({ orders: t.orders + r.orders, revenue: t.revenue + r.revenue }), { orders: 0, revenue: 0 });
   $('stats').innerHTML = `<div class="stat">Today: <b>${total.orders}</b> order${total.orders === 1 ? '' : 's'} ·<b>${rupees(total.revenue)}</b></div>`
@@ -320,7 +320,7 @@ async function start() {
       const me = await api('/me');
       state.outlets = [me];
       state.outletId = String(me.id);
-      $('outletName').textContent = me.name.replace('Raju Chinese - ', '');
+      $('outletName').textContent = BRAND.short(me.name);
     } else {
       state.outlets = await api('/outlets');
     }

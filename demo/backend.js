@@ -3,7 +3,7 @@
 // The real ordering, routing and WhatsApp code running in the browser on an
 // in-memory store, behind the same route handlers the server uses.
 
-const seed = require('../src/seed');
+const { client: activeClient, brand } = require('../src/brand');
 const { createMemoryStore } = require('../src/store/memory');
 const { createOrderService, ValidationError, deliveryCharge } = require('../src/orders');
 const config = require('./config');
@@ -31,6 +31,7 @@ const DEMO_PIN = '1234';
  */
 function createDemoBackend({ state } = {}) {
   // Demo outlets stay open around the clock so it works at any hour.
+  const seed = activeClient();
   const demoSeed = { ...seed, outlets: seed.outlets.map((o, i) => ({ ...o, opens: '00:00', closes: '00:00', sfxStoreCode: `DEMO-${i + 1}` })) };
   const store = createMemoryStore(demoSeed);
   // Sample history so CRM and analytics have data (demo only).
@@ -43,7 +44,7 @@ function createDemoBackend({ state } = {}) {
   const reviews = createReviews({ store, orders, client: reviewClient, log: { error: () => {}, info: () => {} } });
   // Menu pictures shown inline in the demo chat (the server sends PNGs).
   const menuImages = createMenuImages({ menuItems: () => store.menuItems(), baseUrl: null });
-  const bot = createBot({ orders, handoffs, crm, reviews, menuImages, sessions: createSessionStore(store), places: () => store.localities(), baseUrl: 'https://order.rajuchinese.example' });
+  const bot = createBot({ orders, handoffs, crm, reviews, menuImages, sessions: createSessionStore(store), places: () => store.localities(), baseUrl: config.publicBaseUrl });
   const outbox = [];
   const client = recordOutbox({ send: async () => {} }, outbox);
   const quiet = { error: () => {}, info: () => {} };
@@ -97,4 +98,4 @@ function createDemoBackend({ state } = {}) {
   return { request, ensureDemoPin, snapshot, orders, handoffs, store, dispatcher, assignOutlet, deliveryCharge, delivery: config.delivery, outlets: () => orders.listOutlets(), localities: () => store.localities() };
 }
 
-module.exports = { createDemoBackend };
+module.exports = { createDemoBackend, brandId: brand().id };

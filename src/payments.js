@@ -10,6 +10,7 @@
 // whose webhook would call orders.confirmPayment() instead.
 
 const QRCode = require('qrcode');
+const { brand } = require('./brand');
 
 const PAYMENT_LABELS = {
   cod: 'Cash/UPI on delivery',
@@ -25,7 +26,7 @@ function upiLink({ upiId, payee, amountPaise, code }) {
     ['pn', payee],
     ['am', (amountPaise / 100).toFixed(2)],
     ['cu', 'INR'],
-    ['tn', `Raju Chinese order ${code}`],
+    ['tn', `${brand().name} order ${code}`],
     ['tr', code],
   ];
   return 'upi://pay?' + params.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');

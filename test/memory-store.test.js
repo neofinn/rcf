@@ -26,7 +26,7 @@ test('memory store: WhatsApp typed order, status updates, stock-outs and handoff
   say({ type: 'reply', replyId: 'act:place' });
 
   const o = orders.latestOrderForPhone('919811100000');
-  assert.equal(o.outlet.name, 'Raju Chinese - Sector 11 Panchkula');
+  assert.equal(o.outlet.name, 'Test Kitchen - Sector 11 Panchkula');
   assert.equal(o.items.find((i) => i.name === 'Schezwan Fried Rice').note, 'extra spicy');
   assert.equal(orders.listOrders({ outletId: o.outlet_id, statuses: ['placed'] }).length, 1);
   assert.equal(orders.updateStatus(o.code, 'accepted').status, 'accepted');

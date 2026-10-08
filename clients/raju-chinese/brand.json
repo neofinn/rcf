@@ -1,0 +1,45 @@
+{
+  "id": "raju-chinese",
+  "name": "Raju Chinese",
+  "logo": [
+    "Raju",
+    "Chinese"
+  ],
+  "outletPrefix": "Raju Chinese - ",
+  "menuTitle": "RAJU CHINESE FOOD",
+  "emoji": "🥡",
+  "description": "Order Chinese food online from your nearest Raju Chinese outlet in Chandigarh, Mohali, Panchkula, Zirakpur and Kharar.",
+  "colors": {
+    "brand": "#d62828",
+    "brandDark": "#a61e1e",
+    "accent": "#f4a300",
+    "menu": "#C62A1F"
+  },
+  "region": {
+    "name": "the tricity",
+    "state": "Chandigarh",
+    "bounds": {
+      "minLat": 29,
+      "maxLat": 32.5,
+      "minLng": 74.5,
+      "maxLng": 78.5
+    }
+  },
+  "upiExample": "rajuchinese.sec22@okaxis",
+  "demo": {
+    "domain": "order.rajuchinese.example",
+    "address": "House 12, Sector 22-B, Chandigarh",
+    "outside": {
+      "name": "Ludhiana (outside delivery area)",
+      "lat": 30.901,
+      "lng": 75.8573
+    },
+    "tryOrders": [
+      "2 half kurkure veg momo less spicy, ek full veg hakka noodles no onion",
+      "bhaiya 3 chilli chicken aur 1 half chilli potato, call before coming"
+    ]
+  },
+  "orderExample": "2 half kurkure veg momo less spicy and 1 full veg hakka noodles no onion",
+  "menuExample": "2 half veg steam momo, 1 full chilli potato less spicy",
+  "codePrefix": "RC"
+}

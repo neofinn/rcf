@@ -5,10 +5,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const config = require('../src/config');
-const { assignOutlet } = require('../src/geo');
-const realSeed = require('../src/seed');
-const helpers = require('./helpers');
+const config = require('../../../src/config');
+const { assignOutlet } = require('../../../src/geo');
+const realSeed = require('..');
+const helpers = require('../../../test/helpers');
+
+// The test helpers load the test client; these tests are about this client's own data.
+require('../../../src/brand').useClient(realSeed);
 
 const { LUNCH } = helpers;
 // Coverage is checked against the real outlet list.

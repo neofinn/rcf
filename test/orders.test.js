@@ -66,8 +66,8 @@ test('createOrder assigns the delivery outlet from coordinates, ignoring a clien
     fulfilment: 'delivery', name: 'Aman', phone: '9876543210', address: 'House 12, Sector 22-B',
     ...PLACES.phase7, outletId: 1, items: [{ id: rice, qty: 2 }],
   }, LUNCH);
-  assert.match(o.code, /^RC[2-9A-Z]{6}$/);
-  assert.equal(o.outlet.name, 'Raju Chinese - Phase 7 Mohali');
+  assert.match(o.code, /^TK[2-9A-Z]{6}$/);
+  assert.equal(o.outlet.name, 'Test Kitchen - Phase 7 Mohali');
   assert.equal(o.status, 'placed');
   assert.equal(o.phone, '+919876543210');
   assert.equal(o.items[0].qty, 2);

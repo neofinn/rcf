@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#d62828">
-  <title>Raju Chinese – Order Online</title>
-  <meta name="description" content="Order Chinese food online from your nearest Raju Chinese outlet in Chandigarh, Mohali, Panchkula, Zirakpur and Kharar.">
+  <title>{{name}} – Order Online</title>
+  <meta name="description" content="{{description}}">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="logo">Raju <span>Chinese</span></div>
+    <div class="logo">{{logo}}</div>
     <button class="loc-chip" id="locChip" type="button">
       <b id="locTitle">Set location</b>
       <small id="locSub">to see your nearest outlet</small>
@@ -38,7 +38,7 @@
         <button type="button" data-mode="pickup">🏃 Pickup</button>
       </div>
       <div id="deliveryPane">
-        <p class="small muted">Share your current location, type your full address, or both. We'll check delivery and pick your nearest Raju Chinese.</p>
+        <p class="small muted">Share your current location, type your full address, or both. We'll check delivery and pick your nearest outlet.</p>
         <button class="btn" type="button" id="useGps">📍 Use my current location</button>
         <label for="startAddress">Full address</label>
         <textarea id="startAddress" autocomplete="street-address" placeholder="House/flat no., street, sector/phase, city"></textarea>

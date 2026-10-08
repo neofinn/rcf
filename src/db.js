@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
-const defaultSeed = require('./seed');
+const { client, brand } = require('./brand');
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS outlets (
@@ -243,7 +243,7 @@ CREATE TABLE IF NOT EXISTS wa_processed (
 );
 `;
 
-function openDb(file, { seed = defaultSeed } = {}) {
+function openDb(file, { seed = client() } = {}) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
@@ -260,8 +260,8 @@ function migrate(db, seed) {
   const outletCols = db.prepare('PRAGMA table_info(outlets)').all().map((c) => c.name);
   if (!outletCols.includes('upi_id')) {
     db.exec('ALTER TABLE outlets ADD COLUMN upi_id TEXT; ALTER TABLE outlets ADD COLUMN upi_name TEXT;');
-    const set = db.prepare("UPDATE outlets SET upi_id = ?, upi_name = 'Raju Chinese' WHERE slug = ?");
-    for (const o of seed.outlets) set.run(o.upiId || null, o.slug);
+    const set = db.prepare('UPDATE outlets SET upi_id = ?, upi_name = ? WHERE slug = ?');
+    for (const o of seed.outlets) set.run(o.upiId || null, brand().name, o.slug);
   }
   if (!db.prepare('PRAGMA table_info(outlets)').all().some((c) => c.name === 'sfx_store_code')) {
     db.exec('ALTER TABLE outlets ADD COLUMN sfx_store_code TEXT');
@@ -287,7 +287,7 @@ function seedIfEmpty(db, seed) {
       (slug, name, city, address, lat, lng, phone, delivery_radius_km, opens, closes, upi_id, upi_name, wa_payment_config)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const x of seed.outlets) {
-      o.run(x.slug, x.name, x.city, x.address, x.lat, x.lng, x.phone, x.radiusKm, x.opens, x.closes, x.upiId || null, 'Raju Chinese', x.waPaymentConfig || null);
+      o.run(x.slug, x.name, x.city, x.address, x.lat, x.lng, x.phone, x.radiusKm, x.opens, x.closes, x.upiId || null, brand().name, x.waPaymentConfig || null);
     }
     const m = db.prepare(`INSERT INTO menu_items (category, name, description, price, veg, sort)
       VALUES (?, ?, ?, ?, ?, ?)`);

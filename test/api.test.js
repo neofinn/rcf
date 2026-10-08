@@ -163,7 +163,7 @@ test('head office opens a new outlet: it gets orders, stock and a tablet login',
   const body = {
     name: 'New Chandigarh', city: 'Mohali', address: 'SCO 12, Omaxe New Chandigarh 140901', phone: '98765 43210',
     // Open 24h (00:00-00:00) so the test doesn't depend on the clock.
-    mapsLink: `https://www.google.com/maps/place/Raju+Chinese/@${site.lat},${site.lng},17z`, opens: '00:00', closes: '00:00', upiId: 'rc-newchd@okaxis',
+    mapsLink: `https://www.google.com/maps/place/Test+Kitchen/@${site.lat},${site.lng},17z`, opens: '00:00', closes: '00:00', upiId: 'tk-newchd@okaxis',
   };
   assert.equal((await s.call('POST', '/api/admin/outlets', body)).status, 401, 'head office only');
   for (const [bad, msg] of [[{ mapsLink: 'https://example.com' }, /Couldn't read a location/], [{ mapsLink: undefined, lat: 76.6, lng: 30.7 }, /Location looks wrong/],
@@ -175,10 +175,10 @@ test('head office opens a new outlet: it gets orders, stock and a tablet login',
   const created = await s.call('POST', '/api/admin/outlets', body, admin);
   assert.equal(created.status, 201);
   const o = created.body.outlet;
-  assert.equal(o.name, 'Raju Chinese - New Chandigarh');
+  assert.equal(o.name, 'Test Kitchen - New Chandigarh');
   assert.deepEqual([o.lat, o.lng, o.phone, o.slug], [site.lat, site.lng, '+919876543210', 'new-chandigarh']);
   assert.ok(created.body.nearest.km > 0);
-  assert.equal((await s.call('POST', '/api/admin/outlets', body, admin)).body.error, 'There is already an outlet called "Raju Chinese - New Chandigarh".');
+  assert.equal((await s.call('POST', '/api/admin/outlets', body, admin)).body.error, 'There is already an outlet called "Test Kitchen - New Chandigarh".');
 
   // Customers right next to it now get it, with the full menu in stock.
   assert.equal((await s.call('POST', '/api/locate', site)).body.outlet.id, o.id);
@@ -192,7 +192,7 @@ test('head office opens a new outlet: it gets orders, stock and a tablet login',
   // Fix a pin dropped in the wrong place, change hours.
   const moved = await s.call('PATCH', `/api/admin/outlets/${o.id}`, { lat: 30.8150, lng: 76.7050, closes: '22:30' }, admin);
   assert.deepEqual([moved.body.lat, moved.body.closes], [30.815, '22:30']);
-  assert.equal(moved.body.name, 'Raju Chinese - New Chandigarh', 'fields not sent stay as they were');
+  assert.equal(moved.body.name, 'Test Kitchen - New Chandigarh', 'fields not sent stay as they were');
   assert.equal((await s.call('PATCH', `/api/admin/outlets/${o.id}`, { closes: '25:00' }, admin)).status, 400);
 });
 
@@ -227,7 +227,7 @@ test('WhatsApp webhook: verification, signature, dedupe and status notifications
   await post(msg('m6', { type: 'text', text: { body: 'Flat 3, Phase 7, near market' } }));
   await post(msg('m7', { type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: 'act:place' } } }));
   const placed = s.sent.at(-1).replies[0].text;
-  const code = placed.match(/\*(RC[2-9A-Z]{6})\*/)[1];
+  const code = placed.match(/\*(TK[2-9A-Z]{6})\*/)[1];
 
   await s.call('POST', `/api/admin/orders/${code}/status`, { status: 'accepted' }, admin);
   await new Promise((r) => setImmediate(r));
@@ -302,7 +302,7 @@ test('UPI on the web: QR on tracking, customer claim, staff confirm; PNG QR for 
 
   const track = await s.call('GET', `/api/orders/${code}`);
   assert.equal(track.body.payment.status, 'pending');
-  assert.match(track.body.payment.link, /^upi:\/\/pay\?pa=rc-sec-17-chd%40example&pn=Raju%20Chinese&am=\d+\.\d{2}&cu=INR/);
+  assert.match(track.body.payment.link, /^upi:\/\/pay\?pa=tk-sec-17-chd%40example&pn=Test%20Kitchen&am=\d+\.\d{2}&cu=INR/);
   assert.match(track.body.payment.qrSvg, /^<svg/);
 
   const png = await fetch(`${s.base}/pay/${code}/qr.png`);

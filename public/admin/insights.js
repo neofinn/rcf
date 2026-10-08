@@ -9,7 +9,7 @@
   const $ = (id) => document.getElementById(id);
   const num = (n) => Number(n || 0).toLocaleString('en-IN');
   const pct = (x, d = 0) => `${(x * 100).toFixed(d)}%`;
-  const short = (name) => String(name || '').replace('Raju Chinese - ', '');
+  const short = (name) => BRAND.short(String(name || ''));
   const outletName = (id) => short(window.RCAdmin.state.outlets.find((o) => o.id === id)?.name || '—');
   const dateFmt = (iso) => (iso ? new Date(iso).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short' }) : '—');
   // esc() and rupees() come from staff/panel.js.
@@ -478,7 +478,7 @@
     if (t.closest('[data-close-customer]')) { C.open = null; $('crmDetail').innerHTML = ''; return; }
     if (t.id === 'cExport') {
       const res = await fetch('/api/admin/customers.csv?' + customersQuery(ctx()), { headers: { Authorization: 'Bearer ' + ctx().state.token } });
-      return download('raju-chinese-customers.csv', await res.text());
+      return download(`${BRAND.id}-customers.csv`, await res.text());
     }
     const quick = t.closest('[data-quick]');
     if (quick) { const [m, v] = quick.dataset.quick.split(':'); M.mode = m; M.value = v; return previewPrices(); }

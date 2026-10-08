@@ -31,6 +31,7 @@ const MAX_QTY = 20;
 
 // WhatsApp interactive message limits.
 const { portionOf, groupDishes } = require('../portions');
+const { brand, shortName: outletShort } = require('../brand');
 
 const clip = (s, n) => (s.length <= n ? s : s.slice(0, n - 1) + '…');
 const btn = (id, title) => ({ id, title: clip(title, 20) });
@@ -75,10 +76,10 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
 
   function welcome(name) {
     return [
-      buttons(`Namaste${name ? ' ' + name : ''}! 🙏 Welcome to *Raju Chinese* 🥡\n\n`
+      buttons(`Namaste${name ? ' ' + name : ''}! 🙏 Welcome to *${brand().name}* ${brand().emoji}\n\n`
         + '*Delivery or pickup?*\n\n'
-        + 'Once we know where you are, you can tap through the menu or just type your order, like:\n'
-        + '_"2 half kurkure veg momo less spicy and 1 full veg hakka noodles no onion"_\n\n'
+        + 'Once we know where you are, you can tap through the menu or just type your order'
+        + (brand().orderExample ? `, like:\n_"${brand().orderExample}"_\n\n` : '.\n\n')
         + 'Type *track* for your order status.', [
         btn('mode:delivery', '🛵 Delivery'),
         btn('mode:pickup', '🏃 Pickup'),
@@ -87,7 +88,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     ];
   }
 
-  const shortName = (o) => o.name.replace('Raju Chinese - ', '');
+  const shortName = (o) => outletShort(o.name);
 
   // Delivery: current location, typed full address, or both.
   function askLocation(prefix = '') {
@@ -133,7 +134,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     const [first] = open;
     return [buttons(`📍 Your nearest outlet is *${first.outlet.name}*, ${first.distanceKm} km away (${first.outlet.address}). Ready in about ${etaMinutes('pickup')} min after you order.\n\nPick up from here?`, [
       // Buttons allow 20 characters: "Sector 11 · 1.5 km".
-      ...open.map((r) => btn(`outlet:${r.outlet.id}`, `${shortName(r.outlet).replace(/ (Panchkula|Mohali|Chandigarh)$/, '')} · ${r.distanceKm} km`)),
+      ...open.map((r) => btn(`outlet:${r.outlet.id}`, `${shortName(r.outlet).replace(` ${r.outlet.city}`, '')} · ${r.distanceKm} km`)),
       btn('act:outlets', 'All outlets'),
     ])];
   }
@@ -640,7 +641,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       if (['track', 'status', 'order status', 'where is my order'].includes(t)) return trackView(msg.from);
       if (['points', 'my points', 'loyalty', 'rewards'].includes(t)) return pointsView(msg.from);
       // Review template button (web orders) or typed "review RCXXXX".
-      const rv = t.match(/^review[: ]\s*(rc[2-9a-z]{6})$/i);
+      const rv = t.match(/^review[: ]\s*([a-z]{1,3}[2-9a-z]{6})$/i);
       if (rv && reviews) return reviews.start(rv[1].toUpperCase(), msg.from) || [text("I couldn't find that order to review.")];
       if (s.state === 'await_review_comment' && reviews && !HUMAN_RE.test(t)) {
         reviews.comment(s.reviewCode, raw, msg.from, now);

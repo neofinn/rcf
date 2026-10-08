@@ -6,7 +6,7 @@
 
 (() => {
   const $ = (id) => document.getElementById(id);
-  const short = (name) => String(name || '').replace('Raju Chinese - ', '');
+  const short = (name) => BRAND.short(String(name || ''));
   const when = (iso) => (iso ? new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—');
   const LOW = 5;
   const S = { q: '', category: '', show: 'all', msg: '' };
@@ -76,23 +76,25 @@
   // ---- Outlets ----------------------------------------------------------------
 
   // Add-outlet form, also used to edit one (S.editing = outlet id).
-  const CITIES = ['Chandigarh', 'Mohali', 'Panchkula', 'Zirakpur', 'Kharar', 'Dera Bassi', 'New Chandigarh'];
+  // Cities the business already has outlets in.
+  let knownCities = [];
+  const cities = () => knownCities;
   function outletForm(o) {
     const v = (k) => esc(o?.[k] ?? '');
     const f = (name, label, input, hint = '') => `<label class="ofield"><span>${label}</span>${input}${hint ? `<small class="muted">${hint}</small>` : ''}</label>`;
     return `<form id="outletForm" class="outlet-form" data-id="${o ? o.id : ''}">
-      ${f('name', 'Outlet name', `<input name="name" required value="${o ? esc(short(o.name)) : ''}" placeholder="e.g. Sector 22">`, 'Shown to customers as "Raju Chinese - …"')}
-      ${f('city', 'City', `<input name="city" required list="cityList" value="${v('city')}" placeholder="Chandigarh">`)}
+      ${f('name', 'Outlet name', `<input name="name" required value="${o ? esc(short(o.name)) : ''}" placeholder="e.g. Sector 22">`, BRAND.outletPrefix ? `Shown to customers as "${esc(BRAND.outletPrefix)}…"` : '')}
+      ${f('city', 'City', `<input name="city" required list="cityList" value="${v('city')}" placeholder="${esc(cities()[0] || 'City')}">`)}
       ${f('address', 'Full address', `<input name="address" required value="${v('address')}" placeholder="SCO / booth no., market, sector, PIN code">`)}
       ${f('phone', 'Outlet phone', `<input name="phone" required inputmode="tel" value="${v('phone')}" placeholder="98765 43210">`)}
       ${f('mapsLink', 'Location', `<input name="mapsLink" placeholder="Paste the Google Maps link of the outlet">`, `Or type the coordinates:${o ? ` now ${o.lat}, ${o.lng}` : ''}`)}
-      <div class="row"><input name="lat" type="number" step="any" placeholder="Latitude 30.7…" value="${v('lat')}" aria-label="Latitude"><input name="lng" type="number" step="any" placeholder="Longitude 76.7…" value="${v('lng')}" aria-label="Longitude"></div>
+      <div class="row"><input name="lat" type="number" step="any" placeholder="Latitude" value="${v('lat')}" aria-label="Latitude"><input name="lng" type="number" step="any" placeholder="Longitude" value="${v('lng')}" aria-label="Longitude"></div>
       <div class="row">${f('opens', 'Opens', `<input name="opens" type="time" required value="${o ? v('opens') : '11:00'}">`)}${f('closes', 'Closes', `<input name="closes" type="time" required value="${o ? v('closes') : '23:00'}">`, 'Same time = open 24 hours')}</div>
-      ${f('upiId', 'UPI ID for online payments', `<input name="upiId" value="${v('upi_id')}" placeholder="rajuchinese.sec22@okaxis">`, 'Optional. Without it, customers pay cash/UPI on delivery.')}
+      ${f('upiId', 'UPI ID for online payments', `<input name="upiId" value="${v('upi_id')}" placeholder="${esc(BRAND.upiExample)}">`, 'Optional. Without it, customers pay cash/UPI on delivery.')}
       ${f('sfxStoreCode', 'Shadowfax store code', `<input name="sfxStoreCode" value="${v('sfx_store_code')}">`, 'Optional, from Shadowfax onboarding.')}
       ${f('waPaymentConfig', 'WhatsApp payment configuration', `<input name="waPaymentConfig" value="${v('wa_payment_config')}">`, 'Optional, from WhatsApp Manager → Payments.')}
       ${o ? '' : f('pin', 'Outlet panel PIN', '<input name="pin" type="password" inputmode="numeric" pattern="\\d{4,8}" placeholder="4–8 digits">', 'Optional now; you can set it later.')}
-      <datalist id="cityList">${CITIES.map((c) => `<option value="${c}">`).join('')}</datalist>
+      <datalist id="cityList">${cities().map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
       <p class="error hidden" role="alert"></p>
       <div class="row"><button class="btn" style="width:auto">${o ? 'Save changes' : 'Add outlet'}</button><button type="button" class="btn secondary" style="width:auto" data-outlet-form="close">Cancel</button></div>
     </form>`;
@@ -102,6 +104,7 @@
     if (document.activeElement?.closest?.('#view .outlet-table input, #view .outlet-form')) return;
     const [outlets, logins] = await Promise.all([ctx.api('/outlets'), ctx.api('/logins')]);
     ctx.state.outlets = outlets;
+    knownCities = [...new Set(outlets.map((o) => o.city))];
     // Keep the top bar's outlet filter in step with new outlets.
     const sel = $('outlet');
     if (sel && sel.options.length !== outlets.length + 1) {

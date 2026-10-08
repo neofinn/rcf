@@ -11,6 +11,7 @@
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { groupDishes, portionOf } = require('../portions');
+const { brand } = require('../brand');
 
 const W = 1080;
 const ROW = 46;
@@ -19,7 +20,7 @@ const HEAD = 210;
 const FOOT = 120;
 const MAX_ROWS = 36; // dish rows per page at most; keeps text readable after WhatsApp compression
 
-const C = { bg: '#FBF7F2', ink: '#221C19', muted: '#6E625A', red: '#C62A1F', line: '#E6DCD1', veg: '#1A8A3A', nonveg: '#B3261E', band: '#221C19' };
+const COLORS = { bg: '#FBF7F2', ink: '#221C19', muted: '#6E625A', red: '#C62A1F', line: '#E6DCD1', veg: '#1A8A3A', nonveg: '#B3261E', band: '#221C19' };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const price = (p) => `₹${Math.round(p / 100)}`;
 
@@ -53,12 +54,14 @@ function paginate(items) {
 }
 
 function pageSvg(page, n, total) {
+  const b = brand();
+  const C = { ...COLORS, red: b.colors.menu };
   const height = HEAD + page.sections.reduce((h, s) => h + CAT + s.dishes.length * ROW, 0) + FOOT;
   const out = [];
   out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${height}" viewBox="0 0 ${W} ${height}" font-family="Inter, Arial, sans-serif">`);
   out.push(`<rect width="${W}" height="${height}" fill="${C.bg}"/>`);
   out.push(`<rect width="${W}" height="150" fill="${C.red}"/>`);
-  out.push(`<text x="48" y="78" font-size="44" font-weight="700" fill="#FFF6EE">RAJU CHINESE FOOD</text>`);
+  out.push(`<text x="48" y="78" font-size="44" font-weight="700" fill="#FFF6EE">${esc(b.menuTitle)}</text>`);
   out.push(`<text x="48" y="122" font-size="26" fill="#FFE7DA">Menu ${n} of ${total} · prices in ₹ · +5% GST</text>`);
   out.push(`<text x="${W - 48}" y="78" font-size="26" font-weight="700" fill="#FFF6EE" text-anchor="end">Order here in chat</text>`);
   out.push(`<text x="${W - 48}" y="122" font-size="24" fill="#FFE7DA" text-anchor="end">just type what you want</text>`);
@@ -82,7 +85,8 @@ function pageSvg(page, n, total) {
     y += 10;
   }
   out.push(`<rect y="${height - FOOT + 20}" width="${W}" height="${FOOT - 20}" fill="${C.band}"/>`);
-  out.push(`<text x="48" y="${height - 52}" font-size="26" fill="#FBF7F2">Type e.g. <tspan font-weight="700">2 half veg steam momo, 1 full chilli potato less spicy</tspan></text>`);
+  const example = b.menuExample || b.orderExample;
+  out.push(`<text x="48" y="${height - 52}" font-size="26" fill="#FBF7F2">${example ? `Type e.g. <tspan font-weight="700">${esc(example)}</tspan>` : 'Type your order in the chat, the way you would say it'}</text>`);
   out.push('</svg>');
   return out.join('');
 }

@@ -1,6 +1,6 @@
 'use strict';
 
-// Starter data.
+// Raju Chinese: outlets, menu and the localities customers type.
 //
 // Outlets: the 7 Raju Chinese Food outlets found in public listings (Zomato,
 // Justdial, magicpin, Shoutlo, Mappls; Oct 2026). Sector 15, 34, 46, Phase 3B2

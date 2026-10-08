@@ -4,7 +4,7 @@
 // line with the server defaults.
 module.exports = {
   production: false,
-  publicBaseUrl: 'https://order.rajuchinese.example',
+  get publicBaseUrl() { return `https://${require('../src/brand').brand().demo.domain}`; },
   adminToken: 'demo',
   timezone: 'Asia/Kolkata',
   pricing: {

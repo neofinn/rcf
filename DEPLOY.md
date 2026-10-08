@@ -87,7 +87,7 @@ In `.env`, set at least:
 
 Fill in the WhatsApp, Shadowfax and Supabase settings as you finish those sections below.
 
-Before the first start, correct the outlets, menu prices and UPI IDs in `src/seed.js`, or edit them in the admin later.
+Before the first start, correct the outlets, menu prices and UPI IDs in `clients/raju-chinese/data.js`, or edit them in the admin later. (`CLIENT` in `.env` picks the client profile; see `clients/README.md`.)
 
 **Run it with PM2** (restarts on crash and on reboot):
 
@@ -141,6 +141,29 @@ Two more layers:
 su - rcf
 cd app && git pull && npm ci --omit=dev && pm2 restart rcf
 ```
+
+**Versions and rolling back.** Every release is kept on GitHub as a branch `release/v0.N` (the full list is on the repo's Branches page), and the server should always run one of them rather than an unnamed commit. Before an update, take a backup, then switch:
+
+```bash
+su - rcf
+sqlite3 ~/data/rcf.db ".backup '$HOME/backups/rcf-before-update.db'"
+cd app && git fetch origin && git checkout -B live origin/release/v0.18 && npm ci --omit=dev && pm2 restart rcf
+```
+
+To roll back, run the same command with the earlier version (for example `origin/release/v0.17`). Database changes are only ever additions (new tables and columns), so an older version runs on a newer database and nothing needs restoring. Restore `rcf-before-update.db` only if the new version damaged data. To do that, stop the app, copy the file over `~/data/rcf.db`, and start it again; orders placed since the backup are lost.
+
+| Version | What it added |
+|---|---|
+| v0.1–v0.7 | Web ordering, nearest outlet, WhatsApp bot, UPI, Shadowfax |
+| v0.8–v0.11 | CRM and points, menu management, analytics, reviews, Supabase |
+| v0.12–v0.13 | Separate outlet and head office panels, stock, add outlets |
+| v0.14 | Separate demo pages |
+| v0.15 | Real menu with Half/Full |
+| v0.16 | Performance for a year of data |
+| v0.17 | Several delivery partners with smart selection |
+| v0.18 | WhatsApp menu pictures and order slip |
+
+Earlier client demos stay online at `https://neofinn.github.io/rcf/versions.html`.
 
 ---
 

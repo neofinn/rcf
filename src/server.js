@@ -16,7 +16,7 @@ reviews.startTicker(60 * 1000);
 // Copies new and changed rows to Supabase every few seconds, when configured.
 if (sync) sync.startTicker(5000);
 app.listen(config.port, () => {
-  console.log(`Raju Chinese ordering running on http://localhost:${config.port}`);
+  console.log(`${require('./brand').brand().name} ordering running on http://localhost:${config.port}`);
   console.log(`  Customer app:       ${config.publicBaseUrl}/`);
   console.log(`  Outlet dashboard:   ${config.publicBaseUrl}/admin/`);
   if (sync) console.log(`  Supabase copy:      ${config.supabase.url}`);

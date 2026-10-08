@@ -14,6 +14,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const esbuild = require('esbuild');
+const { brand, brandPage } = require('../src/brand');
+const { dirFor } = require('../src/client-profile');
 
 const root = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
@@ -31,6 +33,12 @@ const browserShims = {
       const resolved = path.resolve(args.resolveDir, args.path);
       return resolved === path.join(root, 'src', 'config') ? { path: path.join(root, 'demo', 'config.js') } : undefined;
     });
+    // The client chosen with CLIENT=<id> is built in (a bundle can't pick a folder at run time).
+    build.onResolve({ filter: /^\.\/client-profile$/ }, () => ({ path: 'client-profile', namespace: 'client' }));
+    build.onLoad({ filter: /.*/, namespace: 'client' }, () => ({
+      contents: `const p = require(${JSON.stringify(dirFor(process.env.CLIENT))}); module.exports = () => p;`,
+      resolveDir: root,
+    }));
   },
 };
 
@@ -97,7 +105,7 @@ const STANDALONE_SHIM = `<script>
       try {
         const pending = new Map();
         let seq = 0;
-        const w = new SharedWorker('demo-worker.js', { name: 'raju-chinese-demo' });
+        const w = new SharedWorker('demo-worker.js', { name: '${brand().id}-demo' });
         w.port.onmessage = (e) => { const p = pending.get(e.data.id); if (p) { pending.delete(e.data.id); p(e.data); } };
         w.port.start();
         send = (msg) => new Promise((r) => { const id = ++seq; pending.set(id, r); w.port.postMessage({ ...msg, id }); });
@@ -150,7 +158,7 @@ function inlinePage(file, shim = CHILD_SHIM) {
     .replace(/<link rel="stylesheet" href="(\/[^"]+)">/g, (_, href) => `<style>${read('public' + href)}</style>`)
     .replace(/<script src="(\/[^"]+)"><\/script>/g, (_, src) => `<script>${read('public' + src).replace(/<\/script/gi, '<\\/script')}</script>`);
   html = html.replace('<head>', () => `<head>\n${shim}`);
-  return html;
+  return brandPage(html);
 }
 
 async function main() {
@@ -179,9 +187,10 @@ async function main() {
   };
   const json = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
 
-  const html = read('demo/shell.html')
+  const html = brandPage(read('demo/shell.html'))
+    .replace('</style>', () => `  :root:root { --wok: ${brand().colors.brand}; }\n</style>`)
     .replace('/*__BACKEND__*/', () => backend.replace(/<\/script/gi, '<\\/script'))
-    .replace('/*__PAGES__*/', () => `const PAGES = ${json(pages)};`);
+    .replace('/*__PAGES__*/', () => `const PAGES = ${json(pages)};\nconst BRAND = ${json(brand())};`);
 
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, html);

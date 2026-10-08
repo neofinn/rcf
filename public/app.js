@@ -140,7 +140,7 @@ async function renderOutletList() {
   const nearest = at ? list.find((o) => o.open) : null;
   $('outletList').innerHTML = list.map((o) => `
     <button type="button" class="outlet-opt" data-outlet="${o.id}" ${o.open ? '' : 'disabled'}>
-      <span><b>${esc(o.name.replace('Raju Chinese - ', ''))}</b>${at ? ` <span class="small muted">· ${km(o)} km</span>` : ''}<br><span class="small muted">${esc(o.address)} · ${o.opens === o.closes ? 'open 24 hours' : `${o.opens}–${o.closes}`}</span></span>
+      <span><b>${esc(BRAND.short(o.name))}</b>${at ? ` <span class="small muted">· ${km(o)} km</span>` : ''}<br><span class="small muted">${esc(o.address)} · ${o.opens === o.closes ? 'open 24 hours' : `${o.opens}–${o.closes}`}</span></span>
       <span class="pill ${o === nearest ? 'near' : o.open ? 'open' : 'closed'}">${o === nearest ? 'Nearest' : o.open ? 'Open' : 'Closed'}</span>
     </button>`).join('');
   $('outletList').querySelectorAll('[data-outlet]').forEach((b) => b.addEventListener('click', () => {
@@ -186,10 +186,10 @@ function renderHeader() {
     $('locTitle').textContent = 'Set location';
     $('locSub').textContent = 'or add dishes first';
     $('banner').classList.remove('hidden', 'warn');
-      $('banner').textContent = `👋 Choose delivery or pickup to see the menu from your nearest Raju Chinese. ${rateCardText()}`;
+      $('banner').textContent = `👋 Choose delivery or pickup to see the menu from your nearest ${BRAND.name}. ${rateCardText()}`;
     return;
   }
-  const short = l.outlet.name.replace('Raju Chinese - ', '');
+  const short = BRAND.short(l.outlet.name);
   $('locTitle').textContent = l.fulfilment === 'delivery' ? `Deliver to: ${l.label}` : `Pickup: ${short}`;
   $('locSub').textContent = l.fulfilment === 'delivery'
     ? `from ${short} · ${l.distanceKm} km${l.deliveryCharge != null ? ` · delivery ${rupees(l.deliveryCharge)}` : ''}`
@@ -242,7 +242,7 @@ function qtyControl(item) {
 // Same order as WhatsApp: delivery/pickup and outlet first, then the menu.
 function startCard() {
   return `<div class="start-card"><h2>How would you like your order?</h2>
-    <p class="muted small">We'll find your nearest Raju Chinese, show its menu, and tell you the delivery charge before you order.</p>
+    <p class="muted small">We'll find your nearest ${BRAND.name}, show its menu, and tell you the delivery charge before you order.</p>
     <div class="row"><button type="button" class="btn" data-start="delivery">🛵 Delivery</button><button type="button" class="btn secondary" data-start="pickup">🏃 Pickup</button></div></div>`;
 }
 document.addEventListener('click', (e) => {
@@ -333,7 +333,7 @@ async function renderCart() {
   const upiOk = l.outlet.upi !== false;
   $('payUpiOpt').classList.toggle('hidden', !upiOk);
   if (!upiOk) $('payCod').checked = true;
-  $('cartHeading').textContent = l.fulfilment === 'delivery' ? `Delivery from ${l.outlet.name.replace('Raju Chinese - ', '')}` : `Pickup from ${l.outlet.name.replace('Raju Chinese - ', '')}`;
+  $('cartHeading').textContent = l.fulfilment === 'delivery' ? `Delivery from ${BRAND.short(l.outlet.name)}` : `Pickup from ${BRAND.short(l.outlet.name)}`;
   $('cartLines').innerHTML = entries.map((e) => `
     <div class="line"><span class="vegmark ${e.item.veg ? '' : 'non'}"></span>
       <span class="n">${esc(e.item.name)}<br><span class="small muted">${rupees(e.item.price)}</span></span>

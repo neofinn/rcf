@@ -1,5 +1,7 @@
 'use strict';
 
+const { brand } = require('../src/brand');
+
 // Sample order history for the demo only (never used by the server), so the
 // CRM and analytics screens have something realistic to show: ~90 days of
 // orders with lunch/dinner peaks, busier weekends, regulars and lapsed
@@ -84,7 +86,7 @@ function seedSampleHistory(store, { days = 90, now = new Date() } = {}) {
       if (fulfilment === 'delivery' && priced.subtotal < 14900) continue;
       const cancelled = rand() < 0.04;
       const upi = rand() < 0.5;
-      const code = 'RC' + Array.from({ length: 6 }, () => alphabet[Math.floor(rand() * alphabet.length)]).join('');
+      const code = brand().codePrefix + Array.from({ length: 6 }, () => alphabet[Math.floor(rand() * alphabet.length)]).join('');
       seq += 1;
       const iso = at.toISOString();
       const id = store.insertOrder({
@@ -127,7 +129,7 @@ function seedSampleHistory(store, { days = 90, now = new Date() } = {}) {
         store.addRating({ orderId: id, itemId: 0, name: 'Whole order', stars: overall, outletId: outlet.id, phone: c.phone, at: rAt });
         for (const d of dishStars) store.addRating({ orderId: id, itemId: d.id, name: d.name, stars: d.stars, outletId: outlet.id, phone: c.phone, at: rAt });
         if (rand() < 0.25) {
-          const good = ['Loved the momos, perfect spice', 'Fast delivery and still hot', 'Best noodles in the tricity', 'Generous portion, will order again', 'Gravy was spot on'];
+          const good = ['Loved the momos, perfect spice', 'Fast delivery and still hot', 'Best food in town', 'Generous portion, will order again', 'Gravy was spot on'];
           const bad = ['Food arrived cold', 'Too oily this time', 'Took too long in the rush', 'Less quantity than usual', 'Too spicy for kids'];
           store.addReviewComment(id, overall >= 4 ? pick(good) : pick(bad), rAt);
         }

@@ -28,7 +28,7 @@ test('full delivery order over WhatsApp', () => {
   assert.equal(r[0].type, 'location_request');
   assert.match(r[0].text, /Send location.*or type your full address/s);
   r = c.say({ type: 'location', location: PLACES.sector22 });
-  assert.match(r[0].text, /We deliver to you! \*Raju Chinese - Sector 17\*/);
+  assert.match(r[0].text, /We deliver to you! \*Test Kitchen - Sector 17\*/);
   assert.match(r[0].text, /type your full address/);
   r = c.text('House 12, Sector 22-B, near gurudwara');
   assert.match(r[0].text, /address saved/);
@@ -50,12 +50,12 @@ test('full delivery order over WhatsApp', () => {
   assert.match(r[0].text, /To pay: ₹\d+/);
 
   r = c.tap('act:place');
-  assert.match(r[0].text, /Order placed! Your order ID is \*RC[2-9A-Z]{6}\*/);
-  assert.match(r[0].text, /https:\/\/order\.example\/track\.html\?code=RC/);
+  assert.match(r[0].text, /Order placed! Your order ID is \*TK[2-9A-Z]{6}\*/);
+  assert.match(r[0].text, /https:\/\/order\.example\/track\.html\?code=TK/);
 
   const order = c.orders.latestOrderForPhone('919876543210');
   assert.equal(order.channel, 'whatsapp');
-  assert.equal(order.outlet.name, 'Raju Chinese - Sector 17');
+  assert.equal(order.outlet.name, 'Test Kitchen - Sector 17');
   assert.equal(order.address, 'House 12, Sector 22-B, near gurudwara');
 
   // Next order: the address is remembered, and can be changed.
@@ -87,11 +87,11 @@ test('pickup flow skips the address step', () => {
   assert.equal(allIds(r).length, 7);
   assert.equal(r[1].type, 'location_request');
   r = c.tap('outlet:4');
-  assert.match(r[0].text, /Pickup from \*Raju Chinese - Phase 7 Mohali\*/);
+  assert.match(r[0].text, /Pickup from \*Test Kitchen - Phase 7 Mohali\*/);
   c.tap('cat:Beverages');
   c.tap(`item:${c.orders.menuFor(4).find((i) => i.name === 'Masala Lemonade').id}`);
   c.tap('qty:1');
-  assert.match(c.tap('act:checkout')[0].text, /Pickup from: Raju Chinese - Phase 7 Mohali/);
+  assert.match(c.tap('act:checkout')[0].text, /Pickup from: Test Kitchen - Phase 7 Mohali/);
   assert.match(c.tap('act:place')[0].text, /Order placed/);
 });
 
@@ -100,7 +100,7 @@ test('typing "checkout" or "done" goes to checkout once the cart has something',
   c.tap('mode:pickup');
   c.tap('outlet:4');
   c.text('1 masala lemonade');
-  assert.match(c.text('done')[0].text, /Pickup from: Raju Chinese - Phase 7 Mohali/);
+  assert.match(c.text('done')[0].text, /Pickup from: Test Kitchen - Phase 7 Mohali/);
 });
 
 test('delivery below the minimum order is blocked at checkout', () => {
@@ -174,7 +174,7 @@ test('typed order with special instructions, a follow-up question and location',
   assert.match(r.at(-1).text, /Note for kitchen: call before coming/);
   c.tap('act:place');
   const o = c.orders.latestOrderForPhone('919876543210');
-  assert.equal(o.outlet.name, 'Raju Chinese - Phase 7 Mohali');
+  assert.equal(o.outlet.name, 'Test Kitchen - Phase 7 Mohali');
   assert.equal(o.notes, 'call before coming');
   assert.deepEqual(o.items.map((i) => [i.name, i.qty, i.note]).sort(), [
     ['Chilli Paneer Dry', 2, 'less spicy'],
@@ -208,7 +208,7 @@ test('catalog cart is routed to the nearest outlet after location', () => {
   c.tap('act:checkout');
   assert.equal(c.tap('mode:delivery')[0].type, 'location_request');
   r = c.text('House 77, Sector 5, Panchkula');
-  assert.match(r[0].text, /We deliver to \*Sector 5, Panchkula\*! \*Raju Chinese - Sector 11 Panchkula\*/);
+  assert.match(r[0].text, /We deliver to \*Sector 5, Panchkula\*! \*Test Kitchen - Sector 11 Panchkula\*/);
   assert.match(r.at(-1).text, /Please confirm/);
   assert.match(r.at(-1).text, /Noodles \+ Manchurian Combo × 2/);
 });
@@ -221,7 +221,7 @@ test('unknown requests offer a person; handoff relays messages and staff can han
   c.say({ type: 'location', location: PLACES.sector22 });
   c.text('1 veg fried rice');
   r = c.text('I need a party order for 40 people, can I talk to someone');
-  assert.match(r[0].text, /Connecting you to our team at \*Raju Chinese - Sector 17\*/);
+  assert.match(r[0].text, /Connecting you to our team at \*Test Kitchen - Sector 17\*/);
   const h = c.handoffs.openForPhone('919876543210');
   assert.equal(h.outlet_id, 1);
   assert.match(h.messages[0].body, /Cart:\n1\. Veg Fried Rice × 1/);
@@ -255,8 +255,8 @@ test('UPI: pay now sends QR and link for the exact amount to the cooking outlet'
   const o = c.orders.latestOrderForPhone('919876543210');
   assert.equal(o.payment_method, 'upi');
   assert.equal(o.payment_status, 'pending');
-  assert.equal(o.upi.upiId, 'rc-phase-7-mohali@example');
-  assert.equal(o.upi.link, `upi://pay?pa=rc-phase-7-mohali%40example&pn=Raju%20Chinese&am=${(o.total / 100).toFixed(2)}&cu=INR&tn=Raju%20Chinese%20order%20${o.code}&tr=${o.code}`);
+  assert.equal(o.upi.upiId, 'tk-phase-7-mohali@example');
+  assert.equal(o.upi.link, `upi://pay?pa=tk-phase-7-mohali%40example&pn=Test%20Kitchen&am=${(o.total / 100).toFixed(2)}&cu=INR&tn=Test%20Kitchen%20order%20${o.code}&tr=${o.code}`);
   const img = r.find((x) => x.type === 'image');
   assert.equal(img.url, `https://order.example/pay/${o.code}/qr.png`);
   assert.match(img.svg, /^<svg/);
@@ -315,7 +315,7 @@ test('delivery by typed address: area found, ambiguous area, or ask for a pin', 
   let c = chat();
   c.tap('mode:delivery');
   let r = c.text('House 12, sec 22-B, Chandigarh near gurudwara');
-  assert.match(r[0].text, /We deliver to \*Sector 22, Chandigarh\*! \*Raju Chinese - Sector 17\*/);
+  assert.match(r[0].text, /We deliver to \*Sector 22, Chandigarh\*! \*Test Kitchen - Sector 17\*/);
   assert.match(r[0].text, /Delivery: /);
   assert.ok(allIds(r).includes('cat:Noodles'), 'menu follows');
 
@@ -345,7 +345,7 @@ test('pickup suggests the nearest outlets once location is shared', () => {
   const c = chat();
   c.tap('mode:pickup');
   let r = c.say({ type: 'location', location: PLACES.panchkula5 });
-  assert.match(r[0].text, /nearest outlet is \*Raju Chinese - Sector 11 Panchkula\*/);
+  assert.match(r[0].text, /nearest outlet is \*Test Kitchen - Sector 11 Panchkula\*/);
   assert.equal(allIds(r)[0], 'outlet:7');
   assert.equal(allIds(r).at(-1), 'act:outlets');
   r = c.tap('act:outlets');

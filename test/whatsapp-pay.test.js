@@ -35,7 +35,7 @@ test('pay now sends WhatsApp "Review and pay" for the exact order plus a dynamic
   const od = replies.find((r) => r.type === 'order_details');
   assert.ok(od, 'order_details message sent');
   assert.equal(od.referenceId, order.code);
-  assert.equal(od.paymentConfiguration, 'rc-phase-7-mohali');
+  assert.equal(od.paymentConfiguration, 'tk-phase-7-mohali');
   const qr = replies.find((r) => r.type === 'image');
   assert.match(qr.text, new RegExp(`Order ${order.code}`));
   assert.match(qr.url, new RegExp(`/pay/${order.code}/qr.png$`));

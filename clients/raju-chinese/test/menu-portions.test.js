@@ -4,12 +4,15 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const realSeed = require('../src/seed');
-const { createBot, createSessionStore } = require('../src/whatsapp/bot');
-const { createHandoffService } = require('../src/handoff');
-const { parseOrderText } = require('../src/whatsapp/nlu');
-const { groupDishes, portionOf } = require('../src/portions');
-const helpers = require('./helpers');
+const realSeed = require('..');
+const { createBot, createSessionStore } = require('../../../src/whatsapp/bot');
+const { createHandoffService } = require('../../../src/handoff');
+const { parseOrderText } = require('../../../src/whatsapp/nlu');
+const { groupDishes, portionOf } = require('../../../src/portions');
+const helpers = require('../../../test/helpers');
+
+// The test helpers load the test client; these tests are about this client's own data.
+require('../../../src/brand').useClient(realSeed);
 
 const menu = realSeed.menu.map((m, i) => ({ ...m, id: i + 1, available: true }));
 const names = (r) => r.lines.map((l) => menu[l.id - 1].name);
@@ -59,7 +62,7 @@ test('WhatsApp: dishes page 9 at a time, then Half or Full, then how many', () =
 });
 
 test('WhatsApp with menu pictures: images then "type your order"; order slip; remove a line', () => {
-  const { createMenuImages } = require('../src/whatsapp/menu-image');
+  const { createMenuImages } = require('../../../src/whatsapp/menu-image');
   const { db, orders, store } = helpers.setup({ seed: realSeed });
   db.exec("UPDATE outlets SET opens = '00:00', closes = '00:00'");
   const menuImages = createMenuImages({ menuItems: () => store.menuItems(), baseUrl: 'https://order.example' });

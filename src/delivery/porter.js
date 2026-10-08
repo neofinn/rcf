@@ -20,13 +20,15 @@ const DEFAULT_PATHS = {
 
 const digits10 = (phone) => String(phone || '').replace(/\D/g, '').slice(-10);
 
+const { brand } = require('../brand');
+
 class PorterError extends Error {}
 
 const address = (name, line, city, lat, lng, phone) => ({
   apartment_address: name,
   street_address1: line,
   city,
-  state: 'Chandigarh',
+  state: brand().region.state,
   country: 'India',
   lat,
   lng,
@@ -37,7 +39,7 @@ const address = (name, line, city, lat, lng, phone) => ({
 function buildPorterOrder(order, outlet, attempt = 1) {
   return {
     request_id: `${order.code}-${attempt}`,
-    delivery_instructions: { instructions_list: [{ type: 'text', description: `Raju Chinese order ${order.code}. Food, keep upright.` }] },
+    delivery_instructions: { instructions_list: [{ type: 'text', description: `${brand().name} order ${order.code}. Food, keep upright.` }] },
     pickup_details: { address: address(outlet.name, outlet.address, outlet.city, outlet.lat, outlet.lng, outlet.phone) },
     drop_details: { address: address(order.customer_name, order.address, outlet.city, order.lat, order.lng, order.phone) },
   };

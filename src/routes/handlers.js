@@ -18,6 +18,7 @@ const { placeAddress } = require('../geocode');
 const { normalisePhone } = require('../orders');
 const { qrSvg } = require('../payments');
 const { AuthError } = require('../staff-auth');
+const { brand } = require('../brand');
 
 const ACTIVE = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
 const IST_OFFSET_MS = 330 * 60 * 1000; // IST is UTC+5:30, no daylight saving
@@ -314,7 +315,7 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
     { method: 'GET', path: '/api/admin/customers', admin: true, handle: ({ query }) => reports.customers(query) },
     {
       method: 'GET', path: '/api/admin/customers.csv', admin: true,
-      handle: async ({ query }) => ({ contentType: 'text/csv', filename: 'raju-chinese-customers.csv', text: await reports.customersCsv(query) }),
+      handle: async ({ query }) => ({ contentType: 'text/csv', filename: `${brand().id}-customers.csv`, text: await reports.customersCsv(query) }),
     },
     { method: 'GET', path: '/api/admin/customers/:phone', admin: true, handle: ({ params }) => crm.get(params.phone) || notFound('Customer not found') },
     { method: 'PATCH', path: '/api/admin/customers/:phone', admin: true, handle: ({ params, body }) => crm.update(params.phone, body) || notFound('Customer not found') },
@@ -354,10 +355,10 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
         const header = ['id', 'title', 'description', 'availability', 'condition', 'price', 'link', 'image_link', 'brand', 'product_type'];
         const rows = orders.menuFor(null).map((i) => [
           `RC-${i.id}`, i.name, i.description || `${i.veg ? 'Veg' : 'Non-veg'} · ${i.category}`, 'in stock', 'new',
-          `${(i.price / 100).toFixed(2)} INR`, `${base}/#item-${i.id}`, `${base}/menu-photos/${i.id}.jpg`, 'Raju Chinese', i.category,
+          `${(i.price / 100).toFixed(2)} INR`, `${base}/#item-${i.id}`, `${base}/menu-photos/${i.id}.jpg`, brand().name, i.category,
         ]);
         return {
-          contentType: 'text/csv', filename: 'raju-chinese-catalog.csv',
+          contentType: 'text/csv', filename: `${brand().id}-catalog.csv`,
           text: [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n') + '\n',
         };
       },

@@ -15,7 +15,7 @@ Online ordering for Raju Chinese's outlets across the Chandigarh tricity: a web 
 
 ## How orders reach the right outlet
 
-**Outlets** (`src/seed.js`): Sector 15-D, Sector 34 and Sector 46-C Chandigarh, Phase 3B2 Mohali, VIP Road Zirakpur, Khuda Lahora (near PGI) and Peer Muchalla. These are the outlets found on Zomato, Swiggy, Justdial, magicpin and Google listings; addresses and phone numbers come from those listings, and the coordinates are approximate (Peer Muchalla's is estimated). Check each against the real outlet before going live.
+**Outlets** (`clients/raju-chinese/data.js`): Sector 15-D, Sector 34 and Sector 46-C Chandigarh, Phase 3B2 Mohali, VIP Road Zirakpur, Khuda Lahora (near PGI) and Peer Muchalla. These are the outlets found on Zomato, Swiggy, Justdial, magicpin and Google listings; addresses and phone numbers come from those listings, and the coordinates are approximate (Peer Muchalla's is estimated). Check each against the real outlet before going live.
 
 1. The customer shares a location: browser GPS, a typed address, picking their area from a list of tricity localities, or a WhatsApp location pin.
 2. `assignOutlet` (`src/geo.js`) estimates the road distance to every outlet (straight-line distance × 1.3) and picks the **nearest outlet that is open, accepting orders, and within delivery range**. The range is **20 km by road for every outlet** (`MAX_DELIVERY_KM`), so there is **no blind spot**. `test/coverage.test.js` checks a 500 m grid over the whole tricity and outskirts (New Chandigarh, Mullanpur, Pinjore, Dera Bassi, Banur), including with outlets paused. Kurali (~25 km from Phase 3B2) is outside the range; raise `MAX_DELIVERY_KM` to 26 to include it.
@@ -192,7 +192,7 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
 
 Step-by-step hosting (Hostinger), Supabase and WhatsApp number setup: **[DEPLOY.md](DEPLOY.md)**.
 
-1. **Real outlet data.** `src/seed.js` has the 7 outlets from public listings, but the coordinates are approximate, and the menu prices, opening hours and UPI IDs (`…@example`, deliberately invalid) are *placeholders*. Fix them before the first start (the seed runs only on an empty database), or edit the `outlets` / `menu_items` tables afterwards. Take each outlet's latitude/longitude from Google Maps (right-click the outlet's pin).
+1. **Real outlet data.** `clients/raju-chinese/data.js` has the 7 outlets from public listings, but the coordinates are approximate, and the menu prices, opening hours and UPI IDs (`…@example`, deliberately invalid) are *placeholders*. Fix them before the first start (the seed runs only on an empty database), or edit the `outlets` / `menu_items` tables afterwards. Take each outlet's latitude/longitude from Google Maps (right-click the outlet's pin).
 2. **Hosting.** Any small VPS with a persistent disk for `data/`, behind HTTPS (required by both WhatsApp webhooks and browser geolocation). Set `NODE_ENV=production`, `PUBLIC_BASE_URL` and a long random `ADMIN_TOKEN`.
 3. **WhatsApp Business.**
    - Create a Meta Business account and a WhatsApp Business app at developers.facebook.com, and add and verify the business phone number.
@@ -218,7 +218,8 @@ src/
   server.js              start the HTTP server
   app.js                 wires everything together (Express)
   config.js              env settings and pricing rules
-  db.js, seed.js         SQLite schema and starter data
+  db.js                  SQLite schema
+  brand.js               which client this runs for (clients/<id>/: brand, outlets, menu)
   store/sqlite.js        data access on SQLite
   store/memory.js        same interface in memory (browser demo)
   geo.js                 distance, opening hours, outlet assignment

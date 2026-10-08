@@ -1,4 +1,4 @@
-<title>Raju Chinese Live Demo</title>
+<title>{{name}} Live Demo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
@@ -137,8 +137,8 @@
   <header class="top">
     <div class="intro">
       <span class="eyebrow">Interactive demo · runs in your browser</span>
-      <h1>Raju Chinese <span class="mark">online ordering</span></h1>
-      <p class="muted">Everything here is connected. Order in the web app or on WhatsApp, and the order goes to the nearest of the 7 Raju Chinese outlets (Sector 15, 34, 46, Phase 3B2 Mohali, Zirakpur, Khuda Lahora, Peer Muchalla) and shows up on that outlet's dashboard. Accept it there and the customer gets the update. Mark a WhatsApp order completed and the review request arrives about 20 seconds later (30 minutes in real life).</p>
+      <h1>{{name}} <span class="mark">online ordering</span></h1>
+      <p class="muted">Everything here is connected. Order in the web app or on WhatsApp, and the order goes to the nearest of the <span id="outletList">outlets</span> and shows up on that outlet's dashboard. Accept it there and the customer gets the update. Mark a WhatsApp order completed and the review request arrives about 20 seconds later (30 minutes in real life).</p>
     </div>
     <div class="controls">
       <label class="field" for="gps">Pretend the customer's phone GPS is at
@@ -151,9 +151,7 @@
   <div class="tryline" aria-label="Messages to try on WhatsApp">
     <span class="label">Try typing on WhatsApp:</span>
     <button class="chip" type="button" data-say="hi"><q>hi</q></button>
-    <button class="chip" type="button" data-say="House 12, Sector 22-B, Chandigarh"><q>House 12, Sector 22-B, Chandigarh</q> (after Delivery)</button>
-    <button class="chip" type="button" data-say="2 half kurkure veg momo less spicy, ek full veg hakka noodles no onion"><q>2 half kurkure veg momo less spicy, ek full veg hakka noodles no onion</q></button>
-    <button class="chip" type="button" data-say="bhaiya 3 chilli chicken aur 1 half chilli potato, call before coming"><q>bhaiya 3 chilli chicken aur 1 half chilli potato, call before coming</q></button>
+    <span id="tryExamples"></span>
     <button class="chip" type="button" data-say="Can I talk to someone about a party order for 30 people?"><q>Can I talk to someone about a party order?</q></button>
     <button class="chip" type="button" data-say="track"><q>track</q></button>
     <span class="muted" style="font-size:0.85rem">At checkout, pick <b>💳 Pay now (UPI)</b>: pay inside WhatsApp or with any UPI app, or scan the order QR.</span>
@@ -189,17 +187,17 @@
   <section class="routing off" data-panel="routing" aria-labelledby="routing-h">
     <div class="head">
       <span class="eyebrow">How an order finds its outlet</span>
-      <h2 id="routing-h">One menu, one WhatsApp number, seven kitchens</h2>
+      <h2 id="routing-h">One menu, one WhatsApp number, <span id="kitchens">every kitchen</span></h2>
       <p class="muted">The WhatsApp catalog and the web menu are shared by every outlet, and the customer's location decides which kitchen cooks. Shaded areas show each outlet's zone; the whole map is deliverable. Pause an outlet on the dashboard and its neighbours take over its zone. Click anywhere on the map to see the outlet and delivery charge.</p>
     </div>
     <div>
-      <svg class="map" id="map" viewBox="0 0 760 520" role="img" aria-label="Map of the Chandigarh tricity showing the seven outlets and their delivery areas"></svg>
+      <svg class="map" id="map" viewBox="0 0 760 520" role="img" aria-label="Map showing the outlets and their delivery areas"></svg>
       <p class="caption" id="caption">Waiting for a location from the web app or WhatsApp…</p>
     </div>
     <div class="side">
       <ol class="rules">
         <li>Measure road distance (straight line × 1.3) from the customer to every outlet.</li>
-        <li>Keep outlets that are open and taking orders. Every outlet delivers up to <b>20 km by road</b>, so there is no blind spot anywhere in the tricity or its outskirts (New Chandigarh, Pinjore, Dera Bassi, Banur).</li>
+        <li>Keep outlets that are open and taking orders. Every outlet delivers up to <b>20 km by road</b>, so there is no blind spot between outlets.</li>
         <li>The nearest one cooks. If it is paused or closed, the next nearest takes over.</li>
         <li>The customer sees the <b>delivery charge</b> for their distance before ordering: ₹40 for the first 3 km, then ₹10 per km (placeholder rate card).</li>
         <li>Further than 20 km, or every outlet closed? The customer is offered pickup.</li>
@@ -223,18 +221,23 @@
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const short = (name) => name.replace('Raju Chinese - ', '');
+const short = (name) => (BRAND.outletPrefix && name.startsWith(BRAND.outletPrefix) ? name.slice(BRAND.outletPrefix.length) : name);
+// Example messages for this client (address, typed orders).
+$('tryExamples').outerHTML = [
+  ...(BRAND.demo.address ? [[BRAND.demo.address, ' (after Delivery)']] : []),
+  ...BRAND.demo.tryOrders.map((t) => [t, '']),
+].map(([t, note]) => `<button class="chip" type="button" data-say="${esc(t)}"><q>${esc(t)}</q>${note}</button>`).join('');
 const rupees = (p) => '₹' + (p / 100).toLocaleString('en-IN', p % 100 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {});
 
 let be;
 const frames = { web: $('f-web'), whatsapp: $('f-whatsapp'), outlet: $('f-outlet'), admin: $('f-admin') };
 
 // ---- Demo GPS ---------------------------------------------------------------
-const OUTSIDE = { name: 'Ludhiana (outside delivery area)', lat: 30.9010, lng: 75.8573 };
+const OUTSIDE = BRAND.demo.outside;
 let gpsChoices = [];
 let custom = null;
 function fillGps() {
-  gpsChoices = [...be.localities(), { ...OUTSIDE, city: 'Outside' }];
+  gpsChoices = [...be.localities(), ...(OUTSIDE ? [{ ...OUTSIDE, city: 'Outside' }] : [])];
   const groups = {};
   gpsChoices.forEach((l, i) => (groups[l.city] ||= []).push(`<option value="${i}">${esc(l.name)}</option>`));
   $('gps').innerHTML = (custom ? '<option value="custom">Point picked on the map</option>' : '')
@@ -392,16 +395,46 @@ function wireEvents() {
 }
 
 // ---- Routing map ------------------------------------------------------------
-const B = { minLat: 30.615, maxLat: 30.775, minLng: 76.615, maxLng: 76.885 };
-const KM_LNG = 111.32 * Math.cos((30.7 * Math.PI) / 180);
-const SCALE = 760 / ((B.maxLng - B.minLng) * KM_LNG);
+// The map frames the outlets with 6 km around them, at the map's 760:520 shape.
+let B;
+let KM_LNG;
+let SCALE;
+function fitMap() {
+  const pts = be.outlets();
+  let minLat = Math.min(...pts.map((p) => p.lat));
+  let maxLat = Math.max(...pts.map((p) => p.lat));
+  let minLng = Math.min(...pts.map((p) => p.lng));
+  let maxLng = Math.max(...pts.map((p) => p.lng));
+  KM_LNG = 111.32 * Math.cos((((minLat + maxLat) / 2) * Math.PI) / 180);
+  minLat -= 6 / 111.32; maxLat += 6 / 111.32; minLng -= 6 / KM_LNG; maxLng += 6 / KM_LNG;
+  const w = (maxLng - minLng) * KM_LNG;
+  const h = (maxLat - minLat) * 111.32;
+  if (w / h > 760 / 520) { const d = ((w * 520) / 760 - h) / 111.32 / 2; minLat -= d; maxLat += d; } else { const d = ((h * 760) / 520 - w) / KM_LNG / 2; minLng -= d; maxLng += d; }
+  B = { minLat, maxLat, minLng, maxLng };
+  SCALE = 760 / ((maxLng - minLng) * KM_LNG);
+}
+// City names at the middle of each city's known localities.
+function cityLabels() {
+  const by = {};
+  for (const l of be.localities()) (by[l.city] ||= []).push(l);
+  return Object.entries(by).filter(([, ls]) => ls.length >= 2).map(([city, ls]) => {
+    const lat = ls.reduce((t, l) => t + l.lat, 0) / ls.length;
+    const lng = ls.reduce((t, l) => t + l.lng, 0) / ls.length;
+    const x = X(lng);
+    let y = Y(lat) - 14;
+    // Keep clear of outlet pins and their labels.
+    if (be.outlets().some((o) => Math.abs(X(o.lng) + 30 - x) < 70 && Math.abs(Y(o.lat) - y) < 18)) y += 30;
+    return { city, x, y };
+  }).filter((c) => c.x > 30 && c.x < 730 && c.y > 20 && c.y < 500)
+    .map((c) => `<text x="${c.x}" y="${c.y}" text-anchor="middle" class="city">${esc(c.city.toUpperCase())}</text>`).join('');
+}
 const X = (lng) => (lng - B.minLng) * KM_LNG * SCALE;
 const Y = (lat) => (B.maxLat - lat) * 111.32 * SCALE;
 const fromXY = (x, y) => ({ lat: B.maxLat - y / (111.32 * SCALE), lng: B.minLng + x / (KM_LNG * SCALE) });
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function nearestLocalityName(p) {
-  if (p.lat > B.maxLat + 0.05 || p.lng < B.minLng - 0.05) return 'outside the tricity';
+  if (p.lat > B.maxLat + 0.05 || p.lng < B.minLng - 0.05) return `outside ${BRAND.region.name}`;
   let best = null;
   for (const l of be.localities()) {
     const d = Math.hypot(l.lat - p.lat, l.lng - p.lng);
@@ -441,22 +474,17 @@ function drawZones() { const g = $('zones'); if (g) g.innerHTML = zonesSvg(); }
 function drawMap() {
   const svg = $('map');
   const out = be.outlets();
+  fitMap();
   svg.innerHTML = `
     <g id="zones">${zonesSvg()}</g>
     <g id="locs">${be.localities().map((l) => `<circle cx="${X(l.lng)}" cy="${Y(l.lat)}" r="2.5" class="loc"><title>${esc(l.name)}, ${esc(l.city)}</title></circle>`).join('')}</g>
-    <g id="cities">
-      <text x="${X(76.765)}" y="${Y(30.762)}" text-anchor="middle" class="city">CHANDIGARH</text>
-      <text x="${X(76.700)}" y="${Y(30.682)}" text-anchor="middle" class="city">MOHALI</text>
-      <text x="${X(76.865)}" y="${Y(30.672)}" text-anchor="middle" class="city">PANCHKULA</text>
-      <text x="${X(76.815)}" y="${Y(30.628)}" text-anchor="middle" class="city">ZIRAKPUR</text>
-      <text x="${X(76.645)}" y="${Y(30.765)}" text-anchor="middle" class="city">KHARAR</text>
-    </g>
+    <g id="cities">${cityLabels()}</g>
     <g id="route"></g>
     <g id="riders"></g>
     <g id="outlets">${out.map((o) => `
       <g data-outlet="${o.id}">
         <circle cx="${X(o.lng)}" cy="${Y(o.lat)}" r="8" class="odot"/>
-        <text x="${X(o.lng) + 12}" y="${Y(o.lat) + 4}" class="olabel">${esc(short(o.name).replace(' Panchkula', '').replace(' Mohali', ''))}</text>
+        <text x="${X(o.lng) + 12}" y="${Y(o.lat) + 4}" class="olabel">${esc(short(o.name).replace(` ${o.city}`, ''))}</text>
       </g>`).join('')}</g>
     <g class="scale" transform="translate(16 ${520 - 22})">
       <line x1="0" y1="0" x2="${5 * SCALE}" y2="0"/>
@@ -533,6 +561,9 @@ function start() {
   custom = null;
   fillGps();
   drawMap();
+  const names = be.outlets().map((o) => short(o.name));
+  $('outletList').textContent = `${names.length} ${BRAND.name} outlets (${names.join(', ')})`;
+  $('kitchens').textContent = names.length === 1 ? 'one kitchen' : `${names.length} kitchens`;
   $('log').innerHTML = '<li class="empty">Orders, routing decisions and staff actions appear here as you use the demo.</li>';
   $('caption').textContent = 'Waiting for a location from the web app or WhatsApp…';
   clearChildStorage();

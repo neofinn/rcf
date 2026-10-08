@@ -5,6 +5,7 @@ const { EventEmitter } = require('node:events');
 const config = require('./config');
 const { assignOutlet, isOpen, etaMinutes } = require('./geo');
 const { upiLink, PAYMENT_LABELS } = require('./payments');
+const { brand } = require('./brand');
 
 // Delivery partner statuses as staff and customers see them (see delivery/dispatcher.js).
 const DELIVERY_LABELS = {
@@ -189,7 +190,7 @@ function createOrderService(store) {
     const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     for (;;) {
       const bytes = crypto.randomBytes(6);
-      const code = 'RC' + [...bytes].map((b) => alphabet[b % alphabet.length]).join('');
+      const code = brand().codePrefix + [...bytes].map((b) => alphabet[b % alphabet.length]).join('');
       if (!store.orderCodeExists(code)) return code;
     }
   }
@@ -253,8 +254,8 @@ function createOrderService(store) {
       delivery: presentDelivery(row),
       upi: row.payment_method === 'upi' && outlet?.upi_id ? {
         upiId: outlet.upi_id,
-        payee: outlet.upi_name || 'Raju Chinese',
-        link: upiLink({ upiId: outlet.upi_id, payee: outlet.upi_name || 'Raju Chinese', amountPaise: row.total, code: row.code }),
+        payee: outlet.upi_name || brand().name,
+        link: upiLink({ upiId: outlet.upi_id, payee: outlet.upi_name || brand().name, amountPaise: row.total, code: row.code }),
       } : null,
     };
   }

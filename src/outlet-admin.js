@@ -8,6 +8,7 @@
 const config = require('./config');
 const { ValidationError, normalisePhone } = require('./orders');
 const { haversineKm } = require('./geo');
+const { brand, fullName, shortName } = require('./brand');
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const UPI = /^[a-z0-9._-]{2,}@[a-z][a-z0-9.-]{1,}$/i;
@@ -20,7 +21,7 @@ function coordsFromMapsLink(link) {
   return m ? { lat: Number(m[1]), lng: Number(m[2]) } : null;
 }
 
-const slugify = (s) => String(s).toLowerCase().replace(/raju chinese\s*-?\s*/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'outlet';
+const slugify = (s) => shortName(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'outlet';
 
 function createOutletAdmin({ store }) {
   // Validates the fields that were sent; `required` for a new outlet.
@@ -35,7 +36,7 @@ function createOutletAdmin({ store }) {
     const opt = (k, max) => (body[k] === undefined ? undefined : String(body[k] ?? '').trim().slice(0, max) || null);
 
     const name = text('name', 80, 'Outlet name');
-    if (name !== undefined) out.name = /^raju chinese/i.test(name) ? name : `Raju Chinese - ${name}`;
+    if (name !== undefined) out.name = fullName(name);
     const city = text('city', 40, 'City');
     if (city !== undefined) out.city = city;
     const address = text('address', 200, 'Address');
@@ -60,9 +61,12 @@ function createOutletAdmin({ store }) {
     }
     if (lat !== undefined || lng !== undefined || required) {
       lat = Number(lat); lng = Number(lng);
-      // The tricity and the surrounding region; catches swapped or mistyped numbers.
-      if (!(lat >= 29 && lat <= 32.5 && lng >= 74.5 && lng <= 78.5)) {
-        throw new ValidationError('Location looks wrong: latitude should be about 30.x and longitude about 76.x for the tricity.');
+      // The client's region (India if not set); catches swapped or mistyped numbers.
+      const { region } = brand();
+      const b = region.bounds || { minLat: 6, maxLat: 37.5, minLng: 68, maxLng: 97.5 };
+      if (!(lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng)) {
+        const about = (lo, hi) => `${Math.floor((lo + hi) / 2)}.x`;
+        throw new ValidationError(`Location looks wrong: latitude should be about ${about(b.minLat, b.maxLat)} and longitude about ${about(b.minLng, b.maxLng)}${region.bounds ? ` for ${region.name}` : ''}.`);
       }
       out.lat = Math.round(lat * 1e6) / 1e6;
       out.lng = Math.round(lng * 1e6) / 1e6;
@@ -108,7 +112,7 @@ function createOutletAdmin({ store }) {
     }
     const id = store.insertOutlet({
       slug, upi_id: null, sfx_store_code: null, wa_payment_config: null, ...o,
-      delivery_radius_km: config.delivery.rangeKm, upi_name: 'Raju Chinese',
+      delivery_radius_km: config.delivery.rangeKm, upi_name: brand().name,
       accepting_orders: body.acceptingOrders === false ? 0 : 1, active: 1,
     });
     return { outlet: store.outlet(id), nearest: nearestOther(id, o) };

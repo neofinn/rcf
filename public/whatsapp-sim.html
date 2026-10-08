@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>WhatsApp Simulator – Raju Chinese</title>
+  <title>WhatsApp Simulator – {{name}}</title>
   <link rel="stylesheet" href="/styles.css">
   <style>
     /* Menu pictures and QR codes arrive as SVG in the simulator: fit them to the bubble. */
@@ -33,7 +33,7 @@
   <header class="topbar"><div class="logo">WhatsApp simulator</div><span class="small" style="margin-left:auto;opacity:.8">dev only</span></header>
   <div class="chat" id="chat"></div>
   <div class="compose">
-    <form id="f"><input id="t" placeholder='Try: 2 half kurkure veg momo less spicy, 1 full veg noodles' autocomplete="off"><button class="btn" style="width:auto">Send</button></form>
+    <form id="f"><input id="t" placeholder='Try: {{orderExample}}' autocomplete="off"><button class="btn" style="width:auto">Send</button></form>
     <div class="row">
       <select id="loc"><option value="">📍 Share a location…</option></select>
       <button class="btn secondary" type="button" id="gps">My GPS</button>

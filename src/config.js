@@ -109,7 +109,7 @@ module.exports = {
   whatsapp: {
     token: env.WHATSAPP_TOKEN || '',
     phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID || '',
-    verifyToken: env.WHATSAPP_VERIFY_TOKEN || 'raju-verify',
+    verifyToken: env.WHATSAPP_VERIFY_TOKEN || 'whatsapp-verify',
     appSecret: env.WHATSAPP_APP_SECRET || '',
     graphVersion: env.WHATSAPP_GRAPH_VERSION || 'v21.0',
     // In-chat UPI payments ("Review and pay" order_details messages, India).
