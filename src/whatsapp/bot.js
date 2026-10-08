@@ -20,7 +20,7 @@
 const config = require('../config');
 const { assignOutlet, isOpen, etaMinutes } = require('../geo');
 const { rupees } = require('../format');
-const { ValidationError, deliveryFee, deliveryCharge } = require('../orders');
+const { ValidationError, deliveryFee, deliveryCharge, canPayOnline } = require('../orders');
 const { parseOrderText } = require('./nlu');
 const { placeAddress } = require('../geocode');
 const { roadKm } = require('../geo');
@@ -267,7 +267,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       : `🏃 Pickup from: ${outlet.name}\n${outlet.address}`;
     const later = s.fulfilment === 'delivery' ? 'delivery' : 'pickup';
     const summary = `*Please confirm your order*\n\n${lines}\n${notes}\n${charges}\n*To pay: ${rupees(qte.total)}*\n\n${where}`;
-    if (outlet.upi_id) {
+    if (canPayOnline(outlet)) {
       return longButtons(`${summary}\n\nHow would you like to pay?\n💳 *Pay now*: UPI QR / link for the exact amount\n💵 *Pay on ${later}*: cash or UPI to the rider${s.fulfilment === 'pickup' ? '/counter' : ''}\n\n(Type *cancel* to drop this order.)`, [
         btn('act:place_upi', '💳 Pay now (UPI)'),
         btn('act:place', s.fulfilment === 'delivery' ? '💵 Pay on delivery' : '💵 Pay at pickup'),

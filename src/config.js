@@ -41,6 +41,18 @@ module.exports = {
     windowMinutes: num(env.PAYMENT_WINDOW_MINUTES, 15),
   },
 
+  // Dynamic UPI QR: the UPI ID payments go to. One business-wide ID (e.g. the
+  // merchant UPI ID from your payment gateway) for every outlet; an outlet's own
+  // UPI ID (Head office → Outlets) overrides it. Every order's QR carries the
+  // exact amount and the order code as the transaction reference.
+  upi: {
+    id: env.UPI_ID || '',
+    payeeName: env.UPI_PAYEE_NAME || '',
+    // Merchant category code for merchant UPI IDs (5812 = restaurants). Leave
+    // empty for a personal UPI ID.
+    merchantCode: env.UPI_MERCHANT_CODE || '',
+  },
+
   // Payment gateway: with Razorpay keys, "Pay now" uses a Razorpay payment link
   // (UPI apps, QR, cards) and payments confirm themselves via its webhook; cancelled
   // paid orders are refunded. Without keys: plain UPI to each outlet, confirmed by staff.

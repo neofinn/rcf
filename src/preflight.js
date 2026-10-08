@@ -86,14 +86,16 @@ function preflight(config, store) {
   // ---- Outlet data ---------------------------------------------------------
   if (store) {
     const outlets = store.outlets().filter((o) => o.active);
-    const placeholderUpi = outlets.filter((o) => /@example$/.test(o.upi_id || ''));
-    const noUpi = outlets.filter((o) => !o.upi_id);
+    // Where each outlet's UPI money would go (business-wide UPI_ID or the outlet's own).
+    const { upiFor } = require('./payments');
+    const placeholderUpi = outlets.filter((o) => /@example$/.test(upiFor(o)?.id || ''));
+    const noUpi = outlets.filter((o) => !upiFor(o));
     const fakePhone = outlets.filter((o) => /^\+?910{6,}/.test(o.phone || ''));
     const withPin = new Set(store.outletLogins().map((l) => l.outlet_id));
     const noPin = outlets.filter((o) => !withPin.has(o.id));
     const noSfx = sfx.mode === 'live' ? outlets.filter((o) => !o.sfx_store_code) : [];
     const names = (list) => list.map((o) => o.name).join(', ');
-    if (placeholderUpi.length && !rp.keyId) warnings.push(`Placeholder UPI IDs (…@example) at: ${names(placeholderUpi)}. Online UPI payment is offered there but can't succeed; set real IDs in Head office → Outlets.`);
+    if (placeholderUpi.length && !rp.keyId) warnings.push(`Placeholder UPI IDs (…@example) at: ${names(placeholderUpi)}. The payment QR can't be paid; set UPI_ID (your payment gateway's merchant UPI ID, used by every outlet) or each outlet's UPI ID in Head office → Outlets.`);
     if (noUpi.length && !rp.keyId) warnings.push(`No UPI ID (pay on delivery only) at: ${names(noUpi)}.`);
     if (fakePhone.length) warnings.push(`Placeholder phone numbers at: ${names(fakePhone)}.`);
     if (noPin.length) warnings.push(`No outlet panel PIN yet for: ${names(noPin)} (set in Head office → Outlets).`);

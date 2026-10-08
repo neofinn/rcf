@@ -159,6 +159,7 @@ Database changes are only ever additions (new tables and columns), so an older r
 | v0.20 | Go-live checks, health check, one-command server setup, safe updates with automatic rollback |
 | v0.21 | "Pay now" orders reach the kitchen only once paid; unpaid ones are cancelled after 15 minutes |
 | v0.22 | Razorpay payment gateway: self-confirming payments, automatic refunds; separate demo links |
+| v0.23 | Dynamic UPI QR with one business-wide gateway UPI ID, merchant code and order code as reference |
 
 Earlier client demos stay online at `https://neofinn.github.io/rcf/versions.html`.
 
@@ -240,7 +241,25 @@ The WhatsApp Business **Platform** (Cloud API, which the bot uses) needs a phone
 
 ---
 
-## Online payments: Razorpay (recommended)
+## Online payments: dynamic UPI QR (your existing gateway)
+
+"Pay now" gives every order its own UPI QR and pay link. Each carries:
+- **your gateway's merchant UPI ID**;
+- **the exact amount**;
+- **the order code** as the transaction reference.
+
+Customers' UPI apps open with everything filled in, and each payment shows the order code in your gateway's dashboard.
+
+1. In `/home/rcf/shared/.env`, set:
+   - `UPI_ID` to the merchant UPI ID from your payment gateway (one for all outlets);
+   - `UPI_PAYEE_NAME` (e.g. Raju Chinese Food);
+   - `UPI_MERCHANT_CODE=5812` (restaurants).
+
+   An outlet can have its own UPI ID instead (Head office → Outlets).
+2. `sudo -u rcf pm2 reload rcf`, then place a test "Pay now" order for ₹1–2 worth of items. Scan the QR with GPay, PhonePe and Paytm and check that each opens with the amount and the order code, and that the payment shows in the gateway with that code.
+3. **Confirmation.** Staff tap **Payment received** after a customer taps "I've paid", once the amount shows in the gateway dashboard or app. To make this automatic, the gateway's payment notification (webhook) can be connected so each payment confirms its order by the order code. That needs the gateway's webhook format; tell us which gateway you use.
+
+## Online payments: Razorpay payment links (alternative)
 
 Without a gateway, "Pay now" goes straight to each outlet's UPI ID, and staff confirm every payment by hand. With Razorpay:
 - payments confirm themselves;

@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const config = require('./config');
 const { assignOutlet, isOpen, etaMinutes } = require('./geo');
-const { upiLink, PAYMENT_LABELS } = require('./payments');
+const { upiFor, upiLink, PAYMENT_LABELS } = require('./payments');
 const { brand } = require('./brand');
 
 // Delivery partner statuses as staff and customers see them (see delivery/dispatcher.js).
@@ -69,6 +69,8 @@ const MAX_QTY_PER_ITEM = 20;
 
 // Online payments go through the gateway when Razorpay keys are set.
 const gatewayOn = () => Boolean(config.razorpay?.keyId);
+/** Can this outlet take "Pay now" (gateway, or a UPI ID for the dynamic QR)? */
+const canPayOnline = (outlet) => gatewayOn() || Boolean(upiFor(outlet));
 
 /** Normalise an Indian mobile number to +91XXXXXXXXXX, or return null. */
 function normalisePhone(raw) {
@@ -233,7 +235,7 @@ function createOrderService(store) {
     }
 
     const payUpi = input.paymentMethod === 'upi';
-    if (payUpi && !gatewayOn() && !outlet.upi_id) throw new ValidationError(`${outlet.name} doesn't take UPI payments online yet. Please choose cash/UPI on ${fulfilment}.`, 'no_upi');
+    if (payUpi && !canPayOnline(outlet)) throw new ValidationError(`${outlet.name} doesn't take UPI payments online yet. Please choose cash/UPI on ${fulfilment}.`, 'no_upi');
 
     const code = newCode();
     const ts = now.toISOString();
@@ -270,10 +272,10 @@ function createOrderService(store) {
       // a upi:// request straight to the outlet's UPI ID (staff confirm).
       upi: row.payment_method !== 'upi' ? null : gatewayOn() ? {
         gateway: true, upiId: null, payee: brand().name, link: `${config.publicBaseUrl}/pay/${row.code}`,
-      } : outlet?.upi_id ? {
-        upiId: outlet.upi_id,
-        payee: outlet.upi_name || brand().name,
-        link: upiLink({ upiId: outlet.upi_id, payee: outlet.upi_name || brand().name, amountPaise: row.total, code: row.code }),
+      } : upiFor(outlet) ? {
+        upiId: upiFor(outlet).id,
+        payee: upiFor(outlet).name,
+        link: upiLink({ upiId: upiFor(outlet).id, payee: upiFor(outlet).name, amountPaise: row.total, code: row.code }),
       } : null,
     };
   }
@@ -378,5 +380,5 @@ function createOrderService(store) {
 }
 
 module.exports = {
-  createOrderService, priceCart, ValidationError, normalisePhone, STATUSES, NOT_SALES, STATUS_LABELS, TRANSITIONS, deliveryFee, deliveryCharge, DELIVERY_LABELS,
+  createOrderService, priceCart, ValidationError, normalisePhone, canPayOnline, STATUSES, NOT_SALES, STATUS_LABELS, TRANSITIONS, deliveryFee, deliveryCharge, DELIVERY_LABELS,
 };

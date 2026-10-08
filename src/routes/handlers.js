@@ -12,7 +12,7 @@
 
 const config = require('../config');
 const { assignOutlet, isOpen, etaMinutes, rangeKm } = require('../geo');
-const { deliveryCharge } = require('../orders');
+const { deliveryCharge, canPayOnline } = require('../orders');
 const { computeAnalytics } = require('../analytics');
 const { placeAddress } = require('../geocode');
 const { normalisePhone } = require('../orders');
@@ -32,7 +32,7 @@ const csvCell = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '
 const publicOutlet = (o, now) => ({
   id: o.id, slug: o.slug, name: o.name, city: o.city, address: o.address, lat: o.lat, lng: o.lng,
   phone: o.phone, deliveryRadiusKm: rangeKm(o), opens: o.opens, closes: o.closes, open: isOpen(o, now),
-  upi: Boolean(config.razorpay?.keyId) || !!o.upi_id,
+  upi: canPayOnline(o),
 });
 
 const publicPayment = (o) => ({

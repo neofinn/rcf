@@ -11,6 +11,7 @@
 // gateway's webhook confirms the payment.
 
 const QRCode = require('qrcode');
+const config = require('./config');
 const { brand } = require('./brand');
 
 const PAYMENT_LABELS = {
@@ -21,11 +22,25 @@ const PAYMENT_LABELS = {
   refunded: 'Refunded',
 };
 
-/** upi:// payment link (NPCI deep-link format). */
-function upiLink({ upiId, payee, amountPaise, code }) {
+/**
+ * Where an outlet's UPI payments go: { id, name } or null. The outlet's own UPI
+ * ID wins, unless it is a placeholder (…@example) and a business-wide UPI_ID is set.
+ */
+function upiFor(outlet) {
+  const own = outlet?.upi_id || null;
+  const global = config.upi?.id || null;
+  const id = own && !(global && /@example$/i.test(own)) ? own : global;
+  if (!id) return null;
+  const name = (id === own && outlet.upi_name) || config.upi?.payeeName || brand().name;
+  return { id, name };
+}
+
+/** upi:// payment link (NPCI deep-link format): payee, exact amount, order code as reference. */
+function upiLink({ upiId, payee, amountPaise, code, merchantCode = config.upi?.merchantCode }) {
   const params = [
     ['pa', upiId],
     ['pn', payee],
+    ...(merchantCode ? [['mc', merchantCode]] : []),
     ['am', (amountPaise / 100).toFixed(2)],
     ['cu', 'INR'],
     ['tn', `${brand().name} order ${code}`],
@@ -124,4 +139,4 @@ const WA_ORDER_STATUS = {
   completed: 'completed', cancelled: 'canceled',
 };
 
-module.exports = { upiLink, qrSvg, qrPng, orderDetailsReply, orderDetailsPayload, WA_ORDER_STATUS, PAYMENT_LABELS };
+module.exports = { upiFor, upiLink, qrSvg, qrPng, orderDetailsReply, orderDetailsPayload, WA_ORDER_STATUS, PAYMENT_LABELS };
