@@ -24,6 +24,8 @@ const { createReviews } = require('./reviews');
 const { createStaffAuth } = require('./staff-auth');
 const { createStockService } = require('./stock');
 const { createOutletAdmin } = require('./outlet-admin');
+const { createReports } = require('./reports');
+const { computeAnalytics } = require('./analytics');
 
 function safeEqual(a, b) {
   const x = Buffer.from(String(a || ''));
@@ -52,6 +54,7 @@ function createApp({
   const menuAdmin = createMenuAdmin({ store });
   const stock = createStockService({ store, orders });
   const outletAdmin = createOutletAdmin({ store });
+  const reports = createReports({ dbPath, store, crm, computeAnalytics });
   const staffAuth = createStaffAuth({ store, adminToken: config.adminToken });
   // Dev: keep messages the business sends on its own so the simulator can show them.
   const outbox = [];
@@ -94,7 +97,7 @@ function createApp({
     ? safeEqual(req.get('x-callback-token'), config.shadowfax.callbackToken)
     : !config.production);
 
-  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin })) {
+  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports })) {
     if (route.dev && !enableDevTools) continue;
     // Shadowfax may call back with POST or PUT.
     const methods = route.partner ? ['post', 'put'] : [route.method.toLowerCase()];
@@ -125,7 +128,7 @@ function createApp({
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock };
+  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock, reports };
 }
 
 module.exports = { createApp };

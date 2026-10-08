@@ -100,6 +100,9 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS orders_outlet_status ON orders(outlet_id, status);
+CREATE INDEX IF NOT EXISTS orders_created ON orders(created_at);
+CREATE INDEX IF NOT EXISTS orders_phone ON orders(phone, created_at);
+CREATE INDEX IF NOT EXISTS orders_status ON orders(status);
 
 CREATE TABLE IF NOT EXISTS order_items (
   order_id INTEGER NOT NULL REFERENCES orders(id),
@@ -109,6 +112,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   qty INTEGER NOT NULL,
   note TEXT
 );
+CREATE INDEX IF NOT EXISTS order_items_order ON order_items(order_id);
 
 CREATE TABLE IF NOT EXISTS wa_sessions (
   phone TEXT PRIMARY KEY,

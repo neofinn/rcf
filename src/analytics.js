@@ -66,9 +66,9 @@ function computeAnalytics(store, filters = {}, now = new Date()) {
     && (!filters.channel || o.channel === filters.channel)
     && (!filters.fulfilment || o.fulfilment === filters.fulfilment);
 
-  const all = store.ordersBetween('0000', '9999');
-  const firstOrderAt = new Map();
-  for (const o of all) if (o.status !== 'cancelled' && (!firstOrderAt.has(o.phone) || o.created_at < firstOrderAt.get(o.phone))) firstOrderAt.set(o.phone, o.created_at);
+  // Only this period and the one before it; first-order dates come from the database.
+  const all = store.ordersBetween(prevIso, toIso);
+  const firstOrderAt = store.firstOrders(prevIso, toIso);
 
   const cur = all.filter((o) => o.created_at >= fromIso && o.created_at < toIso && match(o));
   const prev = all.filter((o) => o.created_at >= prevIso && o.created_at < fromIso && match(o));

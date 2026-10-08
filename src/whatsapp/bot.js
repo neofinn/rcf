@@ -506,7 +506,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
 
   function pointsView(phone) {
     if (!crm) return [text('Loyalty points are not available right now.')];
-    const c = crm.get(phone);
+    const c = crm.pointsSummary(phone);
     if (!c) return [text(`⭐ You don't have any points yet. Earn 1 point for every ₹${config.loyalty.rupeesPerPoint} you spend. Type *hi* to order.`)];
     const recent = c.ledger.slice(0, 3).map((l) => `${l.points > 0 ? '+' : ''}${l.points} · ${l.note || l.kind}`).join('\n');
     return [text(`⭐ You have *${c.points} loyalty points*.\nYou earn 1 point for every ₹${config.loyalty.rupeesPerPoint} spent. Show this chat at the outlet to redeem.${recent ? `\n\nRecent:\n${recent}` : ''}`)];
@@ -537,7 +537,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
       s.state = 'browsing';
       const willEarn = crm ? crm.pointsFor(order.total) : 0;
       const loyalty = willEarn ? `\n⭐ You'll earn *${willEarn} loyalty point${willEarn > 1 ? 's' : ''}* when it's delivered.` : '';
-      const optIn = crm && !crm.get(order.phone)?.optIn ? optInAsk() : [];
+      const optIn = crm && !crm.optedIn(order.phone) ? optInAsk() : [];
       if (order.payment_method === 'upi') {
         return [text(`🎉 Order placed! Your order ID is *${order.code}*.\n\n${order.outlet.name} will ${order.fulfilment === 'delivery' ? `deliver in about ${order.etaMinutes} min` : `have it ready in about ${order.etaMinutes} min`}. Outlet phone: ${order.outlet.phone}${loyalty}`), ...payView(order), ...optIn];
       }

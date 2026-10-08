@@ -47,7 +47,9 @@ function createSqliteStore(db) {
     byId: db.prepare('SELECT * FROM orders WHERE id = ?'),
     getDelivery: db.prepare('SELECT * FROM deliveries WHERE order_id = ?'),
     deliveryByRef: db.prepare('SELECT * FROM deliveries WHERE ref = ? ORDER BY updated_at DESC LIMIT 1'),
-    summary: db.prepare(`SELECT outlet_id, COUNT(*) AS orders, SUM(total) AS revenue FROM orders
+    // INDEXED BY: without it SQLite picks the outlet index for the GROUP BY and
+    // scans every order ever placed (seconds with a year of data).
+    summary: db.prepare(`SELECT outlet_id, COUNT(*) AS orders, SUM(total) AS revenue FROM orders INDEXED BY orders_created
       WHERE status != 'cancelled' AND created_at >= ? GROUP BY outlet_id`),
 
     openHandoff: db.prepare(`INSERT INTO wa_handoffs (phone, name, outlet_id, status, created_at, updated_at)
@@ -81,6 +83,19 @@ function createSqliteStore(db) {
     earnedFor: db.prepare("SELECT points FROM loyalty_ledger WHERE order_id = ? AND kind = 'earn'"),
     ordersForPhone: db.prepare('SELECT * FROM orders WHERE phone = ? ORDER BY id DESC'),
     ordersBetween: db.prepare('SELECT * FROM orders WHERE created_at >= ? AND created_at < ? ORDER BY created_at'),
+    // Each customer's first (non-cancelled) order, for customers who ordered in a range.
+    firstOrders: db.prepare(`SELECT p.phone, (SELECT o.created_at FROM orders o WHERE o.phone = p.phone AND o.status <> 'cancelled'
+      ORDER BY o.created_at LIMIT 1) AS first FROM (SELECT DISTINCT phone FROM orders WHERE created_at >= ? AND created_at < ?) p`),
+    customerStats: db.prepare(`SELECT phone, COUNT(*) AS orders, SUM(total) AS spent, MIN(created_at) AS first, MAX(created_at) AS last
+      FROM orders WHERE status <> 'cancelled' GROUP BY phone`),
+    customerStatsFor: db.prepare(`SELECT COUNT(*) AS orders, COALESCE(SUM(total), 0) AS spent, MIN(created_at) AS first, MAX(created_at) AS last
+      FROM orders WHERE phone = ? AND status <> 'cancelled'`),
+    favOutletFor: db.prepare(`SELECT outlet_id FROM orders WHERE phone = ? AND status <> 'cancelled' GROUP BY outlet_id ORDER BY COUNT(*) DESC LIMIT 1`),
+    repeatSpends: db.prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM orders WHERE status <> 'cancelled' GROUP BY phone HAVING COUNT(*) >= 2)`),
+    vipCut: db.prepare(`SELECT SUM(total) AS spent FROM orders WHERE status <> 'cancelled' GROUP BY phone HAVING COUNT(*) >= 2
+      ORDER BY spent DESC LIMIT 1 OFFSET ?`),
+    balanceFor: db.prepare('SELECT COALESCE(SUM(points), 0) AS b FROM loyalty_ledger WHERE phone = ?'),
+    customerOutlets: db.prepare(`SELECT phone, outlet_id, COUNT(*) AS n FROM orders WHERE status <> 'cancelled' GROUP BY phone, outlet_id`),
     linesBetween: db.prepare(`SELECT oi.order_id, oi.item_id, oi.name, oi.price, oi.qty, oi.note FROM order_items oi
       JOIN orders o ON o.id = oi.order_id WHERE o.created_at >= ? AND o.created_at < ?`),
     insertItem: db.prepare('INSERT INTO menu_items (category, name, description, price, veg, sort, active) VALUES (?, ?, ?, ?, ?, ?, ?)'),
@@ -240,6 +255,28 @@ function createSqliteStore(db) {
     addOrderEvent: (orderId, status, at) => q.addEvent.run(orderId, status, at),
     orderEventsBetween: (fromIso, toIso) => q.eventsBetween.all(fromIso, toIso),
     ordersBetween: (fromIso, toIso) => q.ordersBetween.all(fromIso, toIso),
+    /** One customer's totals (cancelled orders excluded), or null when they have none. */
+    customerStatsFor(phone) {
+      const r = q.customerStatsFor.get(phone);
+      if (!r || !r.orders) return null;
+      return { orders: r.orders, spent: r.spent, first: r.first, last: r.last, outletId: q.favOutletFor.get(phone)?.outlet_id ?? null };
+    },
+    /** Spend that makes a customer VIP: the top 10% of customers with 2+ orders. */
+    vipCutoff() {
+      const n = q.repeatSpends.get().n;
+      return n ? q.vipCut.get(Math.max(0, Math.ceil(n * 0.1) - 1))?.spent ?? Infinity : Infinity;
+    },
+    pointsBalance: (phone) => q.balanceFor.get(phone).b,
+    firstOrders: (fromIso, toIso) => new Map(q.firstOrders.all(fromIso, toIso).map((r) => [r.phone, r.first])),
+    /** Per customer: orders, spent, first, last, favourite outlet (cancelled orders excluded). */
+    customerStats() {
+      const stats = new Map(q.customerStats.all().map((r) => [r.phone, { orders: r.orders, spent: r.spent, first: r.first, last: r.last, outletId: null, top: 0 }]));
+      for (const r of q.customerOutlets.all()) {
+        const s = stats.get(r.phone);
+        if (s && r.n > s.top) { s.top = r.n; s.outletId = r.outlet_id; }
+      }
+      return stats;
+    },
     linesBetween: (fromIso, toIso) => q.linesBetween.all(fromIso, toIso),
 
     // WhatsApp conversation state

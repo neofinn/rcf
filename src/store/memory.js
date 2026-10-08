@@ -42,6 +42,38 @@ function createMemoryStore(seed) {
   };
 
   return {
+    firstOrders(fromIso, toIso) {
+      const phones = new Set(orders.filter((o) => o.created_at >= fromIso && o.created_at < toIso).map((o) => o.phone));
+      const first = new Map();
+      for (const o of orders) {
+        if (o.status === 'cancelled' || !phones.has(o.phone)) continue;
+        if (!first.has(o.phone) || o.created_at < first.get(o.phone)) first.set(o.phone, o.created_at);
+      }
+      return first;
+    },
+    customerStatsFor(phone) { return this.customerStats().get(phone) || null; },
+    vipCutoff() {
+      const spends = [...this.customerStats().values()].filter((s) => s.orders >= 2).map((s) => s.spent).sort((a, b) => b - a);
+      return spends.length ? spends[Math.max(0, Math.ceil(spends.length * 0.1) - 1)] : Infinity;
+    },
+    pointsBalance: (phone) => ledger.filter((l) => l.phone === phone).reduce((t, l) => t + l.points, 0),
+    customerStats() {
+      const stats = new Map();
+      const per = new Map();
+      for (const o of orders) {
+        if (o.status === 'cancelled') continue;
+        const s = stats.get(o.phone) || { orders: 0, spent: 0, first: null, last: null, outletId: null, top: 0 };
+        s.orders += 1; s.spent += o.total;
+        if (!s.first || o.created_at < s.first) s.first = o.created_at;
+        if (!s.last || o.created_at > s.last) s.last = o.created_at;
+        stats.set(o.phone, s);
+        const k = `${o.phone}|${o.outlet_id}`;
+        const n = (per.get(k) || 0) + 1;
+        per.set(k, n);
+        if (n > s.top) { s.top = n; s.outletId = o.outlet_id; }
+      }
+      return stats;
+    },
     exportState: () => Object.fromEntries(Object.entries(containers).map(([k, c]) => [k,
       c instanceof Map ? { map: [...c] } : c instanceof Set ? { set: [...c] } : { list: c }])),
     importState(state) {

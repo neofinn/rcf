@@ -50,7 +50,9 @@ function authorize(route, auth) {
   return true;
 }
 
-function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin }) {
+function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports }) {
+  // Reports run off the main thread on the server (src/reports.js); inline otherwise.
+  reports ||= { analytics: (q) => computeAnalytics(store, q), customers: (q) => crm.list(q), customersCsv: (q) => crm.exportCsv(q) };
   // Head office reaches every outlet; an outlet tablet only its own.
   const scope = (auth, requested) => (auth.role === 'outlet' ? auth.outletId : Number(requested) || null);
   const mine = (auth, outletId) => auth.role === 'admin' || outletId === auth.outletId;
@@ -301,10 +303,10 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
     { method: 'GET', path: '/api/admin/outlets', admin: true, handle: () => orders.listOutlets() },
 
     // ---- CRM & loyalty --------------------------------------------------
-    { method: 'GET', path: '/api/admin/customers', admin: true, handle: ({ query }) => crm.list(query) },
+    { method: 'GET', path: '/api/admin/customers', admin: true, handle: ({ query }) => reports.customers(query) },
     {
       method: 'GET', path: '/api/admin/customers.csv', admin: true,
-      handle: ({ query }) => ({ contentType: 'text/csv', filename: 'raju-chinese-customers.csv', text: crm.exportCsv(query) }),
+      handle: async ({ query }) => ({ contentType: 'text/csv', filename: 'raju-chinese-customers.csv', text: await reports.customersCsv(query) }),
     },
     { method: 'GET', path: '/api/admin/customers/:phone', admin: true, handle: ({ params }) => crm.get(params.phone) || notFound('Customer not found') },
     { method: 'PATCH', path: '/api/admin/customers/:phone', admin: true, handle: ({ params, body }) => crm.update(params.phone, body) || notFound('Customer not found') },
@@ -322,7 +324,7 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
     { method: 'POST', path: '/api/admin/menu/undo', admin: true, handle: () => menuAdmin.undo() },
 
     // ---- Analytics ------------------------------------------------------
-    { method: 'GET', path: '/api/admin/analytics', admin: true, handle: ({ query }) => computeAnalytics(store, query) },
+    { method: 'GET', path: '/api/admin/analytics', admin: true, handle: ({ query }) => reports.analytics(query) },
     {
       // Edit details (name, address, location, phone, hours, UPI, Shadowfax code) or pause.
       method: 'PATCH', path: '/api/admin/outlets/:id', admin: true,

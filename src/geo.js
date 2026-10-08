@@ -20,10 +20,14 @@ function haversineKm(a, b) {
 const ROAD_FACTOR = 1.3;
 const roadKm = (a, b) => Math.round(haversineKm(a, b) * ROAD_FACTOR * 10) / 10;
 
+// Building an Intl formatter is slow, and this runs for every outlet on every
+// request: keep one per time zone.
+const formatters = new Map();
 function minutesNow(now, timezone = config.timezone) {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).formatToParts(now);
+  if (!formatters.has(timezone)) {
+    formatters.set(timezone, new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }));
+  }
+  const parts = formatters.get(timezone).formatToParts(now);
   const get = (t) => parseInt(parts.find((p) => p.type === t).value, 10);
   return get('hour') * 60 + get('minute');
 }

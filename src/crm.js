@@ -56,44 +56,36 @@ function createCrm({ store, orders }) {
     }
   });
 
-  const balance = (phone) => store.pointsBalances().get(phone) || 0;
+  const balance = (raw) => store.pointsBalance(normalisePhone(raw) || raw);
+  const optedIn = (phone) => !!store.customer(normalisePhone(phone) || phone)?.marketing_opt_in;
+
+  function rowFor(c, s, points, now) {
+    s ||= { orders: 0, spent: 0, last: c.last_seen_at, first: c.first_seen_at, outletId: null };
+    return {
+      phone: c.phone, name: c.name, firstChannel: c.first_channel, address: c.last_address,
+      orders: s.orders, spent: s.spent, avgOrder: s.orders ? Math.round(s.spent / s.orders) : 0,
+      firstOrderAt: s.first, lastOrderAt: s.last, daysSinceLast: s.last ? Math.floor((now - new Date(s.last)) / DAY) : null,
+      outletId: s.outletId ?? c.last_outlet_id, points,
+      optIn: !!c.marketing_opt_in, tags: c.tags ? c.tags.split(',').filter(Boolean) : [], notes: c.notes,
+    };
+  }
+  const segmentsFor = (r, vipCut) => [
+    r.orders === 1 && 'new',
+    r.orders >= 3 && 'regular',
+    r.orders >= 2 && r.spent >= vipCut && 'vip',
+    r.daysSinceLast != null && r.daysSinceLast > 30 && 'lapsed',
+  ].filter(Boolean);
 
   /** Customers with live stats. Cancelled orders don't count. */
   function list({ q, segment = 'all', outletId, optIn, sort = 'last', limit = 500, now = new Date() } = {}) {
-    const byPhone = new Map();
-    for (const o of store.ordersBetween('0000', '9999')) {
-      if (o.status === 'cancelled') continue;
-      const s = byPhone.get(o.phone) || { orders: 0, spent: 0, outlets: new Map(), last: null, first: null };
-      s.orders += 1;
-      s.spent += o.total;
-      s.outlets.set(o.outlet_id, (s.outlets.get(o.outlet_id) || 0) + 1);
-      s.last = !s.last || o.created_at > s.last ? o.created_at : s.last;
-      s.first = !s.first || o.created_at < s.first ? o.created_at : s.first;
-      byPhone.set(o.phone, s);
-    }
+    // Totals per customer come from the database in one pass (fast with a year of orders).
+    const byPhone = store.customerStats();
     const balances = store.pointsBalances();
-    let rows = store.customers().map((c) => {
-      const s = byPhone.get(c.phone) || { orders: 0, spent: 0, outlets: new Map(), last: c.last_seen_at, first: c.first_seen_at };
-      const favOutlet = [...s.outlets].sort((a, b) => b[1] - a[1])[0]?.[0] ?? c.last_outlet_id;
-      return {
-        phone: c.phone, name: c.name, firstChannel: c.first_channel, address: c.last_address,
-        orders: s.orders, spent: s.spent, avgOrder: s.orders ? Math.round(s.spent / s.orders) : 0,
-        firstOrderAt: s.first, lastOrderAt: s.last, daysSinceLast: s.last ? Math.floor((now - new Date(s.last)) / DAY) : null,
-        outletId: favOutlet, points: balances.get(c.phone) || 0,
-        optIn: !!c.marketing_opt_in, tags: c.tags ? c.tags.split(',').filter(Boolean) : [], notes: c.notes,
-      };
-    });
+    let rows = store.customers().map((c) => rowFor(c, byPhone.get(c.phone), balances.get(c.phone) || 0, now));
     // VIP = top 10% by spend (at least 1 customer, with 2+ orders).
     const spends = rows.filter((r) => r.orders >= 2).map((r) => r.spent).sort((a, b) => b - a);
     const vipCut = spends.length ? spends[Math.max(0, Math.ceil(spends.length * 0.1) - 1)] : Infinity;
-    for (const r of rows) {
-      r.segments = [
-        r.orders === 1 && 'new',
-        r.orders >= 3 && 'regular',
-        r.orders >= 2 && r.spent >= vipCut && 'vip',
-        r.daysSinceLast != null && r.daysSinceLast > 30 && 'lapsed',
-      ].filter(Boolean);
-    }
+    for (const r of rows) r.segments = segmentsFor(r, vipCut);
     const counts = Object.fromEntries(Object.keys(SEGMENTS).map((k) => [k, k === 'all' ? rows.length : rows.filter((r) => r.segments.includes(k)).length]));
 
     if (segment && segment !== 'all') rows = rows.filter((r) => r.segments.includes(segment));
@@ -117,7 +109,9 @@ function createCrm({ store, orders }) {
     const phone = normalisePhone(rawPhone) || rawPhone;
     const c = store.customer(phone);
     if (!c) return null;
-    const row = list({ q: phone.replace(/\D/g, '').slice(-10) }).customers.find((r) => r.phone === phone);
+    // One customer's figures straight from the database, not the whole list.
+    const row = rowFor(c, store.customerStatsFor(phone), balance(phone), new Date());
+    row.segments = segmentsFor(row, store.vipCutoff());
     const history = store.ordersForPhone(phone).slice(0, 50).map((o) => ({
       code: o.code, at: o.created_at, total: o.total, status: o.status, outletId: o.outlet_id, channel: o.channel,
       items: store.orderLines(o.id).map((l) => `${l.qty}× ${l.name}`).join(', '),
@@ -170,7 +164,13 @@ function createCrm({ store, orders }) {
     return [head, ...rows].map((r) => r.map(cell).join(',')).join('\n') + '\n';
   }
 
-  return { events, list, get, balance, adjustPoints, update, exportCsv, pointsFor, SEGMENTS };
+  /** For WhatsApp: balance and the last few point changes. */
+  const pointsSummary = (raw) => {
+    const phone = normalisePhone(raw) || raw;
+    return store.customer(phone) ? { points: balance(phone), ledger: store.pointsLedger(phone).slice(0, 3) } : null;
+  };
+
+  return { events, list, get, balance, optedIn, pointsSummary, adjustPoints, update, exportCsv, pointsFor, SEGMENTS };
 }
 
 module.exports = { createCrm, pointsFor };
