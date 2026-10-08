@@ -552,22 +552,34 @@ const ago = (iso) => {
   return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' });
 };
 
+// Partner comparison for the order card: "Porter ₹62 ✓ · Borzo ₹70 · Shadowfax: no cash on delivery".
+function quotesLine(d) {
+  if (!d.quotes || d.quotes.length < 2) return '';
+  const parts = d.quotes.map((q) => (q.reason
+    ? `${esc(q.label)}: ${esc(q.reason)}`
+    : `${q.name === d.provider ? '<b>' : ''}${esc(q.label)} ${rupees(q.price)}${q.etaMin != null ? ` (~${Math.round(q.etaMin)} min)` : ''}${q.name === d.provider ? ' ✓</b>' : ''}`));
+  return `<div class="small muted">Compared: ${parts.join(' · ')}</div>`;
+}
+
 function deliveryBlock(o) {
   if (o.fulfilment !== 'delivery' || (['completed', 'cancelled'].includes(o.status) && !o.delivery)) return '';
   const d = o.delivery;
-  const book = `<button type="button" data-delivery="${o.code}" data-action="book">🛵 ${d ? 'Retry' : 'Book'} Shadowfax rider</button>`;
+  const book = `<button type="button" data-delivery="${o.code}" data-action="book">🛵 ${d ? 'Try again' : 'Book rider'}</button>`;
   const own = `<button type="button" class="cancel" data-delivery="${o.code}" data-action="own">Own rider</button>`;
   if (!d) {
-    if (o.status === 'placed') return '<div class="small muted" style="margin-bottom:6px">🛵 A Shadowfax rider is booked when you accept.</div>';
+    if (o.status === 'placed') return '<div class="small muted" style="margin-bottom:6px">🛵 When you accept, the best available delivery partner is booked.</div>';
     return `<div class="actions" style="margin-bottom:6px">${book}${own}</div>`;
   }
   if (d.status === 'OWN') return '<div class="small" style="margin-bottom:6px">🛵 Outlet rider</div>';
-  const failed = d.status === 'FAILED' || d.error;
+  const failed = ['FAILED', 'CANCELLED', 'CANCELLED_BY_CUSTOMER', 'RETURNED_TO_SELLER', 'UNDELIVERED'].includes(d.status);
   const rider = d.rider_name ? ` · <b>${esc(d.rider_name)}</b>${d.rider_phone ? ` <a href="tel:${esc(d.rider_phone)}">${esc(d.rider_phone)}</a>` : ''}` : '';
   const collect = !failed && d.collect && d.status !== 'DELIVERED' ? ` · rider collects ${rupees(d.collect)}` : '';
   const track = d.track_url ? ` · <a href="${esc(d.track_url)}" target="_blank" rel="noopener">track</a>` : '';
-  return `<div class="small delivery ${failed ? 'bad' : ''}" style="margin-bottom:6px">🛵 Shadowfax · ${esc(d.label)}${rider}${collect}${track}
-    ${failed ? `<div>${esc(d.error || '')}</div><div class="actions" style="margin-top:6px">${book}${own}</div>` : ''}</div>`;
+  const price = d.price ? ` · ${rupees(d.price)}` : '';
+  return `<div class="small delivery ${failed ? 'bad' : ''}" style="margin-bottom:6px">🛵 ${esc(d.providerLabel || d.provider)}${price} · ${esc(d.label)}${rider}${collect}${track}
+    ${quotesLine(d)}
+    ${d.error ? `<div>${esc(d.error)}</div>` : ''}
+    ${failed ? `<div class="actions" style="margin-top:6px">${book}${own}</div>` : ''}</div>`;
 }
 
 function payActions(o) {

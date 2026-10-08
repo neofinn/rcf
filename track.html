@@ -350,7 +350,7 @@ textarea { resize: vertical; min-height: 64px; }
         ${o.items.map((i) => `<div><span>${i.qty} × ${esc(i.name)}${i.note ? ` <span class="small muted">(${esc(i.note)})</span>` : ''}</span><span>${rupees(i.price * i.qty)}</span></div>`).join('')}
         <div><span>Packing</span><span>${rupees(o.packing)}</span></div>
         <div><span>GST</span><span>${rupees(o.gst)}</span></div>
-        ${o.fulfilment === 'delivery' ? `<div><span>Delivery by ${esc(o.deliveryPartner || 'Shadowfax')}${o.deliveryKm != null ? ` (${o.deliveryKm} km)` : ''}</span><span>${o.deliveryFee ? rupees(o.deliveryFee) : 'FREE'}</span></div>` : ''}
+        ${o.fulfilment === 'delivery' ? `<div><span>Delivery${o.deliveryKm != null ? ` (${o.deliveryKm} km)` : ''}</span><span>${o.deliveryFee ? rupees(o.deliveryFee) : 'FREE'}</span></div>` : ''}
         <div class="total"><span>${o.payment.status === 'paid' ? 'Paid' : 'To pay'}</span><span>${rupees(o.total)}</span></div>
       </div>`;
     clearTimeout(timer);
