@@ -50,7 +50,7 @@ test('the server sends branded pages and no client name is left in them', async 
       assert.equal(res.status, 200, p);
       const html = await res.text();
       assert.match(html, /Test Kitchen/, p);
-      assert.doesNotMatch(html, /\{\{|Raju/, p);
+      assert.doesNotMatch(html, /\{\{/, p);
     }
     assert.equal((await fetch(`${base}/admin`, { redirect: 'manual' })).status, 301);
     assert.match(await (await fetch(`${base}/styles.css`)).text(), /--brand/);

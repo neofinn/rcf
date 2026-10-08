@@ -44,7 +44,7 @@ async function call(kind, method, path, body, token) {
   }
 }
 
-// Spots across the tricity (lat, lng).
+// Spots across the sample client's area (lat, lng); change them for another city.
 const SPOTS = [[30.733, 76.772], [30.7085, 76.7195], [30.694, 76.86], [30.642, 76.817], [30.746, 76.645], [30.76, 76.78], [30.7, 76.79]];
 const rnd = (n) => Math.floor(Math.random() * n);
 

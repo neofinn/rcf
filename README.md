@@ -1,24 +1,26 @@
-# Raju Chinese – Online Ordering
+# Restaurant Online Ordering
 
-Online ordering for Raju Chinese's outlets across the Chandigarh tricity: a web app, ordering on WhatsApp, and automatic routing of every order to the nearest outlet.
+Online ordering for restaurant businesses with several outlets: a web app, ordering on WhatsApp, automatic routing of every order to the nearest outlet, delivery partners, outlet and head office panels, CRM, loyalty and analytics.
+
+The code names no business. Each client's name, logo, colours, wording, outlets and menu live in a **client profile** (`clients/<id>/`), chosen with `CLIENT` in `.env`. `clients/sample` ("Your Restaurant") runs out of the box; see **[clients/README.md](clients/README.md)** to set up a new client.
 
 | Part | URL | Who uses it |
 |---|---|---|
 | Customer web app | `/` | Customers on phone/desktop |
-| Order tracking | `/track.html?code=RC…` | Customers (link shown after ordering and sent on WhatsApp) |
+| Order tracking | `/track.html?code=YR…` | Customers (link shown after ordering and sent on WhatsApp) |
 | WhatsApp bot | `/webhooks/whatsapp` | Customers chatting with the business number |
 | Outlet panel | `/outlet/` | Staff at one outlet (logs in with that outlet's PIN) |
 | Head office panel | `/admin/` | Owner / head office (admin token) |
 | WhatsApp simulator | `/whatsapp-sim.html` | Developers/demos (disabled when `NODE_ENV=production`) |
 
-**Shareable demo:** `npm run build:demo` writes `dist/demo.html`, a single file with the web app, WhatsApp chat, outlet dashboard and a live routing map. It runs the real code from `src/` in the browser on an in-memory store, so no server is needed.
+**Shareable demo:** `CLIENT=<id> npm run build:demo` writes `dist/demo.html`, a single file with the web app, WhatsApp chat, outlet dashboard and a live routing map. It runs the real code from `src/` in the browser on an in-memory store, so no server is needed.
 
 ## How orders reach the right outlet
 
-**Outlets** (`clients/raju-chinese/data.js`): Sector 15-D, Sector 34 and Sector 46-C Chandigarh, Phase 3B2 Mohali, VIP Road Zirakpur, Khuda Lahora (near PGI) and Peer Muchalla. These are the outlets found on Zomato, Swiggy, Justdial, magicpin and Google listings; addresses and phone numbers come from those listings, and the coordinates are approximate (Peer Muchalla's is estimated). Check each against the real outlet before going live.
+**Outlets** come from the client profile (`clients/<id>/data.js`) when the database is first created, and are managed in the head office panel after that. The sample profile has 4 placeholder outlets.
 
-1. The customer shares a location: browser GPS, a typed address, picking their area from a list of tricity localities, or a WhatsApp location pin.
-2. `assignOutlet` (`src/geo.js`) estimates the road distance to every outlet (straight-line distance × 1.3) and picks the **nearest outlet that is open, accepting orders, and within delivery range**. The range is **20 km by road for every outlet** (`MAX_DELIVERY_KM`), so there is **no blind spot**. `test/coverage.test.js` checks a 500 m grid over the whole tricity and outskirts (New Chandigarh, Mullanpur, Pinjore, Dera Bassi, Banur), including with outlets paused. Kurali (~25 km from Phase 3B2) is outside the range; raise `MAX_DELIVERY_KM` to 26 to include it.
+1. The customer shares a location: browser GPS, a typed address, picking their area from the client's list of localities, or a WhatsApp location pin.
+2. `assignOutlet` (`src/geo.js`) estimates the road distance to every outlet (straight-line distance × 1.3) and picks the **nearest outlet that is open, accepting orders, and within delivery range**. The range is **20 km by road for every outlet** (`MAX_DELIVERY_KM`), so neighbouring outlets cover each other. A client's `test/` folder can check that every locality is within range (see `clients/sample/test/`).
 3. If the nearest outlet is closed or paused, the next nearest one in range takes the order.
 4. Only beyond 20 km, or when every outlet is closed, is the customer offered **pickup** instead.
 5. For delivery orders the server always works out the outlet itself from the coordinates. It never trusts an outlet ID sent by the client.
@@ -40,23 +42,23 @@ Built on the official **WhatsApp Business Cloud API** (Meta).
 
 At checkout the saved address is used directly (type *change address* to edit it). If someone types an order before choosing, the cart is kept and delivery/pickup is asked at checkout.
 
-**Menu as pictures, order by typing.** 138 dishes don't fit WhatsApp lists (10 rows each), so once the outlet is set the bot sends the menu as **4 pictures** (`src/whatsapp/menu-image.js`). They are drawn from the live menu, so new prices and dishes show at once (served as PNG at `/menu/page-<n>.png`). Then it says "just type your order". The bot arranges what was typed into a numbered **order slip**: dish, Half/Full, quantity, price, the customer's notes, and the total with delivery. The customer can type more, or `remove 2` to drop a line, before confirming. "Browse menu" still opens the tap-through lists.
+**Menu as pictures, order by typing.** A full menu doesn't fit WhatsApp lists (10 rows each), so once the outlet is set the bot sends the menu as **pictures** (about 36 dishes each) (`src/whatsapp/menu-image.js`). They are drawn from the live menu, so new prices and dishes show at once (served as PNG at `/menu/page-<n>.png`). Then it says "just type your order". The bot arranges what was typed into a numbered **order slip**: dish, Half/Full, quantity, price, the customer's notes, and the total with delivery. The customer can type more, or `remove 2` to drop a line, before confirming. "Browse menu" still opens the tap-through lists.
 
 Customers can order in three ways and mix them freely.
 
 **1. Type it like a message to a person** (`src/whatsapp/nlu.js`)
 
 ```
-"2 kurkure veg momo less spicy, ek full veg chowmein no onion. Call before coming"
-→ Got it 👍  • 1 × Veg Noodles (Full) (no onion)
+"2 butter naan, ek full butter chicken less spicy. Call before coming"
+→ Got it 👍  • 2 × Butter Naan
+             • 1 × Butter Chicken (Full) (less spicy)
   📝 Noted for the kitchen: call before coming
-  Kurkure Veg Momo (×2) (less spicy) — Half or Full?  [Half · ₹159] [Full · ₹249]
 ```
 
 - Understands English and Hinglish quantities (`2`, `2x`, `do`, `ek`, `teen`), common spellings (chowmein, manchuriyan, shezwan, chilly, momo…) and small typos.
 - Special instructions stay attached to the item they belong to (`less spicy`, `no onion`, `jain`, `sauce alag`, `extra crispy`…) and print on the outlet's order card. Requests for the whole order (`call before coming`, `everything less spicy`, `cutlery`) become an order note.
 - When a dish has variants ("chilli chicken", "momos"), the bot asks which one instead of guessing, then Half or Full unless the customer said it ("half", "full", "chhota", "bada").
-- **Menu:** the real dine-in menu (138 dishes, most in Half and Full) in 10 categories. Each portion is its own item (price, stock, sales); the web app shows both on one card, WhatsApp lists dishes 9 per page and then asks Half or Full.
+- **Menu:** dishes sold in Half and Full are two items, `Dish (Half)` and `Dish (Full)`. Each portion is its own item (price, stock, sales); the web app shows both on one card, WhatsApp lists dishes 9 per page and then asks Half or Full.
 - Items sold out at the customer's outlet are reported, not added.
 
 **2. Tap through the menu:** menu list → item → quantity (or type "2 less spicy") → cart → checkout.
@@ -79,7 +81,7 @@ At checkout (web and WhatsApp) the customer picks **💳 Pay now (UPI)** or **�
   - WhatsApp reports the result to our webhook, and the order is marked **paid automatically**. This only happens when the amount matches and the payment comes from the ordering number; otherwise it goes to staff to check.
   - A failed payment offers **Try again** or **Pay cash instead**.
   - Later status changes update the order card in WhatsApp (`order_status`: processing → shipped → completed).
-  - Setup: in Meta Business Suite → WhatsApp Manager → Payments, add each outlet's UPI ID as a *direct payment method* configuration, and put its name in `outlets.wa_payment_config` (seed: `rc-<outlet>`).
+  - Setup: in Meta Business Suite → WhatsApp Manager → Payments, add each outlet's UPI ID as a *direct payment method* configuration, and put its name in `outlets.wa_payment_config` (sample data: `outlet-<slug>`).
 - **On WhatsApp, also always**: the **dynamic QR for this order and amount** as an image (`/pay/<code>/qr.png`), for paying from another phone. There's also a link to the order page, whose **Pay with UPI app** button opens GPay/PhonePe/Paytm/BHIM pre-filled. QR payments are confirmed with **I've paid by QR** or a screenshot, then checked by staff, because a plain QR doesn't report back. Without WhatsApp payments configured, the bot sends just the QR and link.
 - **On the web** the tracking page shows the same QR and button straight after ordering.
 - **Outlet staff** see `UPI payment pending` / `Customer says paid` on the order card and tap **Payment received** once it shows in their UPI app (or **Not received** / **Take cash instead**). WhatsApp customers are told either way.
@@ -147,7 +149,7 @@ Supported partners: **Shadowfax** (`shadowfax.js`), **Porter** (`porter.js`; two
 ### Reviews on WhatsApp (`src/reviews.js`)
 **30 minutes after delivery** (or pickup), the customer gets a WhatsApp message asking for a 1–5 star rating of the order, then of each dish (up to 6), then an optional comment. A low rating offers to connect them with the outlet. Delay: `REVIEW_DELAY_MINUTES`. The job is stored in the database, so it survives restarts.
 - WhatsApp orders: sent as a normal message (the chat is open).
-- Web orders: WhatsApp only allows a business to start a chat with an approved **template**. Create one (e.g. *review_request*: "Hi {{1}}, how was your Raju Chinese order {{2}}?" with a quick-reply button "Rate order") and set `WHATSAPP_REVIEW_TEMPLATE`. Without it, web orders aren't asked.
+- Web orders: WhatsApp only allows a business to start a chat with an approved **template**. Create one (e.g. *review_request*: "Hi {{1}}, how was your order {{2}} from us?" with a quick-reply button "Rate order") and set `WHATSAPP_REVIEW_TEMPLATE`. Without it, web orders aren't asked.
 
 The demo ships ~90 days of generated sample history (`demo/sample-history.js`) so these screens have data. The real server starts empty and fills from real orders.
 
@@ -192,7 +194,7 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
 
 Step-by-step hosting (Hostinger), Supabase and WhatsApp number setup: **[DEPLOY.md](DEPLOY.md)**.
 
-1. **Real outlet data.** `clients/raju-chinese/data.js` has the 7 outlets from public listings, but the coordinates are approximate, and the menu prices, opening hours and UPI IDs (`…@example`, deliberately invalid) are *placeholders*. Fix them before the first start (the seed runs only on an empty database), or edit the `outlets` / `menu_items` tables afterwards. Take each outlet's latitude/longitude from Google Maps (right-click the outlet's pin).
+1. **Client profile.** Create `clients/<id>/` with the client's brand, outlets, menu and localities (copy `clients/sample`; UPI IDs ending `@example` are deliberately invalid) and set `CLIENT=<id>`. Do this before the first start (the seed runs only on an empty database), or edit the `outlets` / `menu_items` tables afterwards. Take each outlet's latitude/longitude from Google Maps (right-click the outlet's pin).
 2. **Hosting.** Any small VPS with a persistent disk for `data/`, behind HTTPS (required by both WhatsApp webhooks and browser geolocation). Set `NODE_ENV=production`, `PUBLIC_BASE_URL` and a long random `ADMIN_TOKEN`.
 3. **WhatsApp Business.**
    - Create a Meta Business account and a WhatsApp Business app at developers.facebook.com, and add and verify the business phone number.
@@ -220,6 +222,7 @@ src/
   config.js              env settings and pricing rules
   db.js                  SQLite schema
   brand.js               which client this runs for (clients/<id>/: brand, outlets, menu)
+  client-profile.js      loads the profile folder named by CLIENT
   store/sqlite.js        data access on SQLite
   store/memory.js        same interface in memory (browser demo)
   geo.js                 distance, opening hours, outlet assignment
@@ -249,4 +252,5 @@ public/                  web app, tracking page, simulator
 supabase/schema.sql      Postgres tables and reporting views
 demo/, scripts/          browser demo build, Supabase backfill
 test/                    node:test suites
+clients/                 client profiles (brand + starting data), see clients/README.md
 ```

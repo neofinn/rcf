@@ -62,12 +62,12 @@ function useClient(p) {
 
 const brand = () => (client(), merged);
 
-/** "Raju Chinese - Sector 15" -> "Sector 15". */
+/** "Spice Route - Sector 15" -> "Sector 15". */
 const shortName = (name) => {
   const p = brand().outletPrefix;
   return p && String(name || '').startsWith(p) ? String(name).slice(p.length) : String(name || '');
 };
-/** "Sector 15" -> "Raju Chinese - Sector 15". */
+/** "Sector 15" -> "Spice Route - Sector 15". */
 const fullName = (short) => (shortName(short) !== short ? short : brand().outletPrefix + short);
 
 /** What the browser pages get (window.BRAND). */

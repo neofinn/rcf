@@ -1,7 +1,7 @@
 'use strict';
 
 // Places a typed address on the map without a maps API, by matching known
-// areas (localities table: Chandigarh sectors, Mohali phases, Panchkula
+// areas (localities table from the client profile, e.g. Chandigarh sectors, Mohali phases, Panchkula
 // sectors, towns). Accurate to the area, which is enough to pick the outlet
 // and delivery charge; customers can share a pin for the exact drop point.
 // For full street-level geocoding plug in a maps API later.

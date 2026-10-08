@@ -14,7 +14,7 @@ function haversineKm(a, b) {
 }
 
 /**
- * Road distance is typically ~1.3x straight-line distance in the tricity grid.
+ * Road distance is typically ~1.3x straight-line distance in a city road grid.
  * Used for radius checks, fees and ETAs so we don't over-promise.
  */
 const ROAD_FACTOR = 1.3;

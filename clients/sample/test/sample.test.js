@@ -29,7 +29,6 @@ test('sample profile: welcome, typed order, order slip and menu pictures carry i
   const images = menu.filter((m) => m.type === 'image');
   assert.ok(images.length >= 1);
   assert.match(images[0].svg, /YOUR RESTAURANT/);
-  assert.doesNotMatch(images.map((i) => i.svg).join(''), /RAJU|Raju/);
 
   const r = say(sample.brand.orderExample);
   const slip = r.map((m) => m.text).join('\n');

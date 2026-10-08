@@ -52,9 +52,8 @@ module.exports = {
 
   delivery: {
     // Every outlet delivers up to this road distance; the nearest open outlet
-    // cooks. 20 km leaves no blind spot across Chandigarh, Mohali, Panchkula,
-    // Zirakpur, Kharar and the outskirts (New Chandigarh, Pinjore, Dera Bassi,
-    // Banur). Kurali (~25 km) is outside it. See test/coverage.test.js.
+    // cooks. Set it so neighbouring outlets' ranges overlap (no blind spots);
+    // a client's test/ folder can check this against its localities.
     rangeKm: num(env.MAX_DELIVERY_KM, 20),
     partner: 'Shadowfax',
     // Delivery charge shown to and paid by the customer: the Shadowfax rate

@@ -94,7 +94,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
   function askLocation(prefix = '') {
     return [{
       type: 'location_request',
-      text: `${prefix}📍 *Where should we deliver?*\n\nTap *Send location* to share your current location, or type your full address (house/flat no., street, sector/phase, city).\nSending both gets the rider to your exact door.`,
+      text: `${prefix}📍 *Where should we deliver?*\n\nTap *Send location* to share your current location, or type your full address (house/flat no., street, area, city).\nSending both gets the rider to your exact door.`,
     }];
   }
 
@@ -443,7 +443,7 @@ function createBot({ orders, sessions, handoffs = null, crm = null, reviews = nu
     }
     return [{
       type: 'location_request',
-      text: "🏠 Thanks, I've saved your address. I couldn't place it on the map, though.\n\nPlease tap *Send location* to share your location pin 📍 so we pick the right outlet, or type your sector/phase and city (e.g. _Sector 22, Chandigarh_).",
+      text: "🏠 Thanks, I've saved your address. I couldn't place it on the map, though.\n\nPlease tap *Send location* to share your location pin 📍 so we pick the right outlet, or type your area and city.",
     }];
   }
 

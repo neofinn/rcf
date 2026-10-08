@@ -6,7 +6,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DEFAULT_CLIENT = 'raju-chinese';
+const DEFAULT_CLIENT = 'sample';
 
 const dirFor = (id) => (/[\\/]/.test(id || '') ? path.resolve(id) : path.join(__dirname, '..', 'clients', id || DEFAULT_CLIENT));
 

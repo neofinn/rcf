@@ -42,7 +42,7 @@ The first run exposed real slowdowns at a year of data, all now fixed:
 
 Before the fixes, order taking stalled for 2–5 s at a time.
 
-**When to change the setup:** only if Raju Chinese grows into many cities, or one server is no longer enough. At that point move the main database to Postgres (Supabase already holds a live copy) and run two app servers. Re-run the load test before and after any big change:
+**When to change the setup:** only if the business grows into many cities, or one server is no longer enough. At that point move the main database to Postgres (Supabase already holds a live copy) and run two app servers. Re-run the load test before and after any big change:
 
 ```bash
 DB_PATH=/tmp/loadtest.db PORT=3456 SHADOWFAX_MODE=simulate node src/server.js &
@@ -55,7 +55,7 @@ node scripts/loadtest.js http://localhost:3456 --seconds 60 --customers 20
 
 In hPanel: **VPS → choose the plain Ubuntu 24.04 template**, set a root password or SSH key, note the server's IP.
 
-**DNS.** Point a domain at the server: an `A` record, e.g. `order.<your-domain>` → VPS IP. (`rajuchinesefood.com` did not resolve when checked; register or renew a domain first.)
+**DNS.** Point a domain at the server: an `A` record, e.g. `order.<your-domain>` → VPS IP.
 
 **Install** (SSH in as root):
 
@@ -66,14 +66,14 @@ apt-get install -y nodejs git nginx certbot python3-certbot-nginx sqlite3
 npm install -g pm2
 
 # App user and code
-adduser --disabled-password --gecos "" rcf
-su - rcf -c "git clone https://github.com/neofinn/rcf.git app && cd app && npm ci --omit=dev"
+adduser --disabled-password --gecos "" ordering
+su - ordering -c "git clone <your-repo-url> app && cd app && npm ci --omit=dev"
 ```
 
 **Configure:**
 
 ```bash
-su - rcf
+su - ordering
 cd app
 cp .env.example .env
 nano .env
@@ -83,22 +83,22 @@ In `.env`, set at least:
 - `NODE_ENV=production`
 - `PUBLIC_BASE_URL=https://order.<your-domain>`
 - `ADMIN_TOKEN` (generate one with `openssl rand -hex 24`)
-- `DB_PATH=/home/rcf/data/rcf.db`
+- `DB_PATH=/home/ordering/data/ordering.db`
 
 Fill in the WhatsApp, Shadowfax and Supabase settings as you finish those sections below.
 
-Before the first start, correct the outlets, menu prices and UPI IDs in `clients/raju-chinese/data.js`, or edit them in the admin later. (`CLIENT` in `.env` picks the client profile; see `clients/README.md`.)
+Before the first start, set `CLIENT` in `.env` to the client's profile folder and check its outlets, menu prices and UPI IDs (see `clients/README.md`). After that they are edited in the head office panel.
 
 **Run it with PM2** (restarts on crash and on reboot):
 
 ```bash
-pm2 start npm --name rcf -- start
+pm2 start npm --name ordering -- start
 pm2 save
 exit                                  # back to root
-env PATH=$PATH:/usr/bin pm2 startup systemd -u rcf --hp /home/rcf
+env PATH=$PATH:/usr/bin pm2 startup systemd -u ordering --hp /home/ordering
 ```
 
-**Nginx + HTTPS.** HTTPS is required by WhatsApp webhooks and by browser GPS. Create `/etc/nginx/sites-available/rcf`:
+**Nginx + HTTPS.** HTTPS is required by WhatsApp webhooks and by browser GPS. Create `/etc/nginx/sites-available/ordering`:
 
 ```nginx
 server {
@@ -116,7 +116,7 @@ server {
 Then enable the site, open the firewall and get a certificate:
 
 ```bash
-ln -s /etc/nginx/sites-available/rcf /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx
+ln -s /etc/nginx/sites-available/ordering /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx
 ufw allow OpenSSH && ufw allow 'Nginx Full' && ufw enable
 certbot --nginx -d order.your-domain.in     # free Let's Encrypt certificate, auto-renews
 ```
@@ -125,10 +125,10 @@ Check `https://order.your-domain.in/healthz`. It should return `{"ok":true}`.
 
 **Panels.** Open `https://order.your-domain.in/admin/` with the `ADMIN_TOKEN` (head office only). In **Outlets**, set a PIN for each outlet. On each outlet's tablet, open `https://order.your-domain.in/outlet/`, pick the outlet, enter its PIN, and add it to the home screen.
 
-**Backups.** The whole business data is one file. Back it up nightly (as user `rcf`, `crontab -e`):
+**Backups.** The whole business data is one file. Back it up nightly (as user `ordering`, `crontab -e`):
 
 ```
-15 3 * * * mkdir -p ~/backups && sqlite3 ~/data/rcf.db ".backup '$HOME/backups/rcf-$(date +\%F).db'" && find ~/backups -name 'rcf-*.db' -mtime +30 -delete
+15 3 * * * mkdir -p ~/backups && sqlite3 ~/data/ordering.db ".backup '$HOME/backups/ordering-$(date +\%F).db'" && find ~/backups -name 'ordering-*.db' -mtime +30 -delete
 ```
 
 Two more layers:
@@ -138,32 +138,19 @@ Two more layers:
 **Updating the app later:**
 
 ```bash
-su - rcf
-cd app && git pull && npm ci --omit=dev && pm2 restart rcf
+su - ordering
+cd app && git pull && npm ci --omit=dev && pm2 restart ordering
 ```
 
-**Versions and rolling back.** Every release is kept on GitHub as a branch `release/v0.N` (the full list is on the repo's Branches page), and the server should always run one of them rather than an unnamed commit. Before an update, take a backup, then switch:
+**Versions and rolling back.** Keep every release as a branch or tag (for example `release/v1.0`) and run the server on one of them, never on an unnamed commit. Before an update, take a backup, then switch:
 
 ```bash
-su - rcf
-sqlite3 ~/data/rcf.db ".backup '$HOME/backups/rcf-before-update.db'"
-cd app && git fetch origin && git checkout -B live origin/release/v0.18 && npm ci --omit=dev && pm2 restart rcf
+su - ordering
+sqlite3 ~/data/ordering.db ".backup '$HOME/backups/ordering-before-update.db'"
+cd app && git fetch origin && git checkout -B live origin/release/v1.1 && npm ci --omit=dev && pm2 restart ordering
 ```
 
-To roll back, run the same command with the earlier version (for example `origin/release/v0.17`). Database changes are only ever additions (new tables and columns), so an older version runs on a newer database and nothing needs restoring. Restore `rcf-before-update.db` only if the new version damaged data. To do that, stop the app, copy the file over `~/data/rcf.db`, and start it again; orders placed since the backup are lost.
-
-| Version | What it added |
-|---|---|
-| v0.1–v0.7 | Web ordering, nearest outlet, WhatsApp bot, UPI, Shadowfax |
-| v0.8–v0.11 | CRM and points, menu management, analytics, reviews, Supabase |
-| v0.12–v0.13 | Separate outlet and head office panels, stock, add outlets |
-| v0.14 | Separate demo pages |
-| v0.15 | Real menu with Half/Full |
-| v0.16 | Performance for a year of data |
-| v0.17 | Several delivery partners with smart selection |
-| v0.18 | WhatsApp menu pictures and order slip |
-
-Earlier client demos stay online at `https://neofinn.github.io/rcf/versions.html`.
+To roll back, run the same command with the earlier version. Database changes are only ever additions (new tables and columns), so an older version runs on a newer database and nothing needs restoring. Restore the backup only if the new version damaged data: stop the app, copy the file over `~/data/ordering.db` and start it again; orders placed since the backup are lost.
 
 ---
 
@@ -171,7 +158,7 @@ Earlier client demos stay online at `https://neofinn.github.io/rcf/versions.html
 
 The app keeps its own SQLite database, so ordering never stops because of an outside service. Supabase gets a live copy of everything for **Power BI**, Metabase or Looker Studio, campaign tools and anything else that talks to Postgres.
 
-1. Create a project at supabase.com. Choose the **Mumbai (ap-south-1)** region, closest to Chandigarh, and save the database password.
+1. Create a project at supabase.com. Choose the **Mumbai (ap-south-1)** region (closest to India), and save the database password.
 2. **SQL Editor → New query**: paste `supabase/schema.sql` and run it. This creates the tables and the reporting views (`v_orders`, `v_order_lines`, `v_item_ratings`, `v_customers`, in rupees and IST).
 3. **Project Settings → API**: copy the **Project URL** and the **service_role** key into `.env`:
    ```
@@ -182,7 +169,7 @@ The app keeps its own SQLite database, so ordering never stops because of an out
 4. Copy what's already there, then restart:
    ```bash
    npm run supabase:backfill
-   pm2 restart rcf
+   pm2 restart ordering
    ```
    From now on new orders, status changes, customers, points, ratings and menu changes reach Supabase within ~5 seconds. If Supabase is down, they queue in the app and are sent when it's back. `GET /api/admin/sync` (with the admin token) shows pending rows and the last error.
 
@@ -191,7 +178,7 @@ The app keeps its own SQLite database, so ordering never stops because of an out
 2. In Power BI Desktop: **Get data → PostgreSQL database**. For the server, use the **Session pooler** host and port from Supabase's **Connect** button (e.g. `aws-0-ap-south-1.pooler.supabase.com:5432`). Database `postgres`, user `reporting.<project-ref>`.
 3. Start with the `v_` views. Scheduled refresh in the Power BI service works directly against Supabase over the internet; if your tenant requires it, use a gateway.
 
-**Plan.** The free plan (500 MB database) holds years of orders for 7 outlets. Free projects pause after a week with no activity, which a live shop doesn't hit; move to Pro (~$25/month) for daily backups and no pausing.
+**Plan.** The free plan (500 MB database) holds years of orders for a handful of outlets. Free projects pause after a week with no activity, which a live shop doesn't hit; move to Pro (~$25/month) for daily backups and no pausing.
 
 Moving the app itself onto Supabase as its main database is possible later. It is a bigger change (every data call becomes asynchronous) and only worth it if several servers must share one database.
 
@@ -204,7 +191,7 @@ The WhatsApp Business **Platform** (Cloud API, which the bot uses) needs a phone
 **A. A new number just for ordering (recommended).**
 - Any Indian mobile or landline that can receive an SMS or voice call for the one-time code.
 - It must not be on WhatsApp already. If it is, delete that WhatsApp account first.
-- One number serves all 7 outlets: the bot routes each order by location. Print it on menus, bags and posters as "Order on WhatsApp".
+- One number serves all outlets: the bot routes each order by location. Print it on menus, bags and posters as "Order on WhatsApp".
 - Customers chat with the bot. Staff reply from the dashboard's **Chats** tab, not from a phone.
 
 **B. Keep an existing WhatsApp Business app number ("Coexistence").** Use this if the Sector 15 number customers already know (e.g. +91 92170 02598) should become the ordering number.
@@ -220,7 +207,7 @@ The WhatsApp Business **Platform** (Cloud API, which the bot uses) needs a phone
 2. **developers.facebook.com → Create app → Business → add WhatsApp.** Add the phone number:
    - for option A, enter it and verify by code;
    - for option B, choose "connect existing WhatsApp Business app" and scan the QR code.
-3. **Display name** "Raju Chinese" (Meta reviews it; it should match your signage and website).
+3. **Display name**: the business name (Meta reviews it; it should match your signage and website).
 4. **Permanent token.** Business settings → System users → add an admin system user. Assign it the app and the WhatsApp account, then generate a token with `whatsapp_business_messaging` and `whatsapp_business_management`. Put it in `WHATSAPP_TOKEN`, along with the **Phone number ID** (`WHATSAPP_PHONE_NUMBER_ID`) and **App secret** (`WHATSAPP_APP_SECRET`).
 5. **Webhook.** WhatsApp → Configuration:
    - Callback URL `https://order.your-domain.in/webhooks/whatsapp`.
@@ -229,7 +216,7 @@ The WhatsApp Business **Platform** (Cloud API, which the bot uses) needs a phone
 6. **Add a payment method** to the WhatsApp account in Business settings. Templates are billed per message.
 7. **Templates** (WhatsApp Manager → Message templates). The bot replies freely within 24 hours of a customer's message. To message first, Meta requires an approved template:
    - `review_request` (Utility):
-     - body "Hi {{1}}, how was your Raju Chinese order {{2}}? Tap below to rate it."
+     - body "Hi {{1}}, how was your order {{2}}? Tap below to rate it."
      - quick-reply button "Rate order"
      - set `WHATSAPP_REVIEW_TEMPLATE=review_request`
      - This asks web customers for reviews; WhatsApp customers are asked without a template.

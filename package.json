@@ -1,8 +1,8 @@
 {
-  "name": "raju-chinese-ordering",
+  "name": "restaurant-ordering-platform",
   "version": "0.1.0",
   "private": true,
-  "description": "Online food ordering for Raju Chinese: web app, WhatsApp ordering and nearest-outlet assignment across the Chandigarh tricity.",
+  "description": "Online ordering for multi-outlet restaurants: web app, WhatsApp ordering, nearest-outlet routing, delivery partners, CRM and analytics.",
   "main": "src/server.js",
   "engines": {
     "node": ">=22.5"

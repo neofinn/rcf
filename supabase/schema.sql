@@ -1,4 +1,4 @@
--- Raju Chinese: tables the app copies into Supabase (Postgres).
+-- Tables the app copies into Supabase (Postgres).
 -- Run once in Supabase > SQL Editor, then `npm run supabase:backfill`.
 --
 -- The app writes with the service-role key; row level security is on with no
