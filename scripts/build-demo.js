@@ -207,6 +207,8 @@ async function main() {
       'demo-backend.js': backend,
       'demo-worker.js': WORKER,
       'demo-server.js': read('demo/standalone-server.js'),
+      // Landing page with the separate links (the all-in-one page is dist/demo.html).
+      'index.html': brandPage(read('demo/links.html')),
     };
     for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(pagesDir, name), text);
     console.log(`Wrote ${Object.keys(files).length} standalone files to ${path.relative(process.cwd(), pagesDir)}/`);
