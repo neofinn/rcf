@@ -122,6 +122,15 @@ No provider (BSP) is needed in between, so there's no monthly fee.
 
 **Cost at Raju's volume.** At ₹50–70 lakh a month online, with, say, 60% paid by UPI in advance, 2% would be ₹60,000–84,000 a month. **Negotiate**: large merchants routinely get UPI at 0–1%. Also keep "Pay on delivery" (no fee).
 
+**Tested against the gateways' test systems (9 Oct 2026).** **PhonePe sandbox**, using the shared test merchant: our server created the order's dynamic UPI QR, a simulated payment was confirmed by our status check, the WhatsApp confirmation went out, and the refund went through. A failed payment left the order waiting. Run `npm run payments:sandbox` to repeat it.
+
+| Gateway | Test system | Status |
+|---|---|---|
+| PhonePe | Shared test merchant | ✅ Built and passed end to end |
+| Razorpay | Needs your test keys (free sign-up, test mode needs no KYC) | Built; full run needs the keys |
+| PayU | Published test key works for status checks | Not built yet |
+| Cashfree, Paytm, Easebuzz | Need your own sandbox sign-up | Not built yet |
+
 **One regulatory item to watch.** A Razorpay article says a UPI MDR of 0.4% on payments above ₹2,000 (0% below) starts on 15 October 2026. We could not confirm it from NPCI or the government. Restaurant orders are mostly under ₹2,000 anyway.
 
 **If each outlet is a separate company** and money must reach each outlet's bank account, Razorpay **Route** can split payments per outlet. That's a later addition; today all online payments settle to one account.

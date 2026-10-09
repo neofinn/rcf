@@ -71,11 +71,17 @@ function preflight(config, store) {
 
   // ---- Online payments -----------------------------------------------------
   const rp = config.razorpay || {};
+  if (rp.keyId && config.phonepe?.merchantId) warnings.push('Both Razorpay and PhonePe keys are set; Razorpay is used. Remove one.');
   if (rp.keyId) {
     if (!rp.keySecret) need.push('RAZORPAY_KEY_SECRET is not set: payment links can\'t be created.');
     if (!rp.webhookSecret) need.push('RAZORPAY_WEBHOOK_SECRET is not set: payments can\'t be confirmed automatically.');
     if (/^rzp_test_/.test(rp.keyId)) (prod ? warnings : ok).push('Razorpay is in test mode (rzp_test_ key): no real money moves. Use the live key to take payments.');
     else if (rp.keySecret && rp.webhookSecret) ok.push('Razorpay connected: online payments confirm themselves; cancelled paid orders are refunded.');
+  } else if (config.phonepe?.merchantId) {
+    const pp = config.phonepe;
+    if (!pp.saltKey) need.push('PHONEPE_SALT_KEY is not set: payments can\'t be created or callbacks checked.');
+    if (pp.env !== 'production') (prod ? warnings : ok).push('PhonePe is in sandbox (PHONEPE_ENV is not "production"): no real money moves.');
+    else if (pp.saltKey) ok.push('PhonePe connected: dynamic UPI QR per order, payments confirm themselves (callback + status check every 30 s).');
   } else {
     warnings.push('No payment gateway: "Pay now" goes straight to each outlet\'s UPI ID and staff confirm every payment by hand. Set RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET / RAZORPAY_WEBHOOK_SECRET for automatic confirmation.');
   }
@@ -95,8 +101,8 @@ function preflight(config, store) {
     const noPin = outlets.filter((o) => !withPin.has(o.id));
     const noSfx = sfx.mode === 'live' ? outlets.filter((o) => !o.sfx_store_code) : [];
     const names = (list) => list.map((o) => o.name).join(', ');
-    if (placeholderUpi.length && !rp.keyId) warnings.push(`Placeholder UPI IDs (…@example) at: ${names(placeholderUpi)}. The payment QR can't be paid; set UPI_ID (your payment gateway's merchant UPI ID, used by every outlet) or each outlet's UPI ID in Head office → Outlets.`);
-    if (noUpi.length && !rp.keyId) warnings.push(`No UPI ID (pay on delivery only) at: ${names(noUpi)}.`);
+    if (placeholderUpi.length && !config.paymentGateway?.()) warnings.push(`Placeholder UPI IDs (…@example) at: ${names(placeholderUpi)}. The payment QR can't be paid; set UPI_ID (your payment gateway's merchant UPI ID, used by every outlet) or each outlet's UPI ID in Head office → Outlets.`);
+    if (noUpi.length && !config.paymentGateway?.()) warnings.push(`No UPI ID (pay on delivery only) at: ${names(noUpi)}.`);
     if (fakePhone.length) warnings.push(`Placeholder phone numbers at: ${names(fakePhone)}.`);
     if (noPin.length) warnings.push(`No outlet panel PIN yet for: ${names(noPin)} (set in Head office → Outlets).`);
     if (noSfx.length) warnings.push(`No Shadowfax store code for: ${names(noSfx)}.`);

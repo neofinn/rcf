@@ -6,7 +6,7 @@ const { preflight, format } = require('./preflight');
 const { brand } = require('./brand');
 
 const ctx = createApp();
-const { app, db, store, orders, reviews, sync, dispatcher, reports, version } = ctx;
+const { app, db, store, orders, reviews, sync, dispatcher, reports, version, gateway } = ctx;
 
 // Go-live checks: in production, refuse to start on an unsafe setting.
 const report = preflight(config, store);
@@ -20,6 +20,8 @@ if (config.production && report.errors.length) {
 dispatcher.startSweeper(60 * 1000);
 // Sends review requests (30 min after delivery) and other scheduled jobs.
 reviews.startTicker(60 * 1000);
+// Asks the payment gateway about open payments, in case a webhook was lost.
+if (gateway) gateway.startSweeper(30 * 1000);
 // Cancels "Pay now (UPI)" orders nobody paid within the payment window.
 const expiry = setInterval(() => { try { orders.expireUnpaid(); } catch (e) { console.error('[orders] expiry failed', e.message); } }, 30 * 1000);
 // Copies new and changed rows to Supabase every few seconds, when configured.
@@ -45,6 +47,7 @@ async function shutdown(signal) {
   force.unref();
   dispatcher.stopSweeper();
   clearInterval(expiry);
+  if (gateway) gateway.stopSweeper();
   reviews.stopTicker();
   if (sync) sync.stopTicker();
   await new Promise((r) => server.close(r));

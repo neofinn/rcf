@@ -21,6 +21,7 @@ const { createShadowfaxClient } = require('./delivery/shadowfax');
 const { createSimulatedFleet } = require('./delivery/simulator');
 const { createPorterClient } = require('./delivery/porter');
 const { createRazorpayClient, validRazorpaySignature, parseRazorpayWebhook } = require('./razorpay');
+const { createPhonePeClient, validPhonePeCallback, parsePhonePeCallback } = require('./phonepe');
 const { createGateway } = require('./gateway');
 const { createBorzoClient, validBorzoSignature } = require('./delivery/borzo');
 const { createSelector } = require('./delivery/selector');
@@ -91,9 +92,10 @@ function createApp({
   notifyOnDelivery({ dispatcher, client, log });
 
   // Payment gateway (Razorpay) when its keys are set; tests pass their own client.
-  const gatewayClient = paymentClient || (config.razorpay.keyId
-    ? createRazorpayClient({ keyId: config.razorpay.keyId, keySecret: config.razorpay.keySecret, baseUrl: config.razorpay.baseUrl, fetchImpl })
-    : null);
+  const gatewayClient = paymentClient || ({
+    razorpay: () => createRazorpayClient({ keyId: config.razorpay.keyId, keySecret: config.razorpay.keySecret, baseUrl: config.razorpay.baseUrl, fetchImpl }),
+    phonepe: () => createPhonePeClient({ ...config.phonepe, callbackUrl: `${config.publicBaseUrl}/webhooks/phonepe`, fetchImpl }),
+  }[config.paymentGateway()] || (() => null))();
   const gateway = gatewayClient
     ? createGateway({ client: gatewayClient, store, orders, publicBaseUrl: config.publicBaseUrl, windowMinutes: config.payments.windowMinutes, log })
     : null;
@@ -151,11 +153,25 @@ function createApp({
     } catch (e) { next(e); }
   });
 
+  // PhonePe server-to-server callback: { response: base64 }, signed in X-VERIFY.
+  app.post('/webhooks/phonepe', async (req, res, next) => {
+    if (!gateway || gateway.name !== 'phonepe') return res.sendStatus(404);
+    if (!validPhonePeCallback(req.body, req.get('x-verify'), config.phonepe.saltKey, config.phonepe.saltIndex)) return res.sendStatus(401);
+    try {
+      const parsed = parsePhonePeCallback(req.body);
+      res.json({ ok: true, result: await gateway.handleWebhook(parsed, parsed.eventId) });
+    } catch (e) { next(e); }
+  });
+
   // UPI QR image for an order (sent as a WhatsApp image; WhatsApp can't show SVG).
+  // With a gateway that makes dynamic UPI QR codes (PhonePe), it's the gateway's
+  // own QR for this order, so the payment is reported back to us.
   app.get('/pay/:code/qr.png', async (req, res, next) => {
     try {
       const o = orders.getOrder(req.params.code);
       if (!o || !o.upi) return res.sendStatus(404);
+      const own = gateway ? await gateway.qrFor(o.code).catch((e) => { log.error('[payments] QR failed', e.message); return null; }) : null;
+      if (own) return res.type('png').set('Cache-Control', 'private, max-age=300').send(own);
       res.type('png').set('Cache-Control', 'private, max-age=3600').send(await qrPng(o.upi.link));
     } catch (e) { next(e); }
   });

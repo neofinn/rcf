@@ -93,7 +93,7 @@ If nobody has paid (or said they paid) within `PAYMENT_WINDOW_MINUTES` (15), the
 - QR and web payments are confirmed by staff because plain UPI QR codes don't report back; payments made through WhatsApp's "Review and pay" confirm themselves. For automatic confirmation, add a payment gateway (Razorpay, PayU, Cashfree) or Meta's *Payments on WhatsApp (India)*. Their webhook calls `orders.setPayment(code, 'paid', now, 'gateway')`, and the rest of the flow stays as is.
 - Outlets without a UPI ID only offer pay on delivery (unless the payment gateway is on).
 
-**Payment gateway (Razorpay, `src/gateway.js`, `src/razorpay.js`).** With `RAZORPAY_*` keys set:
+**Payment gateway (Razorpay or PhonePe; `src/gateway.js`, `src/razorpay.js`, `src/phonepe.js`).** With `RAZORPAY_*` or `PHONEPE_*` keys set (PhonePe also makes each order's dynamic UPI QR, and the server checks open payments every 30 s; `npm run payments:sandbox` runs it against the test systems):
 - **Pay link:** every "Pay now" order is paid through `https://<domain>/pay/<code>`, which creates a Razorpay payment link for the exact amount (UPI apps, QR, cards). The WhatsApp message, the tracking page and the order QR all use this address.
 - **Confirmation:** Razorpay's signed webhook (`/webhooks/razorpay`) marks the order paid and sends it to the kitchen, with no staff check. Repeated webhooks are ignored.
 - **Safety:** a wrong amount goes to staff, and a second payment for the same order is refunded.

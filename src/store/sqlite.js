@@ -29,8 +29,9 @@ function createSqliteStore(db) {
     logins: db.prepare('SELECT outlet_id, updated_at FROM outlet_logins'),
     paymentLinks: db.prepare('SELECT * FROM payment_links WHERE order_id = ? ORDER BY created_at, rowid'),
     paymentLinkById: db.prepare('SELECT * FROM payment_links WHERE id = ?'),
-    insertPaymentLink: db.prepare(`INSERT INTO payment_links (id, order_id, provider, url, amount, expires_at, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    insertPaymentLink: db.prepare(`INSERT INTO payment_links (id, order_id, provider, kind, url, amount, expires_at, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    openPaymentLinks: db.prepare("SELECT id, order_id, provider, kind, amount FROM payment_links WHERE status = 'created' AND created_at >= ?"),
     updatePaymentLink: db.prepare('UPDATE payment_links SET status = ?, payment_id = COALESCE(?, payment_id), refund_id = COALESCE(?, refund_id), updated_at = ? WHERE id = ?'),
     gatewayEventSeen: db.prepare('INSERT OR IGNORE INTO gateway_events (event_id, at) VALUES (?, ?)'),
     unpaidBefore: db.prepare("SELECT code FROM orders WHERE status = 'awaiting_payment' AND payment_status = 'pending' AND created_at < ?"),
@@ -171,7 +172,9 @@ function createSqliteStore(db) {
     // Gateway payment links for an order (oldest first).
     paymentLinks: (orderId) => q.paymentLinks.all(orderId),
     paymentLinkById: (id) => q.paymentLinkById.get(id) || null,
-    insertPaymentLink: (l) => q.insertPaymentLink.run(l.id, l.order_id, l.provider, l.url, l.amount, l.expires_at, l.status, l.created_at, l.created_at),
+    insertPaymentLink: (l) => q.insertPaymentLink.run(l.id, l.order_id, l.provider, l.kind || 'link', l.url, l.amount, l.expires_at, l.status, l.created_at, l.created_at),
+    /** Payment requests not yet paid, failed or refunded, made since `since`. */
+    openPaymentLinks: (since) => q.openPaymentLinks.all(since),
     updatePaymentLink: (id, { status, payment_id = null, refund_id = null }, ts) => q.updatePaymentLink.run(status, payment_id, refund_id, ts, id),
     /** Record a gateway webhook event id; false if it was handled before. */
     gatewayEventSeen: (eventId, ts) => q.gatewayEventSeen.run(eventId, ts).changes === 0,

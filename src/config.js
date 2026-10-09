@@ -64,6 +64,16 @@ module.exports = {
     baseUrl: env.RAZORPAY_BASE_URL || 'https://api.razorpay.com/v1',
   },
 
+  // PhonePe Payment Gateway (alternative to Razorpay): dynamic UPI QR per order,
+  // hosted pay page, callbacks to /webhooks/phonepe, status checks every 30 s.
+  // PHONEPE_ENV=sandbox works with PhonePe's shared test merchant.
+  phonepe: {
+    merchantId: env.PHONEPE_MERCHANT_ID || '',
+    saltKey: env.PHONEPE_SALT_KEY || '',
+    saltIndex: env.PHONEPE_SALT_INDEX || '1',
+    env: env.PHONEPE_ENV === 'production' ? 'production' : 'sandbox',
+  },
+
   // Loyalty: 1 point for every ₹100 of a completed order.
   loyalty: {
     rupeesPerPoint: num(env.LOYALTY_RUPEES_PER_POINT, 100),
@@ -148,4 +158,12 @@ module.exports = {
     // 'digital-goods' needs no shipping address block; 'physical-goods' does.
     goodsType: env.WHATSAPP_PAYMENTS_GOODS_TYPE || 'digital-goods',
   },
+};
+
+/** Which payment gateway "Pay now" uses: 'razorpay', 'phonepe' or null (plain UPI QR). */
+module.exports.paymentGateway = () => {
+  const c = module.exports;
+  if (c.razorpay.keyId) return 'razorpay';
+  if (c.phonepe.merchantId) return 'phonepe';
+  return null;
 };

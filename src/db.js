@@ -247,6 +247,7 @@ CREATE TABLE IF NOT EXISTS payment_links (
   id TEXT PRIMARY KEY,
   order_id INTEGER NOT NULL REFERENCES orders(id),
   provider TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'link',
   url TEXT NOT NULL,
   amount INTEGER NOT NULL,
   expires_at TEXT NOT NULL,
@@ -297,6 +298,8 @@ function migrate(db, seed) {
   for (const [col, type] of [['price', 'INTEGER'], ['booked_at', 'TEXT'], ['allotted_at', 'TEXT'], ['tried', 'TEXT'], ['quotes', 'TEXT']]) {
     if (!deliveryCols.includes(col)) db.exec(`ALTER TABLE deliveries ADD COLUMN ${col} ${type}`);
   }
+  const linkCols = db.prepare('PRAGMA table_info(payment_links)').all().map((c) => c.name);
+  if (!linkCols.includes('kind')) db.exec("ALTER TABLE payment_links ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'");
   const orderCols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
   if (!orderCols.includes('payment_status')) db.exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'cod'");
 }

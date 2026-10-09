@@ -50,6 +50,14 @@ function createRazorpayClient({ keyId, keySecret, baseUrl = 'https://api.razorpa
       return { id: link.id, url: link.short_url, status: link.status };
     },
 
+    /** { state: 'paid' | 'pending' | 'failed', paymentId, amount } for one of our payment links. */
+    async checkStatus(id) {
+      const l = await call('GET', `/payment_links/${encodeURIComponent(id)}`);
+      const p = (l.payments || []).find((x) => x.status === 'captured') || null;
+      const state = l.status === 'paid' ? 'paid' : ['expired', 'cancelled'].includes(l.status) ? 'failed' : 'pending';
+      return { state, paymentId: p?.payment_id || null, amount: Number(p?.amount ?? l.amount_paid) };
+    },
+
     async cancelLink(id) {
       return call('POST', `/payment_links/${encodeURIComponent(id)}/cancel`);
     },

@@ -1,16 +1,20 @@
 'use strict';
 
-// Online payments through a gateway (Razorpay). Every "Pay now" order gets a
-// link on our own address, /pay/<code>; opening it creates (or reuses) a
-// Razorpay payment link for the exact amount and forwards the customer there:
-// UPI apps, UPI QR, cards, netbanking. The same address is in the WhatsApp
-// message, on the tracking page and inside the order's QR code, so paying from
-// another phone works too.
+// Online payments through a gateway (Razorpay, PhonePe; see src/razorpay.js,
+// src/phonepe.js). Every "Pay now" order gets a link on our own address,
+// /pay/<code>; opening it creates (or reuses) the gateway's payment page for the
+// exact amount and forwards the customer there: UPI apps, UPI QR, cards. Where
+// the gateway makes dynamic UPI QR codes (PhonePe), /pay/<code>/qr.png is the
+// gateway's own QR for this order; otherwise it is a QR of the pay link.
 //
-// Razorpay's signed webhook confirms the payment: the order is marked paid and
-// goes to the kitchen (orders.setPayment). No staff checking. If the outlet
-// cancels a paid order, the payment is refunded automatically. A second payment
-// for an order that is already paid is refunded too.
+// The gateway's signed webhook confirms the payment: the order is marked paid
+// and goes to the kitchen (orders.setPayment). No staff checking. As a safety
+// net, sweep() asks the gateway about every open payment every 30 s, so a lost
+// webhook can't leave an order stuck. If the outlet cancels a paid order, the
+// payment is refunded automatically. A second payment for an order that is
+// already paid is refunded too.
+//
+// A gateway client: { name, createLink, createQr?, checkStatus?, refund }.
 
 const { EventEmitter } = require('node:events');
 
@@ -32,31 +36,66 @@ function createGateway({ client, store, orders, publicBaseUrl, windowMinutes = 1
     if (!o) return null;
     if (o.payment_status === 'paid' || o.payment_status === 'refunded') return { done: 'paid' };
     if (!payable(o)) return { done: 'closed' };
-    const links = store.paymentLinks(o.id);
-    const live = links.find((l) => l.status === 'created' && l.amount === o.total && l.expires_at > new Date(now.getTime() + 2 * MIN).toISOString());
+    const live = liveRow(o, 'link', now);
     if (live) return { url: live.url };
-    // Razorpay links must live at least 15 minutes; keep them a little past our payment window.
-    const expireBy = new Date(now.getTime() + Math.max(16, windowMinutes + 5) * MIN);
-    const created = await client.createLink({
-      code: o.code,
-      reference: links.length ? `${o.code}-${links.length + 1}` : o.code,
-      amount: o.total,
-      description: `Order ${o.code} · ${o.outlet.name}`,
-      customer: { name: o.customer_name, phone: o.phone },
-      expireBy,
-      callbackUrl: `${publicBaseUrl}/track.html?code=${o.code}`,
-    });
+    const { args, expireBy } = request(o, 'link', now);
+    const created = await client.createLink(args);
     store.insertPaymentLink({
-      id: created.id, order_id: o.id, provider: client.name, url: created.url, amount: o.total,
+      id: created.id, order_id: o.id, provider: client.name, kind: 'link', url: created.url, amount: o.total,
       expires_at: expireBy.toISOString(), status: 'created', created_at: now.toISOString(),
     });
     return { url: created.url };
   }
 
+  const liveRow = (o, kind, now) => store.paymentLinks(o.id).find((l) => (l.kind || 'link') === kind && l.status === 'created'
+    && l.amount === o.total && l.expires_at > new Date(now.getTime() + 2 * MIN).toISOString());
+
+  // What to ask the gateway for. Each attempt has its own reference (gateways
+  // want them unique): RCABC234-1 (pay page), RCABC234-Q1 (QR), …
+  function request(o, kind, now) {
+    const n = store.paymentLinks(o.id).filter((l) => (l.kind || 'link') === kind).length + 1;
+    // Razorpay links must live at least 15 minutes; keep them a little past our payment window.
+    const expireBy = new Date(now.getTime() + Math.max(16, windowMinutes + 5) * MIN);
+    return {
+      expireBy,
+      args: {
+        code: o.code,
+        reference: kind === 'qr' ? `${o.code}-Q${n}` : (n > 1 ? `${o.code}-${n}` : o.code),
+        amount: o.total,
+        description: `Order ${o.code} · ${o.outlet.name}`,
+        customer: { name: o.customer_name, phone: o.phone },
+        expireBy,
+        callbackUrl: `${publicBaseUrl}/track.html?code=${o.code}`,
+      },
+    };
+  }
+
+  /**
+   * The gateway's own dynamic UPI QR (PNG) for an order, made on first use, or
+   * null when the gateway doesn't make QR codes (then the QR is of the pay link).
+   */
+  const qrCache = new Map();
+  async function qrFor(code, now = new Date()) {
+    if (!client.createQr) return null;
+    const o = orders.getOrder(code);
+    if (!payable(o)) return null;
+    const live = liveRow(o, 'qr', now);
+    if (live && qrCache.has(live.id)) return qrCache.get(live.id);
+    if (live && live.url.startsWith('data:image/png;base64,')) return Buffer.from(live.url.slice(22), 'base64');
+    const { args, expireBy } = request(o, 'qr', now);
+    const created = await client.createQr(args);
+    store.insertPaymentLink({
+      id: created.id, order_id: o.id, provider: client.name, kind: 'qr', url: `data:image/png;base64,${created.png.toString('base64')}`,
+      amount: o.total, expires_at: expireBy.toISOString(), status: 'created', created_at: now.toISOString(),
+    });
+    qrCache.set(created.id, created.png);
+    return created.png;
+  }
+
   // Refund one payment. linkId: the link row to mark refunded (when it holds this payment).
-  async function refund(order, paymentId, linkId, reason, now = new Date()) {
+  async function refund(order, paymentId, linkId, reason, now = new Date(), amount = order.total) {
     try {
-      const r = await client.refund(paymentId, { reason });
+      const r = await client.refund(paymentId, { linkId, amount, reason, refundId: `R${linkId}-${Date.now().toString(36)}` });
       if (linkId) store.updatePaymentLink(linkId, { status: 'refunded', refund_id: r.id }, now.toISOString());
       return r;
     } catch (e) {
@@ -73,18 +112,22 @@ function createGateway({ client, store, orders, publicBaseUrl, windowMinutes = 1
   async function handleWebhook(parsed, eventId, now = new Date()) {
     if (eventId && store.gatewayEventSeen(eventId, now.toISOString())) return 'duplicate';
     if (parsed.kind !== 'paid') return 'ignored';
-    const o = parsed.code ? orders.getOrder(parsed.code) : null;
+    // The order comes from our own record of the payment request; the code the
+    // gateway echoes back must agree when it sends one.
     const link = parsed.linkId ? store.paymentLinkById(parsed.linkId) : null;
-    if (!o || !link || link.order_id !== o.id) {
+    const o = link ? orders.getOrderById(link.order_id) : null;
+    if (!o || (parsed.code && parsed.code !== o.code)) {
       log.error(`[payments] payment ${parsed.paymentId} for unknown order/link ${parsed.code}/${parsed.linkId}`);
       return 'unknown';
     }
+    // The same payment reported twice (webhook and status check): nothing to do.
+    if (parsed.paymentId && link.payment_id === parsed.paymentId) return 'duplicate';
     // Already paid (another link, or WhatsApp Pay): give this one back. The link
     // keeps the record of the payment that counts, if it holds one.
     if (o.payment_status === 'paid' || o.payment_status === 'refunded') {
       const ownRow = !link.payment_id;
       if (ownRow) store.updatePaymentLink(link.id, { status: 'paid', payment_id: parsed.paymentId }, now.toISOString());
-      await refund(o, parsed.paymentId, ownRow ? link.id : null, `Duplicate payment for order ${o.code}`, now);
+      await refund(o, parsed.paymentId, ownRow ? link.id : null, `Duplicate payment for order ${o.code}`, now, parsed.amount);
       return 'refunded_extra';
     }
     store.updatePaymentLink(link.id, { status: 'paid', payment_id: parsed.paymentId }, now.toISOString());
@@ -104,6 +147,26 @@ function createGateway({ client, store, orders, publicBaseUrl, windowMinutes = 1
     return 'paid';
   }
 
+  /**
+   * Ask the gateway about payment requests still open (lost webhooks, gateways
+   * that only report by status check). Returns how many orders it confirmed.
+   */
+  async function sweep(now = new Date()) {
+    if (!client.checkStatus) return 0;
+    const since = new Date(now.getTime() - (windowMinutes + 30) * MIN).toISOString();
+    let confirmed = 0;
+    for (const l of store.openPaymentLinks(since)) {
+      let r;
+      try { r = await client.checkStatus(l.id); } catch (e) { log.error(`[payments] status check ${l.id} failed: ${e.message}`); continue; }
+      if (r.state === 'failed') store.updatePaymentLink(l.id, { status: 'failed' }, now.toISOString());
+      if (r.state !== 'paid') continue;
+      const result = await handleWebhook({ kind: 'paid', linkId: l.id, paymentId: r.paymentId, amount: r.amount }, `${client.name}:status:${r.paymentId || l.id}`, now);
+      if (result === 'paid') confirmed += 1;
+    }
+    return confirmed;
+  }
+  let sweeper = null;
+
   /** Refund every captured gateway payment of an order (outlet cancelled it). */
   async function refundOrder(code, reason, now = new Date()) {
     const o = orders.getOrder(code);
@@ -122,7 +185,13 @@ function createGateway({ client, store, orders, publicBaseUrl, windowMinutes = 1
     refundOrder(o.code, `Order ${o.code} cancelled by ${o.outlet.name}`).catch((e) => log.error('[payments] refund failed', e.message));
   });
 
-  return { events, name: client.name, linkFor, handleWebhook, refundOrder };
+  return {
+    events, name: client.name, linkFor, qrFor, handleWebhook, refundOrder, sweep,
+    startSweeper(ms = 30000) {
+      if (!sweeper) { sweeper = setInterval(() => { sweep().catch((e) => log.error('[payments] sweep failed', e.message)); }, ms); sweeper.unref?.(); }
+    },
+    stopSweeper() { clearInterval(sweeper); sweeper = null; },
+  };
 }
 
 module.exports = { createGateway };

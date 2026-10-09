@@ -160,6 +160,7 @@ Database changes are only ever additions (new tables and columns), so an older r
 | v0.21 | "Pay now" orders reach the kitchen only once paid; unpaid ones are cancelled after 15 minutes |
 | v0.22 | Razorpay payment gateway: self-confirming payments, automatic refunds; separate demo links |
 | v0.23 | Dynamic UPI QR with one business-wide gateway UPI ID, merchant code and order code as reference |
+| v0.24 | PhonePe gateway (dynamic UPI QR, callbacks, refunds), 30-second status check for lost notifications, sandbox test script |
 
 Earlier client demos stay online at `https://neofinn.github.io/rcf/versions.html`.
 
@@ -258,6 +259,32 @@ Customers' UPI apps open with everything filled in, and each payment shows the o
    An outlet can have its own UPI ID instead (Head office → Outlets).
 2. `sudo -u rcf pm2 reload rcf`, then place a test "Pay now" order for ₹1–2 worth of items. Scan the QR with GPay, PhonePe and Paytm and check that each opens with the amount and the order code, and that the payment shows in the gateway with that code.
 3. **Confirmation.** Staff tap **Payment received** after a customer taps "I've paid", once the amount shows in the gateway dashboard or app. To make this automatic, the gateway's payment notification (webhook) can be connected so each payment confirms its order by the order code. That needs the gateway's webhook format; tell us which gateway you use.
+
+## Where payment notifications arrive, and testing them
+
+**Where notifications arrive.** Your gateway posts each payment to our server:
+- `https://order.<your-domain>/webhooks/razorpay` for Razorpay;
+- `https://order.<your-domain>/webhooks/phonepe` for PhonePe.
+
+Each message is signature-checked and matched to its order by our own record of the payment request. If a notification is lost, the server asks the gateway about every open payment every 30 seconds, so an order can't get stuck. Both routes report the same payment only once, and the second report is never refunded as a duplicate.
+
+**Testing against the gateways' test systems** (no real money): `npm run payments:sandbox`.
+- **PhonePe sandbox**, using PhonePe's shared test merchant, needs no account. The script:
+  1. places an order;
+  2. gets PhonePe's dynamic UPI QR for it;
+  3. pays it with PhonePe's simulator;
+  4. checks that the status check confirms it and the WhatsApp confirmation goes out;
+  5. cancels it and checks the refund goes through PhonePe;
+  6. checks that a failed payment leaves the order waiting.
+- **Razorpay test mode** runs too when `RAZORPAY_KEY_ID=rzp_test_…` and `RAZORPAY_KEY_SECRET` are set: it creates a real test payment link and checks its status.
+
+## PhonePe Payment Gateway
+
+1. PhonePe Business dashboard → Developer settings: copy the **Merchant ID**, **Salt key** and **Salt index**.
+2. In `.env`, set `PHONEPE_MERCHANT_ID`, `PHONEPE_SALT_KEY` and `PHONEPE_SALT_INDEX`, and set `PHONEPE_ENV=production` (or `sandbox` while testing). Then `pm2 reload rcf`.
+3. Every "Pay now" order's QR is then PhonePe's own dynamic UPI QR for the exact amount, and the pay link opens PhonePe's pay page. Payments confirm themselves, and cancelled paid orders are refunded.
+
+PhonePe's newer onboarding issues a client ID and secret (API v2) instead of a salt key. If your account only has those, tell us and we'll add v2; it works the same way.
 
 ## Online payments: Razorpay payment links (alternative)
 

@@ -68,7 +68,7 @@ const STATUS_LABELS = {
 const MAX_QTY_PER_ITEM = 20;
 
 // Online payments go through the gateway when Razorpay keys are set.
-const gatewayOn = () => Boolean(config.razorpay?.keyId);
+const gatewayOn = () => Boolean(config.paymentGateway?.());
 /** Can this outlet take "Pay now" (gateway, or a UPI ID for the dynamic QR)? */
 const canPayOnline = (outlet) => gatewayOn() || Boolean(upiFor(outlet));
 

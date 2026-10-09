@@ -137,7 +137,8 @@ function createMemoryStore(seed) {
     orderCodeExists: (code) => orders.some((o) => o.code === code),
     paymentLinks: (orderId) => links.filter((l) => l.order_id === orderId).map(copy),
     paymentLinkById: (id) => copy(links.find((l) => l.id === id) || null),
-    insertPaymentLink: (l) => { links.push({ ...l, payment_id: null, refund_id: null, updated_at: l.created_at }); },
+    insertPaymentLink: (l) => { links.push({ kind: 'link', ...l, payment_id: null, refund_id: null, updated_at: l.created_at }); },
+    openPaymentLinks: (since) => links.filter((l) => l.status === 'created' && l.created_at >= since).map(copy),
     updatePaymentLink(id, { status, payment_id = null, refund_id = null }, ts) {
       const l = links.find((x) => x.id === id);
       if (l) Object.assign(l, { status, payment_id: payment_id ?? l.payment_id, refund_id: refund_id ?? l.refund_id, updated_at: ts });
