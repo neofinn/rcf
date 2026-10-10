@@ -259,6 +259,24 @@ CREATE TABLE IF NOT EXISTS payment_links (
 );
 CREATE INDEX IF NOT EXISTS payment_links_order ON payment_links(order_id);
 
+-- Connection settings entered in Head office → Connections (override .env).
+-- Secret values are encrypted (AES-256-GCM, key from SETTINGS_KEY).
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  secret INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT
+);
+-- Who changed which connection when (never the values).
+CREATE TABLE IF NOT EXISTS settings_log (
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL,
+  by TEXT,
+  integration TEXT NOT NULL,
+  change TEXT NOT NULL
+);
+
 -- Gateway webhook deliveries already handled (they can arrive more than once).
 CREATE TABLE IF NOT EXISTS gateway_events (
   event_id TEXT PRIMARY KEY,

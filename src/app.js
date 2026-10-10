@@ -23,6 +23,7 @@ const { createPorterClient } = require('./delivery/porter');
 const { createRazorpayClient, validRazorpaySignature, parseRazorpayWebhook } = require('./razorpay');
 const { createPhonePeClient, validPhonePeCallback, parsePhonePeCallback } = require('./phonepe');
 const { createGateway } = require('./gateway');
+const { createIntegrations } = require('./integrations');
 const { createBorzoClient, validBorzoSignature } = require('./delivery/borzo');
 const { createSelector } = require('./delivery/selector');
 const { qrPng } = require('./payments');
@@ -57,6 +58,11 @@ function createApp({
   paymentClient,
 } = {}) {
   const db = openDb(dbPath, seed ? { seed } : {});
+  // Connections saved in Head office → Connections override .env (applied before
+  // anything below reads its settings).
+  const connStore = createSqliteStore(db);
+  let rebuild = () => {};
+  const integrations = createIntegrations({ store: connStore, fetchImpl, log, onChange: (id) => rebuild(id) });
   // Optional copy of the data in Supabase; off unless both settings are given.
   const sync = supabase && supabase.url && supabase.serviceKey
     ? createSupabaseSync({ db, url: supabase.url, serviceKey: supabase.serviceKey, fetch: fetchImpl, log })
@@ -91,14 +97,36 @@ function createApp({
   });
   notifyOnDelivery({ dispatcher, client, log });
 
-  // Payment gateway (Razorpay) when its keys are set; tests pass their own client.
-  const gatewayClient = paymentClient || ({
-    razorpay: () => createRazorpayClient({ keyId: config.razorpay.keyId, keySecret: config.razorpay.keySecret, baseUrl: config.razorpay.baseUrl, fetchImpl }),
-    phonepe: () => createPhonePeClient({ ...config.phonepe, callbackUrl: `${config.publicBaseUrl}/webhooks/phonepe`, fetchImpl }),
-  }[config.paymentGateway()] || (() => null))();
-  const gateway = gatewayClient
-    ? createGateway({ client: gatewayClient, store, orders, publicBaseUrl: config.publicBaseUrl, windowMinutes: config.payments.windowMinutes, log })
-    : null;
+  // Payment gateway (Razorpay or PhonePe) when its keys are set; tests pass their own client.
+  // Rebuilt when its settings change in Head office → Connections.
+  const buildGateway = () => {
+    const gatewayClient = paymentClient || ({
+      razorpay: () => createRazorpayClient({ keyId: config.razorpay.keyId, keySecret: config.razorpay.keySecret, baseUrl: config.razorpay.baseUrl, fetchImpl }),
+      phonepe: () => createPhonePeClient({ ...config.phonepe, callbackUrl: `${config.publicBaseUrl}/webhooks/phonepe`, fetchImpl }),
+    }[config.paymentGateway()] || (() => null))();
+    return gatewayClient
+      ? createGateway({ client: gatewayClient, store, orders, publicBaseUrl: config.publicBaseUrl, windowMinutes: config.payments.windowMinutes, log })
+      : null;
+  };
+  let gateway = buildGateway();
+  let gatewaySweeping = false;
+  const payments = {
+    get current() { return gateway; },
+    startSweeper(ms = 30000) { gatewaySweeping = ms; gateway?.startSweeper(ms); },
+    stopSweeper() { gatewaySweeping = false; gateway?.stopSweeper(); },
+  };
+  rebuild = (id) => {
+    if (['payments', 'razorpay', 'phonepe'].includes(id)) {
+      gateway?.close();
+      gateway = buildGateway();
+      if (gateway && gatewaySweeping) gateway.startSweeper(gatewaySweeping);
+      log.info?.(`[connections] payments now: ${gateway ? gateway.name : 'UPI QR, staff confirm'}`);
+    }
+    if (['shadowfax', 'porter', 'borzo'].includes(id) && deliveryPartner === undefined) {
+      dispatcher.setProviders(deliveryProviders({ onUpdate: (name, u) => dispatcher.handleUpdate(name, u) }));
+      log.info?.(`[connections] delivery partners now: ${dispatcher.providers.map((p) => p.name).join(', ') || 'none'}`);
+    }
+  };
 
   const app = express();
   app.disable('x-powered-by');
@@ -188,7 +216,7 @@ function createApp({
     return secret ? safeEqual(req.get('x-callback-token') || req.query.token, secret) : !config.production;
   };
 
-  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports })) {
+  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports, integrations })) {
     if (route.dev && !enableDevTools) continue;
     // Shadowfax may call back with POST or PUT.
     const methods = route.partner ? ['post', 'put'] : [route.method.toLowerCase()];
@@ -235,7 +263,7 @@ function createApp({
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock, reports, version, gateway };
+  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock, reports, version, integrations, payments, get gateway() { return gateway; } };
 }
 
 module.exports = { createApp };

@@ -52,7 +52,7 @@ function authorize(route, auth) {
   return true;
 }
 
-function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports }) {
+function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports, integrations }) {
   // Reports run off the main thread on the server (src/reports.js); inline otherwise.
   reports ||= { analytics: (q) => computeAnalytics(store, q), customers: (q) => crm.list(q), customersCsv: (q) => crm.exportCsv(q) };
   // Head office reaches every outlet; an outlet tablet only its own.
@@ -322,6 +322,16 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
       handle: ({ body }) => { dispatcher.handleWebhook('borzo', body); return { ok: true }; },
     },
     { method: 'GET', path: '/api/admin/outlets', admin: true, handle: () => orders.listOutlets() },
+
+    // ---- Connections: payment gateways, UPI, WhatsApp, delivery partners ----
+    ...(integrations ? [
+      { method: 'GET', path: '/api/admin/connections', admin: true, handle: () => integrations.describe() },
+      {
+        method: 'PUT', path: '/api/admin/connections/:id', admin: true,
+        handle: ({ params, body }) => integrations.save(params.id, body.values || {}, 'head office'),
+      },
+      { method: 'POST', path: '/api/admin/connections/:id/test', admin: true, handle: ({ params }) => integrations.test(params.id) },
+    ] : []),
 
     // ---- CRM & loyalty --------------------------------------------------
     { method: 'GET', path: '/api/admin/customers', admin: true, handle: ({ query }) => reports.customers(query) },

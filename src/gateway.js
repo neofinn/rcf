@@ -180,10 +180,11 @@ function createGateway({ client, store, orders, publicBaseUrl, windowMinutes = 1
   }
 
   // An outlet cancelling a paid order refunds the customer.
-  orders.events.on('status', (o) => {
+  const onStatus = (o) => {
     if (o.status !== 'cancelled' || o.payment_status !== 'paid') return;
     refundOrder(o.code, `Order ${o.code} cancelled by ${o.outlet.name}`).catch((e) => log.error('[payments] refund failed', e.message));
-  });
+  };
+  orders.events.on('status', onStatus);
 
   return {
     events, name: client.name, linkFor, qrFor, handleWebhook, refundOrder, sweep,
@@ -191,6 +192,8 @@ function createGateway({ client, store, orders, publicBaseUrl, windowMinutes = 1
       if (!sweeper) { sweeper = setInterval(() => { sweep().catch((e) => log.error('[payments] sweep failed', e.message)); }, ms); sweeper.unref?.(); }
     },
     stopSweeper() { clearInterval(sweeper); sweeper = null; },
+    /** Stop this gateway (settings changed): no more sweeps or refund listening. */
+    close() { clearInterval(sweeper); sweeper = null; orders.events.off('status', onStatus); },
   };
 }
 

@@ -26,6 +26,8 @@ function createMemoryStore(seed) {
   const orders = [];
   const links = [];
   const gatewayEvents = new Set();
+  const settings = new Map();
+  const settingsLog = [];
   const lines = new Map();
   const handoffs = [];
   const handoffMsgs = new Map();
@@ -143,6 +145,11 @@ function createMemoryStore(seed) {
       const l = links.find((x) => x.id === id);
       if (l) Object.assign(l, { status, payment_id: payment_id ?? l.payment_id, refund_id: refund_id ?? l.refund_id, updated_at: ts });
     },
+    allSettings: () => [...settings.values()].map(copy),
+    setSetting: (key, value, secret, ts, by) => { settings.set(key, { key, value, secret: secret ? 1 : 0, updated_at: ts, updated_by: by || null }); },
+    deleteSetting: (key) => { settings.delete(key); },
+    addSettingsLog: (at, by, integration, change) => { settingsLog.unshift({ at, by: by || null, integration, change }); },
+    settingsLog: (limit = 30) => settingsLog.slice(0, limit).map(copy),
     gatewayEventSeen: (eventId) => { if (gatewayEvents.has(eventId)) return true; gatewayEvents.add(eventId); return false; },
     unpaidBefore: (cutoff) => orders.filter((o) => o.status === 'awaiting_payment' && o.payment_status === 'pending' && o.created_at < cutoff).map((o) => ({ code: o.code })),
     insertOrder(o, ls) {

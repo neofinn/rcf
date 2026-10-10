@@ -15,6 +15,7 @@ const { createMenuImages } = require('../src/whatsapp/menu-image');
 const { createStaffAuth } = require('../src/staff-auth');
 const { createStockService } = require('../src/stock');
 const { createOutletAdmin } = require('../src/outlet-admin');
+const { createIntegrations } = require('../src/integrations');
 const { seedSampleHistory } = require('./sample-history');
 const { createReviews } = require('../src/reviews');
 const { createBot, createSessionStore } = require('../src/whatsapp/bot');
@@ -67,7 +68,9 @@ function createDemoBackend({ state } = {}) {
   if (!state) for (const o of orders.listOutlets()) staffAuth.setPin(o.id, DEMO_PIN);
   const stock = createStockService({ store, orders });
   const outletAdmin = createOutletAdmin({ store });
-  const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, staffAuth, stock, outletAdmin });
+  // Connections tab works in the demo (kept in memory, nothing real connected).
+  const integrations = createIntegrations({ store, cipher: { encrypt: (t) => t, decrypt: (t) => t }, liveTests: false, log: quiet });
+  const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, staffAuth, stock, outletAdmin, integrations });
 
   /** Serve one API request. Resolves to { status, body }. */
   async function request(method, url, body, token = '') {

@@ -24,6 +24,9 @@ module.exports = {
   dbPath: env.DB_PATH || path.join(__dirname, '..', 'data', 'rcf.db'),
   publicBaseUrl: (env.PUBLIC_BASE_URL || `http://localhost:${int(env.PORT, 3000)}`).replace(/\/$/, ''),
   adminToken: env.ADMIN_TOKEN || 'change-me',
+  // Encrypts keys saved in Head office → Connections. Keep it secret and never
+  // change it after saving keys there (they would have to be entered again).
+  settingsKey: env.SETTINGS_KEY || '',
   timezone: 'Asia/Kolkata',
 
   // Pricing rules (all money in paise).
@@ -39,6 +42,8 @@ module.exports = {
   // Online UPI: an order waits this long for payment before it is cancelled.
   payments: {
     windowMinutes: num(env.PAYMENT_WINDOW_MINUTES, 15),
+    // Which gateway "Pay now" uses: auto (whichever has keys), none, razorpay, phonepe.
+    provider: env.PAYMENT_GATEWAY || 'auto',
   },
 
   // Dynamic UPI QR: the UPI ID payments go to. One business-wide ID (e.g. the
@@ -163,6 +168,10 @@ module.exports = {
 /** Which payment gateway "Pay now" uses: 'razorpay', 'phonepe' or null (plain UPI QR). */
 module.exports.paymentGateway = () => {
   const c = module.exports;
+  const choice = c.payments.provider || 'auto';
+  if (choice === 'none') return null;
+  if (choice === 'razorpay') return c.razorpay.keyId ? 'razorpay' : null;
+  if (choice === 'phonepe') return c.phonepe.merchantId ? 'phonepe' : null;
   if (c.razorpay.keyId) return 'razorpay';
   if (c.phonepe.merchantId) return 'phonepe';
   return null;

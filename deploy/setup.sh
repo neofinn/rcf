@@ -65,6 +65,7 @@ if [ ! -f "$APP_HOME/shared/.env" ]; then
   setenv PUBLIC_BASE_URL "https://$DOMAIN"
   setenv DB_PATH "$APP_HOME/shared/data/rcf.db"
   setenv ADMIN_TOKEN "$(openssl rand -hex 24)"
+  setenv SETTINGS_KEY "$(openssl rand -hex 32)"
   setenv WHATSAPP_VERIFY_TOKEN "$(openssl rand -hex 16)"
   setenv SHADOWFAX_CALLBACK_TOKEN "$(openssl rand -hex 16)"
   setenv PORTER_CALLBACK_TOKEN "$(openssl rand -hex 16)"

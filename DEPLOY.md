@@ -161,6 +161,7 @@ Database changes are only ever additions (new tables and columns), so an older r
 | v0.22 | Razorpay payment gateway: self-confirming payments, automatic refunds; separate demo links |
 | v0.23 | Dynamic UPI QR with one business-wide gateway UPI ID, merchant code and order code as reference |
 | v0.24 | PhonePe gateway (dynamic UPI QR, callbacks, refunds), 30-second status check for lost notifications, sandbox test script |
+| v0.25 | Head office → Connections: set up payment gateways, UPI, WhatsApp and delivery partners from the panel (encrypted, live, with tests) |
 
 Earlier client demos stay online at `https://neofinn.github.io/rcf/versions.html`.
 
@@ -259,6 +260,17 @@ Customers' UPI apps open with everything filled in, and each payment shows the o
    An outlet can have its own UPI ID instead (Head office → Outlets).
 2. `sudo -u rcf pm2 reload rcf`, then place a test "Pay now" order for ₹1–2 worth of items. Scan the QR with GPay, PhonePe and Paytm and check that each opens with the amount and the order code, and that the payment shows in the gateway with that code.
 3. **Confirmation.** Staff tap **Payment received** after a customer taps "I've paid", once the amount shows in the gateway dashboard or app. To make this automatic, the gateway's payment notification (webhook) can be connected so each payment confirms its order by the order code. That needs the gateway's webhook format; tell us which gateway you use.
+
+## Head office → Connections
+
+Payment gateways, the UPI ID, WhatsApp and delivery partners can all be set up from **Head office → Connections** instead of editing `.env`:
+- **Keys:** paste them in and press **Save**. They're encrypted with `SETTINGS_KEY`, which setup.sh creates. They take effect at once with no restart, and they're never shown again (only "set, ends …1a2b").
+- **Test connection:** makes a harmless call with the saved keys and says whether they work. Available for Razorpay, PhonePe, WhatsApp and the UPI ID.
+- **Notifications address:** each card shows the address to paste into that service's dashboard.
+- **Server settings:** an empty field uses the value from `.env`; "use server setting" removes a value saved in the panel.
+- **Change log:** every change is listed at the bottom (who, when, which field), never the values.
+
+Keep `SETTINGS_KEY` safe and unchanged: if it changes, keys saved in the panel must be entered again (the panel says which).
 
 ## Where payment notifications arrive, and testing them
 

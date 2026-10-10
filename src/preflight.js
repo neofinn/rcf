@@ -29,6 +29,8 @@ function preflight(config, store) {
   else if (config.adminToken.length < 24) need.push('ADMIN_TOKEN is shorter than 24 characters; generate one with: openssl rand -hex 24');
   else ok.push('Head office token set.');
 
+  if (!config.settingsKey) warnings.push('SETTINGS_KEY is not set: keys saved in Head office → Connections are encrypted with the admin token instead (changing it would lose them). setup.sh sets one.');
+
   if (!/^https:\/\//.test(config.publicBaseUrl)) need.push(`PUBLIC_BASE_URL must be the https:// address customers use (now ${config.publicBaseUrl}).`);
   else ok.push(`Public address ${config.publicBaseUrl}.`);
 

@@ -33,6 +33,12 @@ function createSqliteStore(db) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     openPaymentLinks: db.prepare("SELECT id, order_id, provider, kind, amount FROM payment_links WHERE status = 'created' AND created_at >= ?"),
     updatePaymentLink: db.prepare('UPDATE payment_links SET status = ?, payment_id = COALESCE(?, payment_id), refund_id = COALESCE(?, refund_id), updated_at = ? WHERE id = ?'),
+    allSettings: db.prepare('SELECT key, value, secret, updated_at, updated_by FROM app_settings'),
+    setSetting: db.prepare(`INSERT INTO app_settings (key, value, secret, updated_at, updated_by) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, secret = excluded.secret, updated_at = excluded.updated_at, updated_by = excluded.updated_by`),
+    deleteSetting: db.prepare('DELETE FROM app_settings WHERE key = ?'),
+    addSettingsLog: db.prepare('INSERT INTO settings_log (at, by, integration, change) VALUES (?, ?, ?, ?)'),
+    settingsLog: db.prepare('SELECT at, by, integration, change FROM settings_log ORDER BY id DESC LIMIT ?'),
     gatewayEventSeen: db.prepare('INSERT OR IGNORE INTO gateway_events (event_id, at) VALUES (?, ?)'),
     unpaidBefore: db.prepare("SELECT code FROM orders WHERE status = 'awaiting_payment' AND payment_status = 'pending' AND created_at < ?"),
     setPin: db.prepare(`INSERT INTO outlet_logins (outlet_id, pin_hash, updated_at) VALUES (?, ?, ?)
@@ -176,6 +182,12 @@ function createSqliteStore(db) {
     /** Payment requests not yet paid, failed or refunded, made since `since`. */
     openPaymentLinks: (since) => q.openPaymentLinks.all(since),
     updatePaymentLink: (id, { status, payment_id = null, refund_id = null }, ts) => q.updatePaymentLink.run(status, payment_id, refund_id, ts, id),
+    // Connection settings (Head office → Connections).
+    allSettings: () => q.allSettings.all(),
+    setSetting: (key, value, secret, ts, by) => q.setSetting.run(key, value, secret ? 1 : 0, ts, by || null),
+    deleteSetting: (key) => q.deleteSetting.run(key),
+    addSettingsLog: (at, by, integration, change) => q.addSettingsLog.run(at, by || null, integration, change),
+    settingsLog: (limit = 30) => q.settingsLog.all(limit),
     /** Record a gateway webhook event id; false if it was handled before. */
     gatewayEventSeen: (eventId, ts) => q.gatewayEventSeen.run(eventId, ts).changes === 0,
     // UPI orders nobody has paid (or said they paid) since before `cutoff`.

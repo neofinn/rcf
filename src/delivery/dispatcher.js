@@ -40,9 +40,10 @@ function createDispatcher({
   orders, store, provider, providers, selector, bookOn = 'accepted', reassignMinutes = 8, log = console,
 }) {
   const events = new EventEmitter();
-  const list = providers || (provider ? [provider] : []);
-  const byName = new Map(list.map((p) => [p.name, p]));
-  const enabled = list.length > 0;
+  // Partners can be swapped while running (Head office → Connections).
+  let list = providers || (provider ? [provider] : []);
+  let byName = new Map(list.map((p) => [p.name, p]));
+  const isEnabled = () => list.length > 0;
   const pick = selector || createSelector({ store });
   let sweeper = null;
 
@@ -103,7 +104,7 @@ function createDispatcher({
     if (!order || order.fulfilment !== 'delivery' || ['completed', 'cancelled', 'awaiting_payment', 'unpaid'].includes(order.status)) return order;
     const current = order.delivery;
     if (current && !['FAILED', 'OWN'].includes(current.status) && !FAILED.has(current.status)) return order;
-    if (!enabled) return save(order, { provider: 'none', status: 'FAILED', error: 'No delivery partner is configured' }, 'failed');
+    if (!isEnabled()) return save(order, { provider: 'none', status: 'FAILED', error: 'No delivery partner is configured' }, 'failed');
     const outlet = store.outlet(order.outlet_id);
     save(order, { provider: 'selecting', ref: null, status: 'BOOKING', error: null, rider_name: null, rider_phone: null, rider_lat: null, rider_lng: null, track_url: null, tried: '[]' }, 'booking');
     const { ranked, rejected } = await pick.rank(order, outlet, list, []);
@@ -205,7 +206,7 @@ function createDispatcher({
   // release the rider if the order is cancelled.
   orders.events.on('status', (o, meta = {}) => {
     if (o.fulfilment !== 'delivery' || meta.by === 'delivery') return;
-    if (enabled && o.status === bookOn && !o.delivery) book(o.code);
+    if (isEnabled() && o.status === bookOn && !o.delivery) book(o.code);
     const p = o.delivery && byName.get(o.delivery.provider);
     if (o.status === 'cancelled' && o.delivery?.ref && p && !FAILED.has(o.delivery.status)) {
       p.cancel(o.delivery.ref, 'Order cancelled by outlet').catch((e) => log.error('[delivery] cancel failed', e.message));
@@ -214,9 +215,19 @@ function createDispatcher({
   });
 
   return {
-    events, enabled, providers: list, book, reassign, useOwnRider, handleUpdate, handleCallback, handleWebhook, sweep, label,
+    events,
+    get enabled() { return isEnabled(); },
+    get providers() { return list; },
+    /** Use a new set of partners from now on (bookings in progress keep working by name while kept). */
+    setProviders(next) {
+      // Keep old partners reachable by name so their late updates and cancels still work.
+      const old = byName;
+      list = next;
+      byName = new Map([...old, ...next.map((p) => [p.name, p])]);
+    },
+    book, reassign, useOwnRider, handleUpdate, handleCallback, handleWebhook, sweep, label,
     startSweeper(intervalMs = 60000) {
-      if (!sweeper && enabled) { sweeper = setInterval(() => { sweep().catch((e) => log.error('[delivery] sweep failed', e.message)); }, intervalMs); sweeper.unref?.(); }
+      if (!sweeper) { sweeper = setInterval(() => { sweep().catch((e) => log.error('[delivery] sweep failed', e.message)); }, intervalMs); sweeper.unref?.(); }
     },
     stopSweeper() { clearInterval(sweeper); sweeper = null; },
   };
