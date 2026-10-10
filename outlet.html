@@ -424,6 +424,21 @@ td, th { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: le
 .outlet-form .row > * { flex: 1; }
 .ofield { display: grid; gap: 4px; font-weight: 600; font-size: 0.88rem; }
 .ofield small { font-weight: 400; }
+
+/* Head office → Connections */
+.conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.conn-grid .card { margin-bottom: 0; }
+.conn-fields { display: grid; gap: 8px; }
+.conn .ofield span .src { font-weight: 400; color: var(--muted); font-size: 0.8rem; margin-left: 4px; }
+.conn .webhook { margin: 0 0 10px; overflow-wrap: anywhere; }
+.conn .webhook code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+.chip.conn-ok { background: rgba(26, 138, 58, 0.15); border-color: var(--ok); color: var(--ok); }
+.chip.conn-test { background: rgba(244, 163, 0, 0.18); border-color: var(--accent); }
+.chip.conn-warn { background: rgba(179, 38, 30, 0.12); border-color: var(--nonveg); color: var(--nonveg); }
+.conn-msg.good { color: var(--ok); }
+.conn-msg.bad, p.bad { color: var(--nonveg); }
+.conn-log { margin: 0; padding-left: 18px; }
+@media (max-width: 400px) { .conn-grid { grid-template-columns: minmax(0, 1fr); } }
 </style>
 <script>window.BRAND={"id":"raju-chinese","name":"Raju Chinese","logo":["Raju","Chinese"],"outletPrefix":"Raju Chinese - ","emoji":"🥡","region":{"name":"the tricity"},"upiExample":"rajuchinese.sec22@okaxis","demo":{"domain":"order.rajuchinese.example","address":"House 12, Sector 22-B, Chandigarh","outside":{"name":"Ludhiana (outside delivery area)","lat":30.901,"lng":75.8573},"tryOrders":["2 half kurkure veg momo less spicy, ek full veg hakka noodles no onion","bhaiya 3 chilli chicken aur 1 half chilli potato, call before coming"]}};BRAND.short=(n)=>{n=String(n||'');return BRAND.outletPrefix&&n.startsWith(BRAND.outletPrefix)?n.slice(BRAND.outletPrefix.length):n;};</script><style>:root{--brand:#d62828;--brand-dark:#a61e1e;--accent:#f4a300}</style>
 </head>
