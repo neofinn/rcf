@@ -16,6 +16,7 @@ const { createStaffAuth } = require('../src/staff-auth');
 const { createStockService } = require('../src/stock');
 const { createOutletAdmin } = require('../src/outlet-admin');
 const { createIntegrations } = require('../src/integrations');
+const { createOwnerLock } = require('../src/owner-lock');
 const { seedSampleHistory } = require('./sample-history');
 const { createReviews } = require('../src/reviews');
 const { createBot, createSessionStore } = require('../src/whatsapp/bot');
@@ -70,10 +71,13 @@ function createDemoBackend({ state } = {}) {
   const outletAdmin = createOutletAdmin({ store });
   // Connections tab works in the demo (kept in memory, nothing real connected).
   const integrations = createIntegrations({ store, cipher: { encrypt: (t) => t, decrypt: (t) => t }, liveTests: false, log: quiet });
-  const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, staffAuth, stock, outletAdmin, integrations });
+  // Demo owner PIN for Connections: 246810.
+  const ownerLock = createOwnerLock({ store });
+  if (!ownerLock.hasPin()) ownerLock.setPin('246810', 'demo');
+  const routes = createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, staffAuth, stock, outletAdmin, integrations, ownerLock });
 
   /** Serve one API request. Resolves to { status, body }. */
-  async function request(method, url, body, token = '') {
+  async function request(method, url, body, token = '', ownerToken = '') {
     const u = new URL(url, 'https://demo.local');
     for (const r of routes) {
       if (r.method !== method) continue;
@@ -83,7 +87,7 @@ function createDemoBackend({ state } = {}) {
       const auth = r.admin || r.outlet ? staffAuth.resolve(token) : null;
       if (!authorize(r, auth)) return { status: 401, body: { error: 'Unauthorized' } };
       try {
-        const out = await r.handle({ params, query: Object.fromEntries(u.searchParams), body: body || {}, auth, token });
+        const out = await r.handle({ params, query: Object.fromEntries(u.searchParams), body: body || {}, auth, token, ownerToken });
         if (out && out.contentType) return { status: 200, body: out.text };
         if (out && out.httpStatus) return { status: out.httpStatus, body: out.body };
         return { status: 200, body: out };

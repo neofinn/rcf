@@ -23,8 +23,11 @@ async function world(t, { fetchImpl } = {}) {
   await new Promise((r) => server.once('listening', r));
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
-  const call = async (method, path, body, token = config.adminToken) => {
-    const res = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: body ? JSON.stringify(body) : undefined });
+  // Connections need the owner PIN: set it (as the server would) and unlock.
+  ctx.ownerLock.setPin('482915');
+  const unlock = ctx.ownerLock.unlock('482915').token;
+  const call = async (method, path, body, token = config.adminToken, owner = unlock) => {
+    const res = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Owner-Unlock': owner }, body: body ? JSON.stringify(body) : undefined });
     return { status: res.status, body: await res.json().catch(() => null) };
   };
   return Object.assign(ctx, { call });

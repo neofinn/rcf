@@ -67,7 +67,7 @@ const CHILD_SHIM = `<script>
   });
   window.fetch = async (url, opts = {}) => {
     const auth = (opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || '';
-    const r = await ask({ kind: 'fetch', method: (opts.method || 'GET').toUpperCase(), url: String(url), body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\\s+/i, '') });
+    const r = await ask({ kind: 'fetch', method: (opts.method || 'GET').toUpperCase(), url: String(url), body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\\s+/i, ''), ownerToken: (opts.headers && (opts.headers['X-Owner-Unlock'] || opts.headers['x-owner-unlock'])) || '' });
     const text = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
     return new Response(text, { status: r.status, headers: { 'Content-Type': 'application/json' } });
   };
@@ -134,7 +134,7 @@ const STANDALONE_SHIM = `<script>
     if (!/^\\/(api|webhooks)\\//.test(u)) return realFetch(url, opts);
     await ready;
     const auth = (opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || '';
-    const r = await send({ method: (opts.method || 'GET').toUpperCase(), url: u, body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\\s+/i, '') });
+    const r = await send({ method: (opts.method || 'GET').toUpperCase(), url: u, body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\\s+/i, ''), ownerToken: (opts.headers && (opts.headers['X-Owner-Unlock'] || opts.headers['x-owner-unlock'])) || '' });
     const text = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
     return new Response(text, { status: r.status, headers: { 'Content-Type': 'application/json' } });
   };

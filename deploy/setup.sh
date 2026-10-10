@@ -55,7 +55,9 @@ as_app "mkdir -p ~/shared/data ~/shared/backups ~/shared/logs ~/releases"
 [ -d "$APP_HOME/repo/.git" ] || as_app "git clone --quiet '$REPO_URL' ~/repo"
 
 # ---- .env with fresh secrets (only the first time) ---------------------------------
+FIRST_RUN=0
 if [ ! -f "$APP_HOME/shared/.env" ]; then
+  FIRST_RUN=1
   step "Writing $APP_HOME/shared/.env with new secrets"
   as_app "git -C ~/repo fetch --quiet origin && git -C ~/repo show 'origin/$REF:.env.example' > ~/shared/.env"
   setenv() { sed -i "s|^$1=.*|$1=$2|" "$APP_HOME/shared/.env"; grep -q "^$1=" "$APP_HOME/shared/.env" || echo "$1=$2" >> "$APP_HOME/shared/.env"; }
@@ -114,6 +116,12 @@ ufw allow OpenSSH >/dev/null; ufw allow 'Nginx Full' >/dev/null; ufw --force ena
 ufw status | head -5
 
 # ---- Done ------------------------------------------------------------------------------
+OWNER_PIN_LINE=""
+if [ "$FIRST_RUN" = 1 ]; then
+  step "Owner PIN for Head office → Connections"
+  OWNER_PIN_LINE="$(as_app "cd ~/current && npm run -s owner-pin" | head -1)"
+fi
+
 step "Setup check"
 as_app "cd ~/current && npm run -s check" || true
 
@@ -127,6 +135,7 @@ Done. Running: $(cat "$APP_HOME/current/VERSION")
   Outlet panel:       https://$DOMAIN/outlet/
   Head office panel:  https://$DOMAIN/admin/
   Head office token:  $ADMIN_TOKEN        (keep it private)
+  ${OWNER_PIN_LINE:-Owner PIN: already set (change it with: sudo -u $APP_USER bash -c 'cd ~/current && npm run owner-pin')}
 
   WhatsApp webhook:   https://$DOMAIN/webhooks/whatsapp
   Verify token:       $VERIFY

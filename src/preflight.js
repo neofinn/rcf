@@ -109,6 +109,7 @@ function preflight(config, store) {
     if (noPin.length) warnings.push(`No outlet panel PIN yet for: ${names(noPin)} (set in Head office → Outlets).`);
     if (noSfx.length) warnings.push(`No Shadowfax store code for: ${names(noSfx)}.`);
     ok.push(`${outlets.length} outlets active.`);
+    if (!store.allSettings().some((r) => r.key === 'owner.pinHash')) warnings.push('No owner PIN yet: Head office → Connections can\'t be opened. Set one on the server: npm run owner-pin');
   }
 
   return { errors, warnings, ok };

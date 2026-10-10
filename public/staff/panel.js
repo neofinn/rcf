@@ -27,7 +27,7 @@ const state = { token: store.get('token', '') || (window.RC_DEMO && PANEL === 'a
 async function api(path, opts = {}) {
   const res = await fetch(`/api/${PANEL}` + path, {
     ...opts,
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + state.token },
+    headers: { ...(opts.headers || {}), 'Content-Type': 'application/json', Authorization: 'Bearer ' + state.token },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   if (res.status === 401) { showLogin('Session expired or wrong token.'); throw new Error('unauthorized'); }

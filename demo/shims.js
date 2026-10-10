@@ -6,6 +6,8 @@ class EventEmitter {
   constructor() { this.handlers = new Map(); }
   on(name, fn) { (this.handlers.get(name) || this.handlers.set(name, []).get(name)).push(fn); return this; }
   emit(name, ...args) { for (const fn of this.handlers.get(name) || []) fn(...args); return true; }
+  off(name, fn) { const l = this.handlers.get(name); if (l && l.includes(fn)) l.splice(l.indexOf(fn), 1); return this; }
+  listenerCount(name) { return (this.handlers.get(name) || []).length; }
 }
 
 function randomBytes(n) {

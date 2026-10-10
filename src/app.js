@@ -24,6 +24,7 @@ const { createRazorpayClient, validRazorpaySignature, parseRazorpayWebhook } = r
 const { createPhonePeClient, validPhonePeCallback, parsePhonePeCallback } = require('./phonepe');
 const { createGateway } = require('./gateway');
 const { createIntegrations } = require('./integrations');
+const { createOwnerLock } = require('./owner-lock');
 const { createBorzoClient, validBorzoSignature } = require('./delivery/borzo');
 const { createSelector } = require('./delivery/selector');
 const { qrPng } = require('./payments');
@@ -63,6 +64,7 @@ function createApp({
   const connStore = createSqliteStore(db);
   let rebuild = () => {};
   const integrations = createIntegrations({ store: connStore, fetchImpl, log, onChange: (id) => rebuild(id) });
+  const ownerLock = createOwnerLock({ store: connStore });
   // Optional copy of the data in Supabase; off unless both settings are given.
   const sync = supabase && supabase.url && supabase.serviceKey
     ? createSupabaseSync({ db, url: supabase.url, serviceKey: supabase.serviceKey, fetch: fetchImpl, log })
@@ -216,7 +218,7 @@ function createApp({
     return secret ? safeEqual(req.get('x-callback-token') || req.query.token, secret) : !config.production;
   };
 
-  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports, integrations })) {
+  for (const route of createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports, integrations, ownerLock })) {
     if (route.dev && !enableDevTools) continue;
     // Shadowfax may call back with POST or PUT.
     const methods = route.partner ? ['post', 'put'] : [route.method.toLowerCase()];
@@ -227,7 +229,7 @@ function createApp({
       if (route.partner && !partnerAuthorized(req, route.partner)) return res.status(401).json({ error: 'Unauthorized' });
       let out;
       try {
-        out = await route.handle({ params: req.params, query: req.query, body: req.body || {}, auth, token });
+        out = await route.handle({ params: req.params, query: req.query, body: req.body || {}, auth, token, ownerToken: req.get('x-owner-unlock') || '' });
       } catch (e) { return next(e); }
       if (out && out.contentType) return res.type(out.contentType).attachment(out.filename).send(out.text);
       if (out && out.httpStatus) return res.status(out.httpStatus).json(out.body);
@@ -263,7 +265,7 @@ function createApp({
     res.status(500).json({ error: 'Something went wrong' });
   });
 
-  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock, reports, version, integrations, payments, get gateway() { return gateway; } };
+  return { app, db, store, orders, handoffs, bot, dispatcher, crm, menuAdmin, reviews, sync, staffAuth, stock, reports, version, integrations, ownerLock, payments, get gateway() { return gateway; } };
 }
 
 module.exports = { createApp };

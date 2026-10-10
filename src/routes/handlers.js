@@ -19,6 +19,7 @@ const { normalisePhone } = require('../orders');
 const { qrSvg } = require('../payments');
 const { AuthError } = require('../staff-auth');
 const { brand } = require('../brand');
+const { OwnerLockedError } = require('../owner-lock');
 
 // Live orders: UPI orders waiting for payment show too, so staff can confirm a QR payment.
 const ACTIVE = ['awaiting_payment', 'placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
@@ -52,7 +53,11 @@ function authorize(route, auth) {
   return true;
 }
 
-function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports, integrations }) {
+function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports, integrations, ownerLock }) {
+  // Connections also need the owner's PIN (X-Owner-Unlock); see src/owner-lock.js.
+  const LOCKED = { httpStatus: 423, body: { error: 'Locked: enter the owner PIN.', locked: true } };
+  const owner = (fn) => (args) => (ownerLock && !ownerLock.check(args.ownerToken) ? LOCKED : fn(args));
+  const unlockFailed = (e) => { if (e instanceof OwnerLockedError) return { httpStatus: 423, body: { error: e.message, locked: true } }; throw e; };
   // Reports run off the main thread on the server (src/reports.js); inline otherwise.
   reports ||= { analytics: (q) => computeAnalytics(store, q), customers: (q) => crm.list(q), customersCsv: (q) => crm.exportCsv(q) };
   // Head office reaches every outlet; an outlet tablet only its own.
@@ -325,12 +330,24 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
 
     // ---- Connections: payment gateways, UPI, WhatsApp, delivery partners ----
     ...(integrations ? [
-      { method: 'GET', path: '/api/admin/connections', admin: true, handle: () => integrations.describe() },
+      { method: 'GET', path: '/api/admin/connections', admin: true, handle: owner(() => integrations.describe()) },
       {
         method: 'PUT', path: '/api/admin/connections/:id', admin: true,
-        handle: ({ params, body }) => integrations.save(params.id, body.values || {}, 'head office'),
+        handle: owner(({ params, body }) => integrations.save(params.id, body.values || {}, 'owner')),
       },
-      { method: 'POST', path: '/api/admin/connections/:id/test', admin: true, handle: ({ params }) => integrations.test(params.id) },
+      { method: 'POST', path: '/api/admin/connections/:id/test', admin: true, handle: owner(({ params }) => integrations.test(params.id)) },
+      ...(ownerLock ? [
+        { method: 'GET', path: '/api/admin/owner/status', admin: true, handle: ({ ownerToken }) => ownerLock.status(ownerToken) },
+        {
+          method: 'POST', path: '/api/admin/owner/unlock', admin: true,
+          handle: ({ body }) => { try { return ownerLock.unlock(String(body.pin || '')); } catch (e) { return unlockFailed(e); } },
+        },
+        { method: 'POST', path: '/api/admin/owner/lock', admin: true, handle: ({ ownerToken }) => { ownerLock.lock(ownerToken); return { ok: true }; } },
+        {
+          method: 'POST', path: '/api/admin/owner/pin', admin: true,
+          handle: owner(({ body }) => { ownerLock.changePin(String(body.current || ''), String(body.next || '')); return { ok: true }; }),
+        },
+      ] : []),
     ] : []),
 
     // ---- CRM & loyalty --------------------------------------------------

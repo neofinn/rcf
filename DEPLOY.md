@@ -162,6 +162,7 @@ Database changes are only ever additions (new tables and columns), so an older r
 | v0.23 | Dynamic UPI QR with one business-wide gateway UPI ID, merchant code and order code as reference |
 | v0.24 | PhonePe gateway (dynamic UPI QR, callbacks, refunds), 30-second status check for lost notifications, sandbox test script |
 | v0.25 | Head office → Connections: set up payment gateways, UPI, WhatsApp and delivery partners from the panel (encrypted, live, with tests) |
+| v0.26 | Owner PIN in front of Connections (set on the server, 10-minute unlock, lockout after 5 wrong PINs) |
 
 Earlier client demos stay online at `https://neofinn.github.io/rcf/versions.html`.
 
@@ -263,7 +264,17 @@ Customers' UPI apps open with everything filled in, and each payment shows the o
 
 ## Head office → Connections
 
-Payment gateways, the UPI ID, WhatsApp and delivery partners can all be set up from **Head office → Connections** instead of editing `.env`:
+Payment gateways, the UPI ID, WhatsApp and delivery partners can all be set up from **Head office → Connections** instead of editing `.env`.
+
+**Owner PIN.** The head office login opens every other tab, but Connections also needs the **owner PIN**, so ordinary staff can't change payment or rider settings.
+- `setup.sh` creates the PIN on first setup and prints it once. Keep it with the owner.
+- To set or reset it, run this on the server: `sudo -u rcf bash -c 'cd ~/current && npm run owner-pin'` (random 6-digit PIN), or add `-- 739182` to choose one. That also signs out every browser that had it unlocked.
+- Rules: 6–8 digits, not one digit repeated, not a run like 123456. It's stored only as a hash.
+- The owner can change it inside Connections by entering the current PIN.
+- An unlock lasts while the page is in use and locks after 10 idle minutes, or with **Lock now**.
+- Five wrong PINs lock it for 15 minutes. Unlocks and wrong PINs appear in the change log.
+
+Once unlocked:
 - **Keys:** paste them in and press **Save**. They're encrypted with `SETTINGS_KEY`, which setup.sh creates. They take effect at once with no restart, and they're never shown again (only "set, ends …1a2b").
 - **Test connection:** makes a harmless call with the saved keys and says whether they work. Available for Razorpay, PhonePe, WhatsApp and the UPI ID.
 - **Notifications address:** each card shows the address to paste into that service's dashboard.
