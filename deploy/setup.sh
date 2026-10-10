@@ -56,7 +56,7 @@ as_app "mkdir -p ~/shared/data ~/shared/backups ~/shared/logs ~/releases"
 # server gets its own read-only deploy key; add it in GitHub once.
 if [[ "$REPO_URL" == git@* ]] && [ ! -f "$APP_HOME/.ssh/id_ed25519" ]; then
   step "Deploy key for the private repository"
-  as_app "mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -N '' -C 'rcf-server' -f ~/.ssh/id_ed25519"
+  as_app "mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -N '' -C 'ordering-server' -f ~/.ssh/id_ed25519"
   as_app "ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null"
   echo
   echo "    Add this key to the repository: GitHub → repository → Settings → Deploy keys → Add deploy key"
