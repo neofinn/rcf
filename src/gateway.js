@@ -147,11 +147,29 @@ function createGateway({ client, store, orders, publicBaseUrl, windowMinutes = 1
     return 'paid';
   }
 
+  // Refunds that failed (gateway busy, network) are tried again, backing off
+  // from 30 s to 30 min, until they go through. Staff see "refund pending".
+  const refundRetry = new Map(); // order code -> { tries, next (ms) }
+  async function retryRefunds(now) {
+    for (const code of store.refundsDue()) {
+      const r = refundRetry.get(code) || { tries: 0, next: 0 };
+      if (now.getTime() < r.next) continue;
+      const ok = await refundOrder(code, `Order ${code} cancelled (refund retry)`, now).catch(() => false);
+      if (ok) { refundRetry.delete(code); continue; }
+      r.tries += 1;
+      r.next = now.getTime() + Math.min(30 * MIN, 30000 * 2 ** (r.tries - 1));
+      refundRetry.set(code, r);
+      if (r.tries === 5) log.error(`[payments] refund for ${code} still failing after 5 tries; check the gateway dashboard`);
+    }
+  }
+
   /**
    * Ask the gateway about payment requests still open (lost webhooks, gateways
-   * that only report by status check). Returns how many orders it confirmed.
+   * that only report by status check), and retry refunds that failed.
+   * Returns how many orders it confirmed.
    */
   async function sweep(now = new Date()) {
+    await retryRefunds(now);
     if (!client.checkStatus) return 0;
     const since = new Date(now.getTime() - (windowMinutes + 30) * MIN).toISOString();
     let confirmed = 0;

@@ -266,7 +266,8 @@ function createOrderService(store) {
       nextStatuses: (TRANSITIONS[row.fulfilment][row.status] || []),
       etaMinutes: etaMinutes(row.fulfilment, row.distance_km || 0),
       outlet: outlet && { id: outlet.id, name: outlet.name, phone: outlet.phone, address: outlet.address, lat: outlet.lat, lng: outlet.lng },
-      paymentLabel: PAYMENT_LABELS[row.payment_status],
+      // A cancelled order still showing paid is waiting for its refund (retried automatically).
+      paymentLabel: row.status === 'cancelled' && row.payment_status === 'paid' ? 'Paid, refund pending' : PAYMENT_LABELS[row.payment_status],
       delivery: presentDelivery(row),
       // Gateway: our /pay/<code> page (UPI, QR, cards; confirms itself). Otherwise
       // a upi:// request straight to the outlet's UPI ID (staff confirm).

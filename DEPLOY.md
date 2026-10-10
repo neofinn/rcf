@@ -163,6 +163,7 @@ Database changes are only ever additions (new tables and columns), so an older r
 | v0.24 | PhonePe gateway (dynamic UPI QR, callbacks, refunds), 30-second status check for lost notifications, sandbox test script |
 | v0.25 | Head office → Connections: set up payment gateways, UPI, WhatsApp and delivery partners from the panel (encrypted, live, with tests) |
 | v0.26 | Owner PIN in front of Connections (set on the server, 10-minute unlock, lockout after 5 wrong PINs) |
+| v0.27 | Failed refunds are retried automatically (30 s up to 30 min apart); cancelled paid orders show "refund pending" |
 
 Earlier client demos stay online at `https://neofinn.github.io/rcf/versions.html`.
 

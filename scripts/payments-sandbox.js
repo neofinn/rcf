@@ -76,7 +76,8 @@ async function phonepe() {
 
     const qr = await fetch(`${app.base}/pay/${o.code}/qr.png`);
     const png = Buffer.from(await qr.arrayBuffer());
-    check(qr.ok && png.subarray(1, 4).toString() === 'PNG', `order QR is PhonePe's dynamic UPI QR (${png.length} bytes)`);
+    const fromPhonePe = app.store.paymentLinks(o.id).some((l) => l.kind === 'qr');
+    check(qr.ok && png.subarray(1, 4).toString() === 'PNG' && fromPhonePe, `order QR is PhonePe's dynamic UPI QR (${png.length} bytes)`);
 
     check(await simulatePhonePe(png, 'SUCCESS') === 200, 'customer pays (PhonePe simulator: SUCCESS)');
     let confirmed = 0;
@@ -89,8 +90,13 @@ async function phonepe() {
 
     app.orders.updateStatus(o.code, 'cancelled');
     let refunded = false;
-    for (let i = 0; i < 10 && !refunded; i++) { await sleep(1000); refunded = app.orders.getOrder(o.code).payment_status === 'refunded'; }
-    check(refunded, 'outlet cancelled -> refunded through PhonePe');
+    // The sandbox sometimes says "try again in a while"; the 30-second sweep retries refunds.
+    for (let i = 0; i < 20 && !refunded; i++) {
+      await sleep(3000);
+      refunded = app.orders.getOrder(o.code).payment_status === 'refunded';
+      if (!refunded) await app.gateway.sweep(new Date(Date.now() + 60 * 60000));
+    }
+    check(refunded, 'outlet cancelled -> refunded through PhonePe (retried if PhonePe was busy)');
 
     const f = app.order('9811100002');
     const fpng = Buffer.from(await (await fetch(`${app.base}/pay/${f.code}/qr.png`)).arrayBuffer());
