@@ -189,3 +189,22 @@ test('WhatsApp with the gateway: one self-confirming pay link, no "I\'ve paid"',
   assert.deepEqual(pay.buttons.map((b) => b.id), ['act:pay_cash']);
   assert.equal(r.find((x) => x.type === 'image').url.endsWith(`/pay/${o.code}/qr.png`), true);
 });
+
+test('a refund that fails is retried by the sweep until it goes through; staff see it pending', async (t) => {
+  const { orders, base, order, hook, rp, gateway } = await world(t);
+  const o = order();
+  await fetch(`${base}/pay/${o.code}`, { redirect: 'manual' });
+  await hook(o, { payment: 'pay_R' });
+  let fail = true;
+  const real = rp.refund;
+  rp.refund = async (...a) => { if (fail) throw new Error('gateway busy'); return real(...a); };
+  orders.updateStatus(o.code, 'cancelled');
+  await new Promise((r) => setImmediate(r));
+  assert.equal(orders.getOrder(o.code).paymentLabel, 'Paid, refund pending');
+  await gateway.sweep(new Date(Date.now() + 60000));
+  assert.equal(orders.getOrder(o.code).payment_status, 'paid', 'still failing');
+  fail = false;
+  await gateway.sweep(new Date(Date.now() + 10 * 60000));
+  assert.equal(orders.getOrder(o.code).payment_status, 'refunded');
+  assert.deepEqual(rp.refunds.map((r) => r.paymentId), ['pay_R']);
+});

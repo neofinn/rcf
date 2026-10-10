@@ -31,6 +31,8 @@ function createSqliteStore(db) {
     paymentLinkById: db.prepare('SELECT * FROM payment_links WHERE id = ?'),
     insertPaymentLink: db.prepare(`INSERT INTO payment_links (id, order_id, provider, kind, url, amount, expires_at, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    refundsDue: db.prepare(`SELECT DISTINCT o.code FROM payment_links l JOIN orders o ON o.id = l.order_id
+      WHERE l.status = 'paid' AND l.payment_id IS NOT NULL AND o.status = 'cancelled' AND o.payment_status = 'paid'`),
     openPaymentLinks: db.prepare("SELECT id, order_id, provider, kind, amount FROM payment_links WHERE status = 'created' AND created_at >= ?"),
     updatePaymentLink: db.prepare('UPDATE payment_links SET status = ?, payment_id = COALESCE(?, payment_id), refund_id = COALESCE(?, refund_id), updated_at = ? WHERE id = ?'),
     allSettings: db.prepare('SELECT key, value, secret, updated_at, updated_by FROM app_settings'),
@@ -179,6 +181,8 @@ function createSqliteStore(db) {
     paymentLinks: (orderId) => q.paymentLinks.all(orderId),
     paymentLinkById: (id) => q.paymentLinkById.get(id) || null,
     insertPaymentLink: (l) => q.insertPaymentLink.run(l.id, l.order_id, l.provider, l.kind || 'link', l.url, l.amount, l.expires_at, l.status, l.created_at, l.created_at),
+    /** Cancelled orders whose gateway payment hasn't been refunded yet (a refund failed). */
+    refundsDue: () => q.refundsDue.all().map((r) => r.code),
     /** Payment requests not yet paid, failed or refunded, made since `since`. */
     openPaymentLinks: (since) => q.openPaymentLinks.all(since),
     updatePaymentLink: (id, { status, payment_id = null, refund_id = null }, ts) => q.updatePaymentLink.run(status, payment_id, refund_id, ts, id),
