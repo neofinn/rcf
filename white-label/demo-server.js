@@ -58,7 +58,7 @@ self.RCDemoServer = (() => {
       persistSoon();
       return { status: 200, body: { ok: true } };
     }
-    const res = await be.request(msg.method, msg.url, msg.body, msg.token);
+    const res = await be.request(msg.method, msg.url, msg.body, msg.token, msg.ownerToken);
     // Save before answering: the page may navigate away (e.g. to tracking) right after.
     if (msg.method !== 'GET') { clearTimeout(timer); try { await save(JSON.stringify(be.snapshot())); } catch (e) { /* storage full or blocked */ } }
     const body = typeof res.body === 'string' ? res.body : JSON.parse(JSON.stringify(res.body ?? null));
