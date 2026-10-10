@@ -52,7 +52,22 @@ command -v pm2 >/dev/null || npm install -g --no-fund --no-audit pm2
 step "App user $APP_USER"
 id "$APP_USER" >/dev/null 2>&1 || adduser --disabled-password --gecos "" "$APP_USER"
 as_app "mkdir -p ~/shared/data ~/shared/backups ~/shared/logs ~/releases"
-[ -d "$APP_HOME/repo/.git" ] || as_app "git clone --quiet '$REPO_URL' ~/repo"
+# Private repository: use an SSH address (git@github.com:you/repo.git). The
+# server gets its own read-only deploy key; add it in GitHub once.
+if [[ "$REPO_URL" == git@* ]] && [ ! -f "$APP_HOME/.ssh/id_ed25519" ]; then
+  step "Deploy key for the private repository"
+  as_app "mkdir -p ~/.ssh && chmod 700 ~/.ssh && ssh-keygen -q -t ed25519 -N '' -C 'rcf-server' -f ~/.ssh/id_ed25519"
+  as_app "ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null"
+  echo
+  echo "    Add this key to the repository: GitHub → repository → Settings → Deploy keys → Add deploy key"
+  echo "    (title: ordering server, leave 'Allow write access' OFF):"
+  echo
+  cat "$APP_HOME/.ssh/id_ed25519.pub"
+  echo
+  read -r -p "    Press Enter once the key is added… " _
+fi
+[ -d "$APP_HOME/repo/.git" ] || as_app "git clone --quiet '$REPO_URL' ~/repo" || {
+  echo "    Couldn't download the code from $REPO_URL. For a private repository use its SSH address (git@github.com:…) and add the deploy key shown above."; exit 1; }
 
 # ---- .env with fresh secrets (only the first time) ---------------------------------
 FIRST_RUN=0
