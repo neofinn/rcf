@@ -282,7 +282,7 @@ window.addEventListener('message', async (e) => {
   const from = frameOf(e.source);
   if (!d || !d.rc || !from) return;
   if (d.kind === 'fetch') {
-    const res = await be.request(d.method, d.url, d.body, d.token);
+    const res = await be.request(d.method, d.url, d.body, d.token, d.ownerToken);
     observe(from, d, res);
     e.source.postMessage({ rc: true, reply: true, id: d.id, status: res.status, body: res.body }, '*');
   } else if (d.kind === 'gps') {

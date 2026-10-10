@@ -3,7 +3,7 @@
 This takes the app from the demo to real orders. Rough order of work:
 
 1. Start the WhatsApp/Meta paperwork first: business verification can take days.
-2. Set up the server (about an hour).
+2. Set up the server: one script, about 15 minutes once DNS points at it.
 3. Add Supabase (about 15 minutes).
 4. Connect WhatsApp, payments and Shadowfax.
 
@@ -51,106 +51,101 @@ node scripts/loadtest.js http://localhost:3456 --seconds 60 --customers 20
 
 **WhatsApp limits.** The Cloud API sends up to 80 messages a second per number, far above ~10 messages per order. The limit that matters is Meta's **messaging tier**: how many different customers a day you may message *first*, with templates such as review requests to web customers and offers. It starts low and rises with business verification and good quality ratings. Replies to customers who messaged you are not limited by it.
 
-### Set up the VPS (Ubuntu 24.04)
+### Set up the VPS (Ubuntu 24.04): one script
 
-In hPanel: **VPS → choose the plain Ubuntu 24.04 template**, set a root password or SSH key, note the server's IP.
+**Before you start:**
+1. Buy the VPS with **Ubuntu 24.04** and note its IP address.
+2. Choose the ordering address, e.g. `order.<your-domain>`. At the domain registrar, add an `A` record from that name to the VPS IP.
+3. Wait until `ping order.<your-domain>` shows the VPS IP, usually a few minutes.
 
-**DNS.** Point a domain at the server: an `A` record, e.g. `order.<your-domain>` → VPS IP.
-
-**Install** (SSH in as root):
-
-```bash
-# Node.js 22 LTS, git, nginx, certbot, sqlite3 (for backups)
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt-get install -y nodejs git nginx certbot python3-certbot-nginx sqlite3
-npm install -g pm2
-
-# App user and code
-adduser --disabled-password --gecos "" ordering
-su - ordering -c "git clone <your-repo-url> app && cd app && npm ci --omit=dev"
-```
-
-**Configure:**
+**Run the setup** (SSH in as root, then):
 
 ```bash
-su - ordering
-cd app
-cp .env.example .env
-nano .env
+curl -fsSL <raw URL of deploy/setup.sh in your repo> -o setup.sh
+sudo REPO_URL=<your-repo-url> CLIENT=<client-id> bash setup.sh order.<your-domain> you@example.com <release branch>
 ```
 
-In `.env`, set at least:
-- `NODE_ENV=production`
-- `PUBLIC_BASE_URL=https://order.<your-domain>`
-- `ADMIN_TOKEN` (generate one with `openssl rand -hex 24`)
-- `DB_PATH=/home/ordering/data/ordering.db`
+`deploy/setup.sh` does everything below, and is safe to run again; it never overwrites `.env` or the database:
+- installs nginx, certbot, sqlite3, the firewall, Node.js 22 and pm2;
+- creates the app user `ordering`;
+- writes `/home/ordering/shared/.env` with fresh secrets (head office token, WhatsApp verify token, partner callback tokens);
+- installs the release with `deploy.sh` (below), which runs the test suite first;
+- configures nginx (gzip, an API rate limit, a "back in a moment" page during restarts) and a free HTTPS certificate with automatic renewal;
+- sets up start on boot, log rotation, nightly backups and the firewall.
 
-Fill in the WhatsApp, Shadowfax and Supabase settings as you finish those sections below.
+At the end it prints the panel addresses, the **head office token** and the **WhatsApp webhook URL and verify token**, then runs the setup check.
 
-Before the first start, set `CLIENT` in `.env` to the client's profile folder and check its outlets, menu prices and UPI IDs (see `clients/README.md`). After that they are edited in the head office panel.
+**Layout on the server** (`/home/ordering`):
 
-**Run it with PM2** (restarts on crash and on reboot):
+```
+repo/                 git clone, only used to fetch releases
+releases/<name>/      one folder per installed release (last 5 kept)
+current -> releases/… the live release (pm2 runs this)
+shared/.env           settings and keys (chmod 600)
+shared/data/ordering.db    the database: all orders, customers, menu
+shared/backups/       nightly backups (30 days) + one before every update
+shared/logs/          app, backup and test logs
+```
+
+**Settings.** Fill in the WhatsApp, delivery partner and Supabase keys as you finish those sections below:
 
 ```bash
-pm2 start npm --name ordering -- start
-pm2 save
-exit                                  # back to root
-env PATH=$PATH:/usr/bin pm2 startup systemd -u ordering --hp /home/ordering
+sudo -u ordering nano /home/ordering/shared/.env
+sudo -u ordering pm2 reload ordering
 ```
 
-**Nginx + HTTPS.** HTTPS is required by WhatsApp webhooks and by browser GPS. Create `/etc/nginx/sites-available/ordering`:
+**Setup check.** `sudo -u ordering bash -c 'cd ~/current && npm run check'` lists what is still missing or a placeholder: UPI IDs ending `@example`, outlets without a panel PIN or Shadowfax store code, test-server URLs for delivery partners, the placeholder delivery rate card. In production, the server **refuses to start** on unsafe settings:
+- a short head office token, or a non-https address;
+- WhatsApp connected without its app secret;
+- delivery partners in simulate mode, or a partner without its callback secret.
 
-```nginx
-server {
-  server_name order.your-domain.in;
-  client_max_body_size 1m;
-  location / {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-}
-```
+**Panels.** Open `https://order.<your-domain>/admin/` with the head office token. In **Outlets**, set a PIN for each outlet and fix each outlet's UPI ID and phone number. On each outlet's tablet, open `https://order.<your-domain>/outlet/`, pick the outlet, enter its PIN, and add it to the home screen.
 
-Then enable the site, open the firewall and get a certificate:
+**Uptime alert (free).** At uptimerobot.com, add an HTTPS monitor for `https://order.<your-domain>/healthz` (every 5 minutes) with alerts to your phone. It reports `{"ok":true}` only when the app and the database answer.
+
+**Backups.** Every night at 03:15, `deploy/backup.sh` copies the database (consistent while running), checks it, and keeps 30 days in `shared/backups/`. Every update also takes a backup first. For copies off the server: Supabase (section 2) holds a live copy, and Hostinger's weekly VPS snapshots cover the whole machine. To restore a backup:
 
 ```bash
-ln -s /etc/nginx/sites-available/ordering /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx
-ufw allow OpenSSH && ufw allow 'Nginx Full' && ufw enable
-certbot --nginx -d order.your-domain.in     # free Let's Encrypt certificate, auto-renews
+sudo -u ordering pm2 stop ordering
+sudo -u ordering bash -c 'gunzip -c ~/shared/backups/ordering-2026-11-02-0315.db.gz > ~/shared/data/ordering.db && rm -f ~/shared/data/ordering.db-wal ~/shared/data/ordering.db-shm'
+sudo -u ordering pm2 start ordering
 ```
 
-Check `https://order.your-domain.in/healthz`. It should return `{"ok":true}`.
+Orders placed after that backup are lost, so only do this if the data is damaged.
 
-**Panels.** Open `https://order.your-domain.in/admin/` with the `ADMIN_TOKEN` (head office only). In **Outlets**, set a PIN for each outlet. On each outlet's tablet, open `https://order.your-domain.in/outlet/`, pick the outlet, enter its PIN, and add it to the home screen.
-
-**Backups.** The whole business data is one file. Back it up nightly (as user `ordering`, `crontab -e`):
-
-```
-15 3 * * * mkdir -p ~/backups && sqlite3 ~/data/ordering.db ".backup '$HOME/backups/ordering-$(date +\%F).db'" && find ~/backups -name 'ordering-*.db' -mtime +30 -delete
-```
-
-Two more layers:
-- Turn on Hostinger's weekly VPS backups or snapshots.
-- With Supabase connected (next section), every change is also copied off the server within seconds.
-
-**Updating the app later:**
+**Updating, and rolling back.** Every release is a branch `release/v0.N` on GitHub. To update:
 
 ```bash
-su - ordering
-cd app && git pull && npm ci --omit=dev && pm2 restart ordering
+sudo -u ordering bash /home/ordering/current/deploy/deploy.sh release/v0.21
 ```
 
-**Versions and rolling back.** Keep every release as a branch or tag (for example `release/v1.0`) and run the server on one of them, never on an unnamed commit. Before an update, take a backup, then switch:
+The script:
+1. installs the release into a new folder;
+2. **runs the full test suite** (stops here if anything fails; nothing changes);
+3. backs up the database;
+4. switches over (customers see "back in a moment" for 1–2 seconds);
+5. waits for the health check.
+
+If the new version doesn't come up healthy within 40 seconds, **it switches back to the previous one by itself**. Update outside the lunch and dinner rush.
 
 ```bash
-su - ordering
-sqlite3 ~/data/ordering.db ".backup '$HOME/backups/ordering-before-update.db'"
-cd app && git fetch origin && git checkout -B live origin/release/v1.1 && npm ci --omit=dev && pm2 restart ordering
+sudo -u ordering bash /home/ordering/current/deploy/deploy.sh --list       # installed releases, * = live
+sudo -u ordering bash /home/ordering/current/deploy/deploy.sh --rollback   # back to the one before
 ```
 
-To roll back, run the same command with the earlier version. Database changes are only ever additions (new tables and columns), so an older version runs on a newer database and nothing needs restoring. Restore the backup only if the new version damaged data: stop the app, copy the file over `~/data/ordering.db` and start it again; orders placed since the backup are lost.
+Database changes are only ever additions (new tables and columns), so an older release runs on a newer database and a rollback never needs a restore.
+
+**Everyday commands:**
+
+| What | Command |
+|---|---|
+| Is it running? | `sudo -u ordering pm2 status` |
+| Live log | `sudo -u ordering pm2 logs ordering` |
+| Restart after editing `.env` | `sudo -u ordering pm2 reload ordering` |
+| Health | `curl https://order.<your-domain>/healthz` |
+| Deploy history | `cat /home/ordering/shared/deploys.log` |
+
+Name each release (for example `release/v1.0`, `release/v1.1`) so you can always roll back to a known one.
 
 ---
 
@@ -227,6 +222,102 @@ The WhatsApp Business **Platform** (Cloud API, which the bot uses) needs a phone
    - Without this, customers get the order's UPI QR and pay-link instead.
 
 **Costs.** Replies to customers within the 24-hour window are free. Templates are charged per message by category: in India, utility costs roughly ₹0.1–0.2 and marketing roughly ₹0.8–1. Check Meta's current rate card. There is no monthly fee when you connect directly to Meta like this. A provider (Interakt, AiSensy, Gupshup and similar) adds a monthly fee and isn't needed.
+
+---
+
+## Online payments: dynamic UPI QR (your existing gateway)
+
+"Pay now" gives every order its own UPI QR and pay link. Each carries:
+- **your gateway's merchant UPI ID**;
+- **the exact amount**;
+- **the order code** as the transaction reference.
+
+Customers' UPI apps open with everything filled in, and each payment shows the order code in your gateway's dashboard.
+
+1. In `/home/ordering/shared/.env`, set:
+   - `UPI_ID` to the merchant UPI ID from your payment gateway (one for all outlets);
+   - `UPI_PAYEE_NAME` (e.g. the business name);
+   - `UPI_MERCHANT_CODE=5812` (restaurants).
+
+   An outlet can have its own UPI ID instead (Head office → Outlets).
+2. `sudo -u ordering pm2 reload ordering`, then place a test "Pay now" order for ₹1–2 worth of items. Scan the QR with GPay, PhonePe and Paytm and check that each opens with the amount and the order code, and that the payment shows in the gateway with that code.
+3. **Confirmation.** Staff tap **Payment received** after a customer taps "I've paid", once the amount shows in the gateway dashboard or app. To make this automatic, the gateway's payment notification (webhook) can be connected so each payment confirms its order by the order code. That needs the gateway's webhook format; tell us which gateway you use.
+
+## Head office → Connections
+
+Payment gateways, the UPI ID, WhatsApp and delivery partners can all be set up from **Head office → Connections** instead of editing `.env`.
+
+**Owner PIN.** The head office login opens every other tab, but Connections also needs the **owner PIN**, so ordinary staff can't change payment or rider settings.
+- `setup.sh` creates the PIN on first setup and prints it once. Keep it with the owner.
+- To set or reset it, run this on the server: `sudo -u ordering bash -c 'cd ~/current && npm run owner-pin'` (random 6-digit PIN), or add `-- 739182` to choose one. That also signs out every browser that had it unlocked.
+- Rules: 6–8 digits, not one digit repeated, not a run like 123456. It's stored only as a hash.
+- The owner can change it inside Connections by entering the current PIN.
+- An unlock lasts while the page is in use and locks after 10 idle minutes, or with **Lock now**.
+- Five wrong PINs lock it for 15 minutes. Unlocks and wrong PINs appear in the change log.
+
+Once unlocked:
+- **Keys:** paste them in and press **Save**. They're encrypted with `SETTINGS_KEY`, which setup.sh creates. They take effect at once with no restart, and they're never shown again (only "set, ends …1a2b").
+- **Test connection:** makes a harmless call with the saved keys and says whether they work. Available for Razorpay, PhonePe, WhatsApp and the UPI ID.
+- **Notifications address:** each card shows the address to paste into that service's dashboard.
+- **Server settings:** an empty field uses the value from `.env`; "use server setting" removes a value saved in the panel.
+- **Change log:** every change is listed at the bottom (who, when, which field), never the values.
+
+Keep `SETTINGS_KEY` safe and unchanged: if it changes, keys saved in the panel must be entered again (the panel says which).
+
+## Where payment notifications arrive, and testing them
+
+**Where notifications arrive.** Your gateway posts each payment to our server:
+- `https://order.<your-domain>/webhooks/razorpay` for Razorpay;
+- `https://order.<your-domain>/webhooks/phonepe` for PhonePe.
+
+Each message is signature-checked and matched to its order by our own record of the payment request. If a notification is lost, the server asks the gateway about every open payment every 30 seconds, so an order can't get stuck. Both routes report the same payment only once, and the second report is never refunded as a duplicate.
+
+**Testing against the gateways' test systems** (no real money): `npm run payments:sandbox`.
+- **PhonePe sandbox**, using PhonePe's shared test merchant, needs no account. The script:
+  1. places an order;
+  2. gets PhonePe's dynamic UPI QR for it;
+  3. pays it with PhonePe's simulator;
+  4. checks that the status check confirms it and the WhatsApp confirmation goes out;
+  5. cancels it and checks the refund goes through PhonePe;
+  6. checks that a failed payment leaves the order waiting.
+- **Razorpay test mode** runs too when `RAZORPAY_KEY_ID=rzp_test_…` and `RAZORPAY_KEY_SECRET` are set: it creates a real test payment link and checks its status.
+
+## PhonePe Payment Gateway
+
+1. PhonePe Business dashboard → Developer settings: copy the **Merchant ID**, **Salt key** and **Salt index**.
+2. In `.env`, set `PHONEPE_MERCHANT_ID`, `PHONEPE_SALT_KEY` and `PHONEPE_SALT_INDEX`, and set `PHONEPE_ENV=production` (or `sandbox` while testing). Then `pm2 reload ordering`.
+3. Every "Pay now" order's QR is then PhonePe's own dynamic UPI QR for the exact amount, and the pay link opens PhonePe's pay page. Payments confirm themselves, and cancelled paid orders are refunded.
+
+PhonePe's newer onboarding issues a client ID and secret (API v2) instead of a salt key. If your account only has those, tell us and we'll add v2; it works the same way.
+
+## Online payments: Razorpay payment links (alternative)
+
+Without a gateway, "Pay now" goes straight to each outlet's UPI ID, and staff confirm every payment by hand. With Razorpay:
+- payments confirm themselves;
+- paid orders that the outlet cancels are refunded automatically.
+
+Hosting, WhatsApp and gateway options are compared in [docs/GO-LIVE-OPTIONS.md](docs/GO-LIVE-OPTIONS.md).
+
+1. Sign up at razorpay.com with the business's PAN, GST and bank account, and complete KYC. Payments settle to that bank account.
+2. Dashboard → **Account & Settings → API keys**: generate a key. Start with the **Test mode** key (`rzp_test_…`), then switch to the **Live** key after a test order.
+3. Dashboard → **Webhooks → Add new webhook**:
+   - URL `https://order.<your-domain>/webhooks/razorpay`;
+   - a secret you choose (`openssl rand -hex 24`);
+   - event **`payment_link.paid`**.
+4. In `/home/ordering/shared/.env`, set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET`, then `sudo -u ordering pm2 reload ordering`. `npm run check` confirms the setup, and production refuses to start if the webhook secret is missing.
+5. **Test with a test key:**
+   - place a "Pay now" order;
+   - open its pay link and pay with Razorpay's test UPI (`success@razorpay`);
+   - the order should move to the outlet panel by itself and WhatsApp should confirm it;
+   - cancel it from the outlet panel and check the refund appears in the dashboard.
+6. **Optional, for paying inside WhatsApp:**
+   - in WhatsApp Manager → Payments (India), create a payment configuration connected to Razorpay;
+   - set `WHATSAPP_PAYMENTS=on`;
+   - put the configuration's name on each outlet.
+
+   Customers then see "Review and pay" in the chat, with our Razorpay link as the fallback.
+
+Fees: Razorpay's standard rate is 2% + GST per payment, and you can negotiate it at this volume (see docs/GO-LIVE-OPTIONS.md). Pay-on-delivery orders cost nothing.
 
 ---
 

@@ -21,9 +21,12 @@ const num = (v, d) => (v === undefined || v === '' ? d : Number(v));
 module.exports = {
   port: int(env.PORT, 3000),
   production: env.NODE_ENV === 'production',
-  dbPath: env.DB_PATH || path.join(__dirname, '..', 'data', 'rcf.db'),
+  dbPath: env.DB_PATH || path.join(__dirname, '..', 'data', 'ordering.db'),
   publicBaseUrl: (env.PUBLIC_BASE_URL || `http://localhost:${int(env.PORT, 3000)}`).replace(/\/$/, ''),
   adminToken: env.ADMIN_TOKEN || 'change-me',
+  // Encrypts keys saved in Head office → Connections. Keep it secret and never
+  // change it after saving keys there (they would have to be entered again).
+  settingsKey: env.SETTINGS_KEY || '',
   timezone: 'Asia/Kolkata',
 
   // Pricing rules (all money in paise).
@@ -34,6 +37,46 @@ module.exports = {
     // 0 = customers always pay the delivery charge. Set e.g. 49900 to make
     // delivery free (outlet pays Shadowfax) on bigger orders.
     freeDeliveryAbove: int(env.FREE_DELIVERY_ABOVE_PAISE, 0),
+  },
+
+  // Online UPI: an order waits this long for payment before it is cancelled.
+  payments: {
+    windowMinutes: num(env.PAYMENT_WINDOW_MINUTES, 15),
+    // Which gateway "Pay now" uses: auto (whichever has keys), none, razorpay, phonepe.
+    provider: env.PAYMENT_GATEWAY || 'auto',
+  },
+
+  // Dynamic UPI QR: the UPI ID payments go to. One business-wide ID (e.g. the
+  // merchant UPI ID from your payment gateway) for every outlet; an outlet's own
+  // UPI ID (Head office → Outlets) overrides it. Every order's QR carries the
+  // exact amount and the order code as the transaction reference.
+  upi: {
+    id: env.UPI_ID || '',
+    payeeName: env.UPI_PAYEE_NAME || '',
+    // Merchant category code for merchant UPI IDs (5812 = restaurants). Leave
+    // empty for a personal UPI ID.
+    merchantCode: env.UPI_MERCHANT_CODE || '',
+  },
+
+  // Payment gateway: with Razorpay keys, "Pay now" uses a Razorpay payment link
+  // (UPI apps, QR, cards) and payments confirm themselves via its webhook; cancelled
+  // paid orders are refunded. Without keys: plain UPI to each outlet, confirmed by staff.
+  razorpay: {
+    keyId: env.RAZORPAY_KEY_ID || '',
+    keySecret: env.RAZORPAY_KEY_SECRET || '',
+    // Webhook secret set in Razorpay Dashboard > Webhooks (signs every callback).
+    webhookSecret: env.RAZORPAY_WEBHOOK_SECRET || '',
+    baseUrl: env.RAZORPAY_BASE_URL || 'https://api.razorpay.com/v1',
+  },
+
+  // PhonePe Payment Gateway (alternative to Razorpay): dynamic UPI QR per order,
+  // hosted pay page, callbacks to /webhooks/phonepe, status checks every 30 s.
+  // PHONEPE_ENV=sandbox works with PhonePe's shared test merchant.
+  phonepe: {
+    merchantId: env.PHONEPE_MERCHANT_ID || '',
+    saltKey: env.PHONEPE_SALT_KEY || '',
+    saltIndex: env.PHONEPE_SALT_INDEX || '1',
+    env: env.PHONEPE_ENV === 'production' ? 'production' : 'sandbox',
   },
 
   // Loyalty: 1 point for every ₹100 of a completed order.
@@ -119,4 +162,16 @@ module.exports = {
     // 'digital-goods' needs no shipping address block; 'physical-goods' does.
     goodsType: env.WHATSAPP_PAYMENTS_GOODS_TYPE || 'digital-goods',
   },
+};
+
+/** Which payment gateway "Pay now" uses: 'razorpay', 'phonepe' or null (plain UPI QR). */
+module.exports.paymentGateway = () => {
+  const c = module.exports;
+  const choice = c.payments.provider || 'auto';
+  if (choice === 'none') return null;
+  if (choice === 'razorpay') return c.razorpay.keyId ? 'razorpay' : null;
+  if (choice === 'phonepe') return c.phonepe.merchantId ? 'phonepe' : null;
+  if (c.razorpay.keyId) return 'razorpay';
+  if (c.phonepe.merchantId) return 'phonepe';
+  return null;
 };

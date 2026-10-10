@@ -262,11 +262,19 @@ test('UPI: pay now sends QR and link for the exact amount to the cooking outlet'
   assert.match(img.svg, /^<svg/);
   assert.deepEqual(allIds(r), ["act:paid", 'act:pay_cash']);
 
+  // Not placed until paid: the kitchen doesn't see it as a new order yet.
+  assert.equal(o.status, 'awaiting_payment');
+  assert.doesNotMatch(r.map((x) => x.text || '').join('\n'), /Order placed/);
+  assert.match(r[0].text, /Pay ₹[\d.,]+ to confirm it/);
+
   r = c.tap('act:paid');
-  assert.match(r[0].text, /will confirm/);
+  assert.match(r[0].text, /goes to the kitchen as soon as they see it/);
   assert.equal(c.orders.getOrder(o.code).payment_status, 'claimed');
-  assert.equal(c.orders.setPayment(o.code, 'paid').paymentLabel, 'Paid by UPI');
-  assert.match(c.text('track')[0].text, /Paid by UPI/);
+  assert.equal(c.orders.getOrder(o.code).status, 'awaiting_payment', 'a claim alone does not place it');
+  const paid = c.orders.setPayment(o.code, 'paid');
+  assert.equal(paid.paymentLabel, 'Paid online');
+  assert.equal(paid.status, 'placed', 'staff seeing the money sends it to the kitchen');
+  assert.match(c.text('track')[0].text, /Paid online/);
 });
 
 test('UPI: screenshot counts as a claim; customer can switch to cash', () => {

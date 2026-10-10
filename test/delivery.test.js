@@ -103,6 +103,7 @@ test('dispatcher: booking failure and partner cancellation leave the order with 
   const provider = { name: 'shadowfax', label: 'Shadowfax', ready: (outlet) => Boolean(outlet.sfx_store_code), book: async () => { if (fail) throw new Error('Shadowfax has no rider for this address right now'); return { ref: 'R2', status: 'ACCEPTED' }; }, cancel: async () => {} };
   const d = createDispatcher({ orders, store, provider, log: { error() {} } });
   const o = deliveryOrder(orders, 'upi');
+  orders.setPayment(o.code, 'paid');
   orders.updateStatus(o.code, 'accepted');
   await tick();
   assert.equal(orders.getOrder(o.code).delivery.status, 'FAILED');

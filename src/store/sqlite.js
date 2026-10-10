@@ -27,6 +27,20 @@ function createSqliteStore(db) {
     adjustStock: db.prepare('UPDATE outlet_stock SET remaining = MAX(0, remaining + ?), updated_at = ? WHERE outlet_id = ? AND item_id = ?'),
     pinHash: db.prepare('SELECT pin_hash, updated_at FROM outlet_logins WHERE outlet_id = ?'),
     logins: db.prepare('SELECT outlet_id, updated_at FROM outlet_logins'),
+    paymentLinks: db.prepare('SELECT * FROM payment_links WHERE order_id = ? ORDER BY created_at, rowid'),
+    paymentLinkById: db.prepare('SELECT * FROM payment_links WHERE id = ?'),
+    insertPaymentLink: db.prepare(`INSERT INTO payment_links (id, order_id, provider, kind, url, amount, expires_at, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    openPaymentLinks: db.prepare("SELECT id, order_id, provider, kind, amount FROM payment_links WHERE status = 'created' AND created_at >= ?"),
+    updatePaymentLink: db.prepare('UPDATE payment_links SET status = ?, payment_id = COALESCE(?, payment_id), refund_id = COALESCE(?, refund_id), updated_at = ? WHERE id = ?'),
+    allSettings: db.prepare('SELECT key, value, secret, updated_at, updated_by FROM app_settings'),
+    setSetting: db.prepare(`INSERT INTO app_settings (key, value, secret, updated_at, updated_by) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, secret = excluded.secret, updated_at = excluded.updated_at, updated_by = excluded.updated_by`),
+    deleteSetting: db.prepare('DELETE FROM app_settings WHERE key = ?'),
+    addSettingsLog: db.prepare('INSERT INTO settings_log (at, by, integration, change) VALUES (?, ?, ?, ?)'),
+    settingsLog: db.prepare('SELECT at, by, integration, change FROM settings_log ORDER BY id DESC LIMIT ?'),
+    gatewayEventSeen: db.prepare('INSERT OR IGNORE INTO gateway_events (event_id, at) VALUES (?, ?)'),
+    unpaidBefore: db.prepare("SELECT code FROM orders WHERE status = 'awaiting_payment' AND payment_status = 'pending' AND created_at < ?"),
     setPin: db.prepare(`INSERT INTO outlet_logins (outlet_id, pin_hash, updated_at) VALUES (?, ?, ?)
       ON CONFLICT (outlet_id) DO UPDATE SET pin_hash = excluded.pin_hash, updated_at = excluded.updated_at`),
     addSession: db.prepare('INSERT INTO staff_sessions (token_hash, outlet_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
@@ -60,7 +74,7 @@ function createSqliteStore(db) {
     // INDEXED BY: without it SQLite picks the outlet index for the GROUP BY and
     // scans every order ever placed (seconds with a year of data).
     summary: db.prepare(`SELECT outlet_id, COUNT(*) AS orders, SUM(total) AS revenue FROM orders INDEXED BY orders_created
-      WHERE status != 'cancelled' AND created_at >= ? GROUP BY outlet_id`),
+      WHERE status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') AND created_at >= ? GROUP BY outlet_id`),
 
     openHandoff: db.prepare(`INSERT INTO wa_handoffs (phone, name, outlet_id, status, created_at, updated_at)
       VALUES (?, ?, ?, 'open', ?, ?)`),
@@ -94,18 +108,18 @@ function createSqliteStore(db) {
     ordersForPhone: db.prepare('SELECT * FROM orders WHERE phone = ? ORDER BY id DESC'),
     ordersBetween: db.prepare('SELECT * FROM orders WHERE created_at >= ? AND created_at < ? ORDER BY created_at'),
     // Each customer's first (non-cancelled) order, for customers who ordered in a range.
-    firstOrders: db.prepare(`SELECT p.phone, (SELECT o.created_at FROM orders o WHERE o.phone = p.phone AND o.status <> 'cancelled'
+    firstOrders: db.prepare(`SELECT p.phone, (SELECT o.created_at FROM orders o WHERE o.phone = p.phone AND o.status NOT IN ('cancelled', 'awaiting_payment', 'unpaid')
       ORDER BY o.created_at LIMIT 1) AS first FROM (SELECT DISTINCT phone FROM orders WHERE created_at >= ? AND created_at < ?) p`),
     customerStats: db.prepare(`SELECT phone, COUNT(*) AS orders, SUM(total) AS spent, MIN(created_at) AS first, MAX(created_at) AS last
-      FROM orders WHERE status <> 'cancelled' GROUP BY phone`),
+      FROM orders WHERE status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') GROUP BY phone`),
     customerStatsFor: db.prepare(`SELECT COUNT(*) AS orders, COALESCE(SUM(total), 0) AS spent, MIN(created_at) AS first, MAX(created_at) AS last
-      FROM orders WHERE phone = ? AND status <> 'cancelled'`),
-    favOutletFor: db.prepare(`SELECT outlet_id FROM orders WHERE phone = ? AND status <> 'cancelled' GROUP BY outlet_id ORDER BY COUNT(*) DESC LIMIT 1`),
-    repeatSpends: db.prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM orders WHERE status <> 'cancelled' GROUP BY phone HAVING COUNT(*) >= 2)`),
-    vipCut: db.prepare(`SELECT SUM(total) AS spent FROM orders WHERE status <> 'cancelled' GROUP BY phone HAVING COUNT(*) >= 2
+      FROM orders WHERE phone = ? AND status NOT IN ('cancelled', 'awaiting_payment', 'unpaid')`),
+    favOutletFor: db.prepare(`SELECT outlet_id FROM orders WHERE phone = ? AND status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') GROUP BY outlet_id ORDER BY COUNT(*) DESC LIMIT 1`),
+    repeatSpends: db.prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM orders WHERE status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') GROUP BY phone HAVING COUNT(*) >= 2)`),
+    vipCut: db.prepare(`SELECT SUM(total) AS spent FROM orders WHERE status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') GROUP BY phone HAVING COUNT(*) >= 2
       ORDER BY spent DESC LIMIT 1 OFFSET ?`),
     balanceFor: db.prepare('SELECT COALESCE(SUM(points), 0) AS b FROM loyalty_ledger WHERE phone = ?'),
-    customerOutlets: db.prepare(`SELECT phone, outlet_id, COUNT(*) AS n FROM orders WHERE status <> 'cancelled' GROUP BY phone, outlet_id`),
+    customerOutlets: db.prepare(`SELECT phone, outlet_id, COUNT(*) AS n FROM orders WHERE status NOT IN ('cancelled', 'awaiting_payment', 'unpaid') GROUP BY phone, outlet_id`),
     linesBetween: db.prepare(`SELECT oi.order_id, oi.item_id, oi.name, oi.price, oi.qty, oi.note FROM order_items oi
       JOIN orders o ON o.id = oi.order_id WHERE o.created_at >= ? AND o.created_at < ?`),
     insertItem: db.prepare('INSERT INTO menu_items (category, name, description, price, veg, sort, active) VALUES (?, ?, ?, ?, ?, ?, ?)'),
@@ -161,6 +175,23 @@ function createSqliteStore(db) {
 
     // Orders
     orderCodeExists: (code) => !!q.byCode.get(code),
+    // Gateway payment links for an order (oldest first).
+    paymentLinks: (orderId) => q.paymentLinks.all(orderId),
+    paymentLinkById: (id) => q.paymentLinkById.get(id) || null,
+    insertPaymentLink: (l) => q.insertPaymentLink.run(l.id, l.order_id, l.provider, l.kind || 'link', l.url, l.amount, l.expires_at, l.status, l.created_at, l.created_at),
+    /** Payment requests not yet paid, failed or refunded, made since `since`. */
+    openPaymentLinks: (since) => q.openPaymentLinks.all(since),
+    updatePaymentLink: (id, { status, payment_id = null, refund_id = null }, ts) => q.updatePaymentLink.run(status, payment_id, refund_id, ts, id),
+    // Connection settings (Head office → Connections).
+    allSettings: () => q.allSettings.all(),
+    setSetting: (key, value, secret, ts, by) => q.setSetting.run(key, value, secret ? 1 : 0, ts, by || null),
+    deleteSetting: (key) => q.deleteSetting.run(key),
+    addSettingsLog: (at, by, integration, change) => q.addSettingsLog.run(at, by || null, integration, change),
+    settingsLog: (limit = 30) => q.settingsLog.all(limit),
+    /** Record a gateway webhook event id; false if it was handled before. */
+    gatewayEventSeen: (eventId, ts) => q.gatewayEventSeen.run(eventId, ts).changes === 0,
+    // UPI orders nobody has paid (or said they paid) since before `cutoff`.
+    unpaidBefore: (cutoff) => q.unpaidBefore.all(cutoff),
     insertOrder: (o, lines) => transaction(() => {
       const id = q.insertOrder.run(o.code, o.outlet_id, o.channel, o.fulfilment, o.customer_name, o.phone, o.address,
         o.lat, o.lng, o.distance_km, o.notes, o.subtotal, o.packing, o.gst, o.delivery_fee, o.total, o.payment_method,

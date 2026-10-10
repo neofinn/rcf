@@ -67,7 +67,7 @@ const CHILD_SHIM = `<script>
   });
   window.fetch = async (url, opts = {}) => {
     const auth = (opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || '';
-    const r = await ask({ kind: 'fetch', method: (opts.method || 'GET').toUpperCase(), url: String(url), body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\\s+/i, '') });
+    const r = await ask({ kind: 'fetch', method: (opts.method || 'GET').toUpperCase(), url: String(url), body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\\s+/i, ''), ownerToken: (opts.headers && (opts.headers['X-Owner-Unlock'] || opts.headers['x-owner-unlock'])) || '' });
     const text = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
     return new Response(text, { status: r.status, headers: { 'Content-Type': 'application/json' } });
   };
@@ -134,7 +134,7 @@ const STANDALONE_SHIM = `<script>
     if (!/^\\/(api|webhooks)\\//.test(u)) return realFetch(url, opts);
     await ready;
     const auth = (opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || '';
-    const r = await send({ method: (opts.method || 'GET').toUpperCase(), url: u, body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\\s+/i, '') });
+    const r = await send({ method: (opts.method || 'GET').toUpperCase(), url: u, body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\\s+/i, ''), ownerToken: (opts.headers && (opts.headers['X-Owner-Unlock'] || opts.headers['x-owner-unlock'])) || '' });
     const text = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
     return new Response(text, { status: r.status, headers: { 'Content-Type': 'application/json' } });
   };
@@ -207,6 +207,8 @@ async function main() {
       'demo-backend.js': backend,
       'demo-worker.js': WORKER,
       'demo-server.js': read('demo/standalone-server.js'),
+      // Landing page with the separate links (the all-in-one page is dist/demo.html).
+      'index.html': brandPage(read('demo/links.html')),
     };
     for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(pagesDir, name), text);
     console.log(`Wrote ${Object.keys(files).length} standalone files to ${path.relative(process.cwd(), pagesDir)}/`);

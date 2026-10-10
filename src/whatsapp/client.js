@@ -59,11 +59,15 @@ function toPayload(to, r) {
   }
 }
 
-function createClient({ token = config.whatsapp.token, phoneNumberId = config.whatsapp.phoneNumberId, fetchImpl = globalThis.fetch, log = console } = {}) {
-  const enabled = Boolean(token && phoneNumberId);
-  const url = `https://graph.facebook.com/${config.whatsapp.graphVersion}/${phoneNumberId}/messages`;
+// token / phoneNumberId: fixed values (tests), or left out to use the current
+// settings at send time, so a change in Head office → Connections applies at once.
+function createClient({ token, phoneNumberId, fetchImpl = globalThis.fetch, log = console } = {}) {
+  const creds = () => ({ token: token ?? config.whatsapp.token, phoneNumberId: phoneNumberId ?? config.whatsapp.phoneNumberId });
 
   async function send(to, replies) {
+    const c = creds();
+    const enabled = Boolean(c.token && c.phoneNumberId);
+    const url = `https://graph.facebook.com/${config.whatsapp.graphVersion}/${c.phoneNumberId}/messages`;
     for (const r of replies) {
       const payload = toPayload(to, r);
       if (!enabled) {
@@ -72,7 +76,7 @@ function createClient({ token = config.whatsapp.token, phoneNumberId = config.wh
       }
       const res = await fetchImpl(url, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${c.token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
@@ -82,7 +86,10 @@ function createClient({ token = config.whatsapp.token, phoneNumberId = config.wh
     }
   }
 
-  return { enabled, send };
+  return {
+    get enabled() { const c = creds(); return Boolean(c.token && c.phoneNumberId); },
+    send,
+  };
 }
 
 module.exports = { createClient, toPayload };

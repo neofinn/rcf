@@ -15,7 +15,15 @@ const STATUS_MESSAGES = {
   ready: (o) => `🥡 Your order *${o.code}* is ready for pickup at ${o.outlet.name}, ${o.outlet.address}.`,
   completed: (o) => `🙏 Thank you for ordering from ${brand().name}! Hope you enjoyed order *${o.code}*. Send *hi* to order again.`,
   cancelled: (o) => `❌ Sorry, your order *${o.code}* was cancelled by the outlet. Please call ${o.outlet.phone} for help.`,
+  unpaid: (o) => `⌛ We didn't receive the payment for order *${o.code}* within ${config.payments.windowMinutes} minutes, so it was cancelled. Nothing was charged.
+
+Type *hi* to order again.`,
 };
+
+/** "Order confirmed" wording once an order goes to the kitchen. */
+function orderConfirmedText(o) {
+  return `🎉 Order *${o.code}* is confirmed and sent to the kitchen. ${o.outlet.name} will ${o.fulfilment === 'delivery' ? `deliver in about ${o.etaMinutes} min` : `have it ready in about ${o.etaMinutes} min`}.`;
+}
 
 /** Message WhatsApp customers when their order status changes. */
 function notifyOnStatusChange({ orders, client, crm = null, log = console }) {
@@ -53,14 +61,24 @@ function relayHandoffReplies({ handoffs, client, log = console }) {
 
 /** Tell WhatsApp customers when the outlet confirms (or can't find) their UPI payment. */
 function notifyOnPayment({ orders, client, log = console }) {
-  orders.events.on('payment', (o, previous, by) => {
+  orders.events.on('payment', (o, previous, by, { confirmed } = {}) => {
     // The bot already answers changes made in the chat (customer or WhatsApp Pay).
     if (o.channel !== 'whatsapp' || by === 'customer' || by === 'whatsapp') return;
     let text = null;
-    if (o.payment_status === 'paid') text = `✅ Payment of ${rupees(o.total)} received for order *${o.code}*. Thank you!`;
+    if (o.payment_status === 'paid' && confirmed) text = `✅ Payment of ${rupees(o.total)} received. ${orderConfirmedText(o)}`;
+    else if (o.payment_status === 'paid') text = `✅ Payment of ${rupees(o.total)} received for order *${o.code}*. Thank you!`;
     else if (o.payment_status === 'pending' && previous === 'claimed') {
-      text = `⚠️ ${o.outlet.name} can't see your payment for order *${o.code}* yet. Please check your UPI app, or pay ${rupees(o.total)} by cash/UPI when your order arrives.`;
-    } else if (o.payment_status === 'cod' && previous !== 'cod') text = `👍 No problem, pay ${rupees(o.total)} by cash/UPI ${o.fulfilment === 'delivery' ? 'when your order arrives' : 'at pickup'}.`;
+      const held = o.status === 'awaiting_payment';
+      const body = `⚠️ ${o.outlet.name} can't see your payment of ${rupees(o.total)} for order *${o.code}* yet.${held ? ' Your order is on hold until it arrives.' : ''} Please check your UPI app.`;
+      const reply = held
+        ? { type: 'buttons', text: body, buttons: [{ id: 'act:pay_again', title: '🔁 Pay again' }, { id: 'act:pay_cash', title: '💵 Pay cash instead' }] }
+        : { type: 'text', text: `${body} Or pay by cash/UPI when your order arrives.` };
+      client.send(o.phone.replace(/^\+/, ''), [reply]).catch((e) => log.error('[whatsapp] notify failed', e));
+    } else if (o.payment_status === 'refunded') {
+      text = `💸 We've refunded ${rupees(o.total)} for order *${o.code}*. It reaches your account in 5–7 working days.`;
+    } else if (o.payment_status === 'cod' && previous !== 'cod') {
+      text = `👍 No problem, pay ${rupees(o.total)} by cash/UPI ${o.fulfilment === 'delivery' ? 'when your order arrives' : 'at pickup'}.${confirmed ? ` ${orderConfirmedText(o)}` : ''}`;
+    }
     if (text) client.send(o.phone.replace(/^\+/, ''), [{ type: 'text', text }]).catch((e) => log.error('[whatsapp] notify failed', e));
   });
 }
@@ -80,4 +98,4 @@ function notifyOnDelivery({ dispatcher, client, log = console }) {
   });
 }
 
-module.exports = { notifyOnStatusChange, relayHandoffReplies, notifyOnPayment, notifyOnDelivery };
+module.exports = { orderConfirmedText, notifyOnStatusChange, relayHandoffReplies, notifyOnPayment, notifyOnDelivery };

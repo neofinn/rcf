@@ -241,6 +241,47 @@ CREATE TABLE IF NOT EXISTS wa_processed (
   message_id TEXT PRIMARY KEY,
   at TEXT NOT NULL
 );
+
+-- Payment gateway (Razorpay): one payment link per attempt to pay an order.
+CREATE TABLE IF NOT EXISTS payment_links (
+  id TEXT PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id),
+  provider TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'link',
+  url TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  expires_at TEXT NOT NULL,
+  status TEXT NOT NULL,
+  payment_id TEXT,
+  refund_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS payment_links_order ON payment_links(order_id);
+
+-- Connection settings entered in Head office → Connections (override .env).
+-- Secret values are encrypted (AES-256-GCM, key from SETTINGS_KEY).
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  secret INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  updated_by TEXT
+);
+-- Who changed which connection when (never the values).
+CREATE TABLE IF NOT EXISTS settings_log (
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL,
+  by TEXT,
+  integration TEXT NOT NULL,
+  change TEXT NOT NULL
+);
+
+-- Gateway webhook deliveries already handled (they can arrive more than once).
+CREATE TABLE IF NOT EXISTS gateway_events (
+  event_id TEXT PRIMARY KEY,
+  at TEXT NOT NULL
+);
 `;
 
 function openDb(file, { seed = client() } = {}) {
@@ -275,6 +316,8 @@ function migrate(db, seed) {
   for (const [col, type] of [['price', 'INTEGER'], ['booked_at', 'TEXT'], ['allotted_at', 'TEXT'], ['tried', 'TEXT'], ['quotes', 'TEXT']]) {
     if (!deliveryCols.includes(col)) db.exec(`ALTER TABLE deliveries ADD COLUMN ${col} ${type}`);
   }
+  const linkCols = db.prepare('PRAGMA table_info(payment_links)').all().map((c) => c.name);
+  if (!linkCols.includes('kind')) db.exec("ALTER TABLE payment_links ADD COLUMN kind TEXT NOT NULL DEFAULT 'link'");
   const orderCols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
   if (!orderCols.includes('payment_status')) db.exec("ALTER TABLE orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'cod'");
 }

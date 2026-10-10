@@ -12,15 +12,17 @@
 
 const config = require('../config');
 const { assignOutlet, isOpen, etaMinutes, rangeKm } = require('../geo');
-const { deliveryCharge } = require('../orders');
+const { deliveryCharge, canPayOnline } = require('../orders');
 const { computeAnalytics } = require('../analytics');
 const { placeAddress } = require('../geocode');
 const { normalisePhone } = require('../orders');
 const { qrSvg } = require('../payments');
 const { AuthError } = require('../staff-auth');
 const { brand } = require('../brand');
+const { OwnerLockedError } = require('../owner-lock');
 
-const ACTIVE = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
+// Live orders: UPI orders waiting for payment show too, so staff can confirm a QR payment.
+const ACTIVE = ['awaiting_payment', 'placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'];
 const IST_OFFSET_MS = 330 * 60 * 1000; // IST is UTC+5:30, no daylight saving
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -31,12 +33,12 @@ const csvCell = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '
 const publicOutlet = (o, now) => ({
   id: o.id, slug: o.slug, name: o.name, city: o.city, address: o.address, lat: o.lat, lng: o.lng,
   phone: o.phone, deliveryRadiusKm: rangeKm(o), opens: o.opens, closes: o.closes, open: isOpen(o, now),
-  upi: !!o.upi_id,
+  upi: canPayOnline(o),
 });
 
 const publicPayment = (o) => ({
   method: o.payment_method, status: o.payment_status, label: o.paymentLabel,
-  ...(o.upi && o.payment_status !== 'cod' ? { upiId: o.upi.upiId, payee: o.upi.payee, link: o.upi.link, qrSvg: qrSvg(o.upi.link) } : {}),
+  ...(o.upi && o.payment_status !== 'cod' ? { upiId: o.upi.upiId, payee: o.upi.payee, link: o.upi.link, gateway: Boolean(o.upi.gateway), qrSvg: qrSvg(o.upi.link) } : {}),
 });
 
 const publicDelivery = (d) => d && {
@@ -51,7 +53,11 @@ function authorize(route, auth) {
   return true;
 }
 
-function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports }) {
+function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, menuAdmin, sync, staffAuth, stock, outletAdmin, reports, integrations, ownerLock }) {
+  // Connections also need the owner's PIN (X-Owner-Unlock); see src/owner-lock.js.
+  const LOCKED = { httpStatus: 423, body: { error: 'Locked: enter the owner PIN.', locked: true } };
+  const owner = (fn) => (args) => (ownerLock && !ownerLock.check(args.ownerToken) ? LOCKED : fn(args));
+  const unlockFailed = (e) => { if (e instanceof OwnerLockedError) return { httpStatus: 423, body: { error: e.message, locked: true } }; throw e; };
   // Reports run off the main thread on the server (src/reports.js); inline otherwise.
   reports ||= { analytics: (q) => computeAnalytics(store, q), customers: (q) => crm.list(q), customersCsv: (q) => crm.exportCsv(q) };
   // Head office reaches every outlet; an outlet tablet only its own.
@@ -224,6 +230,7 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
           total: o.total, paymentMethod: o.payment_method,
           etaMinutes: o.etaMinutes, createdAt: o.created_at, updatedAt: o.updated_at, outlet: o.outlet,
           payment: publicPayment(o),
+          payWithinMinutes: config.payments.windowMinutes,
           delivery: publicDelivery(o.delivery),
           loyalty: crm ? { points: crm.pointsFor(o.total), earned: o.status === 'completed' } : null,
         };
@@ -235,6 +242,16 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
       handle: ({ params }) => {
         const o = orders.claimPayment(params.code);
         return o ? { payment: publicPayment(o) } : notFound('Order not found');
+      },
+    },
+    {
+      // Customer switches a waiting UPI order to cash/UPI on delivery (tracking page).
+      method: 'POST', path: '/api/orders/:code/cash',
+      handle: ({ params }) => {
+        const o = orders.getOrder(params.code);
+        if (!o) return notFound('Order not found');
+        if (!['pending', 'claimed'].includes(o.payment_status)) return { payment: publicPayment(o) };
+        return { payment: publicPayment(orders.setPayment(o.code, 'cod', new Date(), 'customer')) };
       },
     },
 
@@ -310,6 +327,28 @@ function createRoutes({ store, orders, handoffs, bot, outbox, dispatcher, crm, m
       handle: ({ body }) => { dispatcher.handleWebhook('borzo', body); return { ok: true }; },
     },
     { method: 'GET', path: '/api/admin/outlets', admin: true, handle: () => orders.listOutlets() },
+
+    // ---- Connections: payment gateways, UPI, WhatsApp, delivery partners ----
+    ...(integrations ? [
+      { method: 'GET', path: '/api/admin/connections', admin: true, handle: owner(() => integrations.describe()) },
+      {
+        method: 'PUT', path: '/api/admin/connections/:id', admin: true,
+        handle: owner(({ params, body }) => integrations.save(params.id, body.values || {}, 'owner')),
+      },
+      { method: 'POST', path: '/api/admin/connections/:id/test', admin: true, handle: owner(({ params }) => integrations.test(params.id)) },
+      ...(ownerLock ? [
+        { method: 'GET', path: '/api/admin/owner/status', admin: true, handle: ({ ownerToken }) => ownerLock.status(ownerToken) },
+        {
+          method: 'POST', path: '/api/admin/owner/unlock', admin: true,
+          handle: ({ body }) => { try { return ownerLock.unlock(String(body.pin || '')); } catch (e) { return unlockFailed(e); } },
+        },
+        { method: 'POST', path: '/api/admin/owner/lock', admin: true, handle: ({ ownerToken }) => { ownerLock.lock(ownerToken); return { ok: true }; } },
+        {
+          method: 'POST', path: '/api/admin/owner/pin', admin: true,
+          handle: owner(({ body }) => { ownerLock.changePin(String(body.current || ''), String(body.next || '')); return { ok: true }; }),
+        },
+      ] : []),
+    ] : []),
 
     // ---- CRM & loyalty --------------------------------------------------
     { method: 'GET', path: '/api/admin/customers', admin: true, handle: ({ query }) => reports.customers(query) },

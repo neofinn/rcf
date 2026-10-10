@@ -5,6 +5,9 @@
 
 const { brand } = require('../brand');
 
+// Orders that aren't sales (same list as orders.NOT_SALES; kept here to avoid a require cycle).
+const NOT_SALES = new Set(['cancelled', 'awaiting_payment', 'unpaid']);
+
 function createMemoryStore(seed) {
   const outlets = seed.outlets.map((o, i) => ({
     id: i + 1, slug: o.slug, name: o.name, city: o.city, address: o.address, lat: o.lat, lng: o.lng, phone: o.phone,
@@ -21,6 +24,10 @@ function createMemoryStore(seed) {
   const pins = new Map();
   const staffSessions = new Map();
   const orders = [];
+  const links = [];
+  const gatewayEvents = new Set();
+  const settings = new Map();
+  const settingsLog = [];
   const lines = new Map();
   const handoffs = [];
   const handoffMsgs = new Map();
@@ -48,7 +55,7 @@ function createMemoryStore(seed) {
       const phones = new Set(orders.filter((o) => o.created_at >= fromIso && o.created_at < toIso).map((o) => o.phone));
       const first = new Map();
       for (const o of orders) {
-        if (o.status === 'cancelled' || !phones.has(o.phone)) continue;
+        if (NOT_SALES.has(o.status) || !phones.has(o.phone)) continue;
         if (!first.has(o.phone) || o.created_at < first.get(o.phone)) first.set(o.phone, o.created_at);
       }
       return first;
@@ -63,7 +70,7 @@ function createMemoryStore(seed) {
       const stats = new Map();
       const per = new Map();
       for (const o of orders) {
-        if (o.status === 'cancelled') continue;
+        if (NOT_SALES.has(o.status)) continue;
         const s = stats.get(o.phone) || { orders: 0, spent: 0, first: null, last: null, outletId: null, top: 0 };
         s.orders += 1; s.spent += o.total;
         if (!s.first || o.created_at < s.first) s.first = o.created_at;
@@ -130,6 +137,21 @@ function createMemoryStore(seed) {
     localities: () => seed.localities.map(copy),
 
     orderCodeExists: (code) => orders.some((o) => o.code === code),
+    paymentLinks: (orderId) => links.filter((l) => l.order_id === orderId).map(copy),
+    paymentLinkById: (id) => copy(links.find((l) => l.id === id) || null),
+    insertPaymentLink: (l) => { links.push({ kind: 'link', ...l, payment_id: null, refund_id: null, updated_at: l.created_at }); },
+    openPaymentLinks: (since) => links.filter((l) => l.status === 'created' && l.created_at >= since).map(copy),
+    updatePaymentLink(id, { status, payment_id = null, refund_id = null }, ts) {
+      const l = links.find((x) => x.id === id);
+      if (l) Object.assign(l, { status, payment_id: payment_id ?? l.payment_id, refund_id: refund_id ?? l.refund_id, updated_at: ts });
+    },
+    allSettings: () => [...settings.values()].map(copy),
+    setSetting: (key, value, secret, ts, by) => { settings.set(key, { key, value, secret: secret ? 1 : 0, updated_at: ts, updated_by: by || null }); },
+    deleteSetting: (key) => { settings.delete(key); },
+    addSettingsLog: (at, by, integration, change) => { settingsLog.unshift({ at, by: by || null, integration, change }); },
+    settingsLog: (limit = 30) => settingsLog.slice(0, limit).map(copy),
+    gatewayEventSeen: (eventId) => { if (gatewayEvents.has(eventId)) return true; gatewayEvents.add(eventId); return false; },
+    unpaidBefore: (cutoff) => orders.filter((o) => o.status === 'awaiting_payment' && o.payment_status === 'pending' && o.created_at < cutoff).map((o) => ({ code: o.code })),
     insertOrder(o, ls) {
       const id = orders.length + 1;
       orders.push({ ...o, id });
@@ -176,7 +198,7 @@ function createMemoryStore(seed) {
     summarySince(iso) {
       const m = new Map();
       for (const o of orders) {
-        if (o.status === 'cancelled' || o.created_at < iso) continue;
+        if (NOT_SALES.has(o.status) || o.created_at < iso) continue;
         const r = m.get(o.outlet_id) || { outlet_id: o.outlet_id, orders: 0, revenue: 0 };
         r.orders += 1;
         r.revenue += o.total;

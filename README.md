@@ -1,6 +1,6 @@
 # Restaurant Online Ordering
 
-Online ordering for restaurant businesses with several outlets: a web app, ordering on WhatsApp, automatic routing of every order to the nearest outlet, delivery partners, outlet and head office panels, CRM, loyalty and analytics.
+Online ordering for restaurant businesses with several outlets: a web app, ordering on WhatsApp, automatic routing of every order to the nearest outlet, payment gateways, delivery partners, outlet and head office panels, CRM, loyalty and analytics.
 
 The code names no business. Each client's name, logo, colours, wording, outlets and menu live in a **client profile** (`clients/<id>/`), chosen with `CLIENT` in `.env`. `clients/sample` ("Your Restaurant") runs out of the box; see **[clients/README.md](clients/README.md)** to set up a new client.
 
@@ -13,7 +13,7 @@ The code names no business. Each client's name, logo, colours, wording, outlets 
 | Head office panel | `/admin/` | Owner / head office (admin token) |
 | WhatsApp simulator | `/whatsapp-sim.html` | Developers/demos (disabled when `NODE_ENV=production`) |
 
-**Shareable demo:** `CLIENT=<id> npm run build:demo` writes `dist/demo.html`, a single file with the web app, WhatsApp chat, outlet dashboard and a live routing map. It runs the real code from `src/` in the browser on an in-memory store, so no server is needed.
+**Shareable demo:** `npm run build:demo` writes `dist/demo.html`, a single file with the web app, WhatsApp chat, outlet dashboard and a live routing map. It runs the real code from `src/` in the browser on an in-memory store, so no server is needed.
 
 ## How orders reach the right outlet
 
@@ -75,6 +75,13 @@ Customers can type `menu`, `cart`, `track` or `reset` at any time. Orders from W
 
 At checkout (web and WhatsApp) the customer picks **💳 Pay now (UPI)** or **💵 Pay on delivery/pickup**.
 
+**Pay now means pay first.** A "Pay now" order waits as *Waiting for payment*. The customer isn't told "order placed", and the outlet sees it only in a separate "Waiting for payment" section marked "don't cook yet", with no Accept button and no rider. It goes to the kitchen (status *placed*, with the customer's confirmation and the outlet's beep) when:
+- WhatsApp confirms the payment, or
+- staff tap **Payment received** after a QR payment (the customer tapped *I've paid*; the outlet beeps for this), or
+- the customer switches to **Pay cash instead**.
+
+If nobody has paid (or said they paid) within `PAYMENT_WINDOW_MINUTES` (15), the order is cancelled as *Not paid in time*: its dishes go back to stock and the customer is told nothing was charged. A payment that lands later still goes through and the order is confirmed. Orders waiting for payment, or never paid, are not counted as sales or as cancellations in reports.
+
 - **Each order gets its own UPI request**, unlike a fixed QR printed or saved in the WhatsApp Business app. The request is for the exact bill amount, with the order code as the reference, and goes to the **UPI ID of the outlet that is cooking it**. Every outlet's own merchant UPI ID is stored on the outlet (`outlets.upi_id`); point them all at one ID if payments are collected centrally.
 - **On WhatsApp, paid inside the chat** (`WHATSAPP_PAYMENTS=on`): the bot sends WhatsApp's own **"Review and pay"** order message (`order_details`, India UPI). It lists the items, packing, GST, "Delivery by Shadowfax" and the total, with the order code as `reference_id`.
   - The customer pays with **WhatsApp's built-in UPI or any UPI app** on the phone.
@@ -86,7 +93,15 @@ At checkout (web and WhatsApp) the customer picks **💳 Pay now (UPI)** or **�
 - **On the web** the tracking page shows the same QR and button straight after ordering.
 - **Outlet staff** see `UPI payment pending` / `Customer says paid` on the order card and tap **Payment received** once it shows in their UPI app (or **Not received** / **Take cash instead**). WhatsApp customers are told either way.
 - QR and web payments are confirmed by staff because plain UPI QR codes don't report back; payments made through WhatsApp's "Review and pay" confirm themselves. For automatic confirmation, add a payment gateway (Razorpay, PayU, Cashfree) or Meta's *Payments on WhatsApp (India)*. Their webhook calls `orders.setPayment(code, 'paid', now, 'gateway')`, and the rest of the flow stays as is.
-- Outlets without a UPI ID only offer pay on delivery.
+- Outlets without a UPI ID only offer pay on delivery (unless the payment gateway is on).
+
+**Payment gateway (Razorpay or PhonePe; `src/gateway.js`, `src/razorpay.js`, `src/phonepe.js`).** With `RAZORPAY_*` or `PHONEPE_*` keys set (PhonePe also makes each order's dynamic UPI QR, and the server checks open payments every 30 s; `npm run payments:sandbox` runs it against the test systems):
+- **Pay link:** every "Pay now" order is paid through `https://<domain>/pay/<code>`, which creates a Razorpay payment link for the exact amount (UPI apps, QR, cards). The WhatsApp message, the tracking page and the order QR all use this address.
+- **Confirmation:** Razorpay's signed webhook (`/webhooks/razorpay`) marks the order paid and sends it to the kitchen, with no staff check. Repeated webhooks are ignored.
+- **Safety:** a wrong amount goes to staff, and a second payment for the same order is refunded.
+- **Refunds:** an order the outlet cancels after payment is refunded automatically, and the customer is told.
+
+Setup: DEPLOY.md. Options and costs: [docs/GO-LIVE-OPTIONS.md](docs/GO-LIVE-OPTIONS.md).
 
 ## Delivery riders: several partners, picked per order (`src/delivery/`)
 
@@ -194,8 +209,8 @@ Without WhatsApp credentials the bot runs in dry-run mode and logs what it would
 
 Step-by-step hosting (Hostinger), Supabase and WhatsApp number setup: **[DEPLOY.md](DEPLOY.md)**.
 
-1. **Client profile.** Create `clients/<id>/` with the client's brand, outlets, menu and localities (copy `clients/sample`; UPI IDs ending `@example` are deliberately invalid) and set `CLIENT=<id>`. Do this before the first start (the seed runs only on an empty database), or edit the `outlets` / `menu_items` tables afterwards. Take each outlet's latitude/longitude from Google Maps (right-click the outlet's pin).
-2. **Hosting.** Any small VPS with a persistent disk for `data/`, behind HTTPS (required by both WhatsApp webhooks and browser geolocation). Set `NODE_ENV=production`, `PUBLIC_BASE_URL` and a long random `ADMIN_TOKEN`.
+1. **Client profile.** Create `clients/<id>/` with the client's brand, outlets, menu and localities (copy `clients/sample`; UPI IDs ending `@example` are deliberately invalid) and set `CLIENT=<id>`. Do this before the first start (the starting data is only used on an empty database); after that, outlets and menu are managed in the head office panel.
+2. **Hosting.** `deploy/setup.sh` sets up a fresh Ubuntu VPS in one go (HTTPS, backups, start on boot); `npm run check` lists what's still missing. See DEPLOY.md.
 3. **WhatsApp Business.**
    - Create a Meta Business account and a WhatsApp Business app at developers.facebook.com, and add and verify the business phone number.
    - Copy the permanent access token and phone number ID into `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`, and the app secret into `WHATSAPP_APP_SECRET`.
@@ -223,6 +238,8 @@ src/
   db.js                  SQLite schema
   brand.js               which client this runs for (clients/<id>/: brand, outlets, menu)
   client-profile.js      loads the profile folder named by CLIENT
+  preflight.js           go-live checks (npm run check; production refuses unsafe settings)
+  razorpay.js, gateway.js  payment links, webhook confirmation, refunds (Razorpay)
   store/sqlite.js        data access on SQLite
   store/memory.js        same interface in memory (browser demo)
   geo.js                 distance, opening hours, outlet assignment
@@ -250,7 +267,7 @@ public/                  web app, tracking page, simulator
   outlet/, admin/        outlet panel, head office panel
   staff/                 code and styles shared by both panels
 supabase/schema.sql      Postgres tables and reporting views
-demo/, scripts/          browser demo build, Supabase backfill
+demo/, scripts/          browser demo build, Supabase backfill, load test, setup check
+deploy/                  server setup, safe updates with rollback, backups, nginx, pm2 (see DEPLOY.md)
 test/                    node:test suites
-clients/                 client profiles (brand + starting data), see clients/README.md
 ```

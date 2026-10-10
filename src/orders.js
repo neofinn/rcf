@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const config = require('./config');
 const { assignOutlet, isOpen, etaMinutes } = require('./geo');
-const { upiLink, PAYMENT_LABELS } = require('./payments');
+const { upiFor, upiLink, PAYMENT_LABELS } = require('./payments');
 const { brand } = require('./brand');
 
 // Delivery partner statuses as staff and customers see them (see delivery/dispatcher.js).
@@ -26,17 +26,26 @@ class ValidationError extends Error {
   }
 }
 
-const STATUSES = ['placed', 'accepted', 'preparing', 'ready', 'out_for_delivery', 'completed', 'cancelled'];
+const STATUSES = ['awaiting_payment', 'placed', 'accepted', 'preparing', 'ready', 'out_for_delivery', 'completed', 'cancelled', 'unpaid'];
+
+// An order paid online by UPI waits in awaiting_payment: the outlet doesn't
+// cook it and the customer isn't told "order placed" until the money is in
+// (WhatsApp confirms it, or staff see it in their UPI app). It then moves to
+// placed. Not paid within config.payments.windowMinutes: unpaid (cancelled,
+// stock put back). Neither state is a sale.
+const NOT_SALES = ['cancelled', 'awaiting_payment', 'unpaid'];
 
 // Allowed next statuses, per fulfilment type.
 const TRANSITIONS = {
   delivery: {
+    awaiting_payment: ['cancelled'],
     placed: ['accepted', 'cancelled'],
     accepted: ['preparing', 'cancelled'],
     preparing: ['out_for_delivery', 'cancelled'],
     out_for_delivery: ['completed'],
   },
   pickup: {
+    awaiting_payment: ['cancelled'],
     placed: ['accepted', 'cancelled'],
     accepted: ['preparing', 'cancelled'],
     preparing: ['ready', 'cancelled'],
@@ -45,6 +54,7 @@ const TRANSITIONS = {
 };
 
 const STATUS_LABELS = {
+  awaiting_payment: 'Waiting for payment',
   placed: 'Order placed',
   accepted: 'Accepted by outlet',
   preparing: 'Being prepared',
@@ -52,9 +62,15 @@ const STATUS_LABELS = {
   out_for_delivery: 'Out for delivery',
   completed: 'Completed',
   cancelled: 'Cancelled',
+  unpaid: 'Not paid in time',
 };
 
 const MAX_QTY_PER_ITEM = 20;
+
+// Online payments go through the gateway when Razorpay keys are set.
+const gatewayOn = () => Boolean(config.paymentGateway?.());
+/** Can this outlet take "Pay now" (gateway, or a UPI ID for the dynamic QR)? */
+const canPayOnline = (outlet) => gatewayOn() || Boolean(upiFor(outlet));
 
 /** Normalise an Indian mobile number to +91XXXXXXXXXX, or return null. */
 function normalisePhone(raw) {
@@ -219,7 +235,7 @@ function createOrderService(store) {
     }
 
     const payUpi = input.paymentMethod === 'upi';
-    if (payUpi && !outlet.upi_id) throw new ValidationError(`${outlet.name} doesn't take UPI payments online yet. Please choose cash/UPI on ${fulfilment}.`, 'no_upi');
+    if (payUpi && !canPayOnline(outlet)) throw new ValidationError(`${outlet.name} doesn't take UPI payments online yet. Please choose cash/UPI on ${fulfilment}.`, 'no_upi');
 
     const code = newCode();
     const ts = now.toISOString();
@@ -228,13 +244,13 @@ function createOrderService(store) {
       customer_name: name, phone, address: fulfilment === 'delivery' ? address : null,
       lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null, distance_km: distanceKm,
       notes: notes || null, subtotal: priced.subtotal, packing: priced.packing, gst: priced.gst,
-      delivery_fee: priced.deliveryFee, total: priced.total, payment_method: payUpi ? 'upi' : 'cod', payment_status: payUpi ? 'pending' : 'cod', status: 'placed',
+      delivery_fee: priced.deliveryFee, total: priced.total, payment_method: payUpi ? 'upi' : 'cod', payment_status: payUpi ? 'pending' : 'cod', status: payUpi ? 'awaiting_payment' : 'placed',
       created_at: ts, updated_at: ts,
     }, priced.lines);
     // Take the dishes out of the outlet's stock count (no-op for items without a count).
     for (const l of priced.lines) store.adjustStock(outlet.id, l.item_id, -l.qty, ts);
     const order = getOrder(code);
-    store.addOrderEvent(order.id, 'placed', ts);
+    store.addOrderEvent(order.id, order.status, ts);
     // The customer's marketing consent travels with the event to the CRM.
     events.emit('created', { ...order, marketingOptIn: !!input.marketingOptIn });
     return order;
@@ -252,10 +268,14 @@ function createOrderService(store) {
       outlet: outlet && { id: outlet.id, name: outlet.name, phone: outlet.phone, address: outlet.address, lat: outlet.lat, lng: outlet.lng },
       paymentLabel: PAYMENT_LABELS[row.payment_status],
       delivery: presentDelivery(row),
-      upi: row.payment_method === 'upi' && outlet?.upi_id ? {
-        upiId: outlet.upi_id,
-        payee: outlet.upi_name || brand().name,
-        link: upiLink({ upiId: outlet.upi_id, payee: outlet.upi_name || brand().name, amountPaise: row.total, code: row.code }),
+      // Gateway: our /pay/<code> page (UPI, QR, cards; confirms itself). Otherwise
+      // a upi:// request straight to the outlet's UPI ID (staff confirm).
+      upi: row.payment_method !== 'upi' ? null : gatewayOn() ? {
+        gateway: true, upiId: null, payee: brand().name, link: `${config.publicBaseUrl}/pay/${row.code}`,
+      } : upiFor(outlet) ? {
+        upiId: upiFor(outlet).id,
+        payee: upiFor(outlet).name,
+        link: upiLink({ upiId: upiFor(outlet).id, payee: upiFor(outlet).name, amountPaise: row.total, code: row.code }),
       } : null,
     };
   }
@@ -267,6 +287,8 @@ function createOrderService(store) {
     claimed: ['paid', 'pending', 'cod'],
     // A WhatsApp/UPI payment can still land after the customer chose cash.
     cod: ['paid'],
+    // Gateway refund after the outlet cancelled a paid order.
+    paid: ['refunded'],
   };
 
   // by: 'staff' (dashboard), 'customer' (WhatsApp/web) or 'gateway' (future
@@ -274,15 +296,29 @@ function createOrderService(store) {
   function setPayment(code, next, now = new Date(), by = 'staff') {
     const order = getOrder(code);
     if (!order) return null;
+    if (order.status === 'unpaid' && next !== 'paid') {
+      throw new ValidationError(`Order ${order.code} wasn't paid in time and was cancelled. Please order again.`, 'expired');
+    }
     if (!(PAYMENT_TRANSITIONS[order.payment_status] || []).includes(next)) {
       throw new ValidationError(`Payment is already "${order.paymentLabel}".`, 'bad_payment_transition');
     }
     if (!store.setPaymentStatus(order.id, order.payment_status, next, now.toISOString())) {
       throw new ValidationError('Order was updated by someone else. Refresh and try again.', 'conflict');
     }
-    const updated = getOrder(code);
-    events.emit('payment', updated, order.payment_status, by);
+    let updated = getOrder(code);
+    // Paid, or switched to cash: a waiting (or just expired) order now goes to the kitchen.
+    // Cash on an expired order doesn't bring it back; a late payment does.
+    const confirm = (updated.status === 'awaiting_payment' && ['paid', 'cod'].includes(next)) || (updated.status === 'unpaid' && next === 'paid');
+    if (confirm) updated = moveStatus(updated, 'placed', now, { by: 'payment', revived: updated.status === 'unpaid' });
+    // confirmed: this payment change sent the order to the kitchen (listeners tell the customer).
+    events.emit('payment', updated, order.payment_status, by, { confirmed: confirm });
     return updated;
+  }
+
+  /** Cancel UPI orders still unpaid after the payment window (not ones the customer says are paid). */
+  function expireUnpaid(now = new Date()) {
+    const cutoff = new Date(now.getTime() - config.payments.windowMinutes * 60000).toISOString();
+    return store.unpaidBefore(cutoff).map((row) => moveStatus(getOrder(row.code), 'unpaid', now, { by: 'system' }));
   }
 
   /** Customer says they've paid. Idempotent. */
@@ -320,21 +356,29 @@ function createOrderService(store) {
     if (!order.nextStatuses.includes(next)) {
       throw new ValidationError(`Cannot move order from "${order.status}" to "${next}".`, 'bad_transition');
     }
+    return moveStatus(order, next, now, meta);
+  }
+
+  // Status change without the staff transition rules (payment and expiry use it directly).
+  function moveStatus(order, next, now, meta = {}) {
+    const code = order.code;
     if (!store.setOrderStatus(order.id, order.status, next, now.toISOString())) throw new ValidationError('Order was updated by someone else. Refresh and try again.', 'conflict');
     store.addOrderEvent(order.id, next, now.toISOString());
-    // A cancelled order's dishes go back into the outlet's stock count.
-    if (next === 'cancelled') for (const l of order.items) store.adjustStock(order.outlet_id, l.item_id, l.qty, now.toISOString());
+    // A cancelled or unpaid order's dishes go back into the outlet's stock count;
+    // a late payment for an expired order takes them again.
+    if (meta.revived) for (const l of order.items) store.adjustStock(order.outlet_id, l.item_id, -l.qty, now.toISOString());
+    if (next === 'cancelled' || next === 'unpaid') for (const l of order.items) store.adjustStock(order.outlet_id, l.item_id, l.qty, now.toISOString());
     const updated = getOrder(code);
-    events.emit('status', updated, meta);
+    events.emit('status', updated, { ...meta, from: order.status });
     return updated;
   }
 
   return {
     events, listOutlets, getOutlet, menuFor, categories, resolveOutlet, quote, createOrder, getOrder, getOrderById,
-    latestOrderForPhone, listOrders, updateStatus, setPayment, claimPayment,
+    latestOrderForPhone, listOrders, updateStatus, setPayment, claimPayment, expireUnpaid,
   };
 }
 
 module.exports = {
-  createOrderService, priceCart, ValidationError, normalisePhone, STATUSES, STATUS_LABELS, TRANSITIONS, deliveryFee, deliveryCharge, DELIVERY_LABELS,
+  createOrderService, priceCart, ValidationError, normalisePhone, canPayOnline, STATUSES, NOT_SALES, STATUS_LABELS, TRANSITIONS, deliveryFee, deliveryCharge, DELIVERY_LABELS,
 };

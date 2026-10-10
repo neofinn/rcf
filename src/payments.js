@@ -6,24 +6,41 @@
 //
 // The QR code and the upi:// link open any UPI app (GPay, PhonePe, Paytm,
 // BHIM) with payee, amount and note filled in. Confirmation is manual (staff
-// tap "Paid" once it shows in their UPI app) until a payment gateway is added,
-// whose webhook would call orders.confirmPayment() instead.
+// tap "Paid" once it shows in their UPI app). With a payment gateway
+// configured (src/gateway.js), the link is our /pay/<code> page instead and the
+// gateway's webhook confirms the payment.
 
 const QRCode = require('qrcode');
+const config = require('./config');
 const { brand } = require('./brand');
 
 const PAYMENT_LABELS = {
   cod: 'Cash/UPI on delivery',
   pending: 'UPI payment pending',
   claimed: 'Customer says paid, check UPI app',
-  paid: 'Paid by UPI',
+  paid: 'Paid online',
+  refunded: 'Refunded',
 };
 
-/** upi:// payment link (NPCI deep-link format). */
-function upiLink({ upiId, payee, amountPaise, code }) {
+/**
+ * Where an outlet's UPI payments go: { id, name } or null. The outlet's own UPI
+ * ID wins, unless it is a placeholder (…@example) and a business-wide UPI_ID is set.
+ */
+function upiFor(outlet) {
+  const own = outlet?.upi_id || null;
+  const global = config.upi?.id || null;
+  const id = own && !(global && /@example$/i.test(own)) ? own : global;
+  if (!id) return null;
+  const name = (id === own && outlet.upi_name) || config.upi?.payeeName || brand().name;
+  return { id, name };
+}
+
+/** upi:// payment link (NPCI deep-link format): payee, exact amount, order code as reference. */
+function upiLink({ upiId, payee, amountPaise, code, merchantCode = config.upi?.merchantCode }) {
   const params = [
     ['pa', upiId],
     ['pn', payee],
+    ...(merchantCode ? [['mc', merchantCode]] : []),
     ['am', (amountPaise / 100).toFixed(2)],
     ['cu', 'INR'],
     ['tn', `${brand().name} order ${code}`],
@@ -122,4 +139,4 @@ const WA_ORDER_STATUS = {
   completed: 'completed', cancelled: 'canceled',
 };
 
-module.exports = { upiLink, qrSvg, qrPng, orderDetailsReply, orderDetailsPayload, WA_ORDER_STATUS, PAYMENT_LABELS };
+module.exports = { upiFor, upiLink, qrSvg, qrPng, orderDetailsReply, orderDetailsPayload, WA_ORDER_STATUS, PAYMENT_LABELS };

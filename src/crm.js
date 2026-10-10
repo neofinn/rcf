@@ -10,7 +10,7 @@
 
 const { EventEmitter } = require('node:events');
 const config = require('./config');
-const { normalisePhone, ValidationError } = require('./orders');
+const { normalisePhone, ValidationError, NOT_SALES } = require('./orders');
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -119,7 +119,7 @@ function createCrm({ store, orders }) {
     // Favourite dishes across all orders.
     const fav = new Map();
     for (const o of store.ordersForPhone(phone)) {
-      if (o.status === 'cancelled') continue;
+      if (NOT_SALES.includes(o.status)) continue;
       for (const l of store.orderLines(o.id)) fav.set(l.name, (fav.get(l.name) || 0) + l.qty);
     }
     return {
