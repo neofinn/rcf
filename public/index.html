@@ -6,90 +6,117 @@
   <meta name="theme-color" content="#d62828">
   <title>{{name}} – Order Online</title>
   <meta name="description" content="{{description}}">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/home.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="logo">{{logo}}</div>
-    <button class="loc-chip" id="locChip" type="button">
-      <b id="locTitle">Set location</b>
-      <small id="locSub">to see your nearest outlet</small>
-    </button>
+  <header class="top">
+    <div class="bar">
+      <a class="logo" href="/">{{logo}}</a>
+      <nav class="links" aria-label="Sections">
+        <a href="#menu">Menu</a>
+        <a href="#outlets">Outlets</a>
+        <a href="#how">How it works</a>
+      </nav>
+      <a class="btn small" href="/order">Order now</a>
+    </div>
   </header>
 
-  <main class="wrap">
-    <div id="banner" class="banner hidden"></div>
-    <nav class="cats" id="cats"></nav>
-    <label class="vegtoggle"><input type="checkbox" id="vegOnly" style="width:auto"> Veg only</label>
-    <div id="menu"></div>
+  <section class="hero">
+    <div class="hero-in">
+      <div class="hero-copy">
+        <p class="eyebrow" id="eyebrow">Order online · Delivery &amp; pickup</p>
+        <h1 id="tagline">{{name}}, hot and fresh near you</h1>
+        <p class="intro" id="intro">{{description}}</p>
+        <div class="ctas">
+          <a class="btn big" href="/order">Order now</a>
+          <a class="btn big ghost hidden" id="waCta" href="#" target="_blank" rel="noopener">Order on WhatsApp</a>
+          <a class="btn big ghost" id="findCta" href="#outlets">Find your outlet</a>
+        </div>
+        <ul class="ticks">
+          <li>Delivery from your nearest outlet</li>
+          <li>Pay by UPI or cash</li>
+          <li>Half &amp; full portions</li>
+        </ul>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <svg viewBox="0 0 320 300" role="presentation">
+          <ellipse cx="160" cy="270" rx="120" ry="14" fill="rgba(0,0,0,.18)"/>
+          <g class="steam" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".75">
+            <path d="M120 70c-14-18 14-26 0-46"/><path d="M160 60c-14-18 14-26 0-46"/><path d="M200 70c-14-18 14-26 0-46"/>
+          </g>
+          <path d="M70 110h180l-22 150a12 12 0 0 1-12 10H104a12 12 0 0 1-12-10z" fill="#fff"/>
+          <path d="M70 110h180l-4 28H74z" fill="var(--accent)"/>
+          <path d="M98 110l26-30h72l26 30" fill="#fff" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+          <path d="M160 80v30" stroke="var(--accent)" stroke-width="4"/>
+          <circle cx="160" cy="200" r="34" fill="var(--brand)"/>
+          <text x="160" y="212" text-anchor="middle" font-size="34" font-weight="800" fill="#fff" font-family="system-ui,sans-serif" id="artMark">R</text>
+          <g stroke="#7a4a1d" stroke-width="7" stroke-linecap="round"><path d="M232 40 262 152"/><path d="M252 34 274 150"/></g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <main>
+    <section class="sec" id="menu">
+      <div class="head">
+        <h2>What's cooking</h2>
+        <p class="sub" id="menuSub">Our menu, from crispy starters to full platters.</p>
+      </div>
+      <div class="cats" id="cats"><p class="muted">Loading the menu…</p></div>
+      <p class="center"><a class="btn" href="/order">See the full menu and order</a></p>
+    </section>
+
+    <section class="sec alt" id="why">
+      <div class="head"><h2>Why order direct</h2></div>
+      <div class="feats">
+        <div class="feat"><b>Nearest kitchen</b><span>Your order goes to the outlet closest to you, so it reaches you hot.</span></div>
+        <div class="feat"><b>Delivery or pickup</b><span>Get it delivered, or order ahead and collect it on your way.</span></div>
+        <div class="feat"><b>Live tracking</b><span>Follow your order from the kitchen to your door.</span></div>
+        <div class="feat"><b>Earn points</b><span>Collect loyalty points on every order you place with us.</span></div>
+      </div>
+    </section>
+
+    <section class="sec" id="outlets">
+      <div class="head">
+        <h2 id="outletsTitle">Our outlets</h2>
+        <p class="sub">Order for delivery or pickup. Tap to call or get directions.</p>
+      </div>
+      <div class="filters" id="filters" role="tablist" aria-label="Filter by city"></div>
+      <div class="outlets" id="outletList"><p class="muted">Loading outlets…</p></div>
+    </section>
+
+    <section class="sec alt" id="how">
+      <div class="head"><h2>How it works</h2></div>
+      <ol class="steps">
+        <li><b>Set your location</b><span>Choose delivery or pickup. We find your nearest outlet.</span></li>
+        <li><b>Pick your dishes</b><span>Half or full, veg or non-veg, add notes like "less spicy".</span></li>
+        <li><b>Pay and track</b><span>Pay by UPI or cash and follow your order live.</span></li>
+      </ol>
+    </section>
+
+    <section class="band">
+      <h2>Hungry? Your order is a few taps away.</h2>
+      <a class="btn big light" href="/order">Order now</a>
+    </section>
   </main>
 
-  <div class="cartbar hidden" id="cartBar">
-    <button type="button" id="openCart"><span id="cartCount">0 items</span><span>View cart →</span></button>
-  </div>
-
-  <!-- Location picker -->
-  <div class="overlay hidden" id="locModal">
-    <div class="sheet" role="dialog" aria-labelledby="locHeading">
-      <button class="close" type="button" data-close="locModal" aria-label="Close">×</button>
-      <h3 id="locHeading">How would you like your order?</h3>
-      <div class="tabs">
-        <button type="button" data-mode="delivery" class="on">🛵 Delivery</button>
-        <button type="button" data-mode="pickup">🏃 Pickup</button>
+  <footer class="foot">
+    <div class="foot-in">
+      <div>
+        <div class="logo">{{logo}}</div>
+        <p class="muted" id="footAreas"></p>
       </div>
-      <div id="deliveryPane">
-        <p class="small muted">Share your current location, type your full address, or both. We'll check delivery and pick your nearest outlet.</p>
-        <button class="btn" type="button" id="useGps">📍 Use my current location</button>
-        <label for="startAddress">Full address</label>
-        <textarea id="startAddress" autocomplete="street-address" placeholder="House/flat no., street, sector/phase, city"></textarea>
-        <div id="areaChoices" class="choice-row"></div>
-        <button class="btn secondary" type="button" id="findAddress" style="margin-top:8px">Find my outlet</button>
-        <div class="or">or choose your area</div>
-        <select id="locality" aria-label="Your area"><option value="">Select area…</option></select>
-        <p class="error hidden" id="locError"></p>
-      </div>
-      <div id="pickupPane" class="hidden">
-        <button class="btn secondary" type="button" id="nearestPickup">📍 Show the nearest outlet</button>
-        <p class="muted small">Or pick the outlet you'll collect from.</p>
-        <div id="outletList"></div>
+      <div class="foot-links">
+        <a href="/order">Order online</a>
+        <a href="#outlets">Outlets</a>
+        <a href="#menu">Menu</a>
       </div>
     </div>
-  </div>
+    <p class="muted copy">© <span id="year"></span> {{name}}</p>
+  </footer>
 
-  <!-- Cart / checkout -->
-  <div class="overlay hidden" id="cartModal">
-    <div class="sheet" role="dialog" aria-labelledby="cartHeading">
-      <button class="close" type="button" data-close="cartModal" aria-label="Close">×</button>
-      <h3 id="cartHeading">Your order</h3>
-      <div id="cartLines"></div>
-      <div class="bill" id="bill"></div>
-      <form id="checkout" novalidate>
-        <label for="name">Name</label>
-        <input id="name" name="name" autocomplete="name" required>
-        <label for="phone">WhatsApp number</label>
-        <input id="phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" placeholder="10-digit WhatsApp number" required>
-        <p class="small muted" style="margin:4px 0 0">Order updates, your bill and loyalty points come on this WhatsApp number.</p>
-        <p class="small" id="pointsLine" aria-live="polite"></p>
-        <div id="addressBox">
-          <label for="address">Delivery address</label>
-          <textarea id="address" name="address" autocomplete="street-address" placeholder="House/flat no., street/sector, landmark"></textarea>
-        </div>
-        <label for="notes">Cooking notes (optional)</label>
-        <input id="notes" name="notes" placeholder="e.g. less spicy">
-        <fieldset class="payopts">
-          <legend>Payment</legend>
-          <label class="payopt" id="payUpiOpt"><input type="radio" name="pay" id="payUpi" value="upi" checked>
-            <span><b>💳 Pay now by UPI</b><br><span class="small muted">GPay, PhonePe, Paytm or QR, for the exact amount</span></span></label>
-          <label class="payopt"><input type="radio" name="pay" id="payCod" value="cod">
-            <span><b>💵 Pay on <span id="payWhen">delivery</span></b><br><span class="small muted">Cash or UPI to the rider / counter</span></span></label>
-        </fieldset>
-        <label class="optin"><input type="checkbox" id="marketingOptIn" style="width:auto"> Send me offers and loyalty updates on WhatsApp</label>
-        <p class="error hidden" id="checkoutError"></p>
-        <button class="btn" type="submit" id="placeBtn">Place order</button>
-      </form>
-    </div>
-  </div>
+  <div class="sticky"><a class="btn big" href="/order">Order now</a></div>
 
-  <script src="/app.js"></script>
+  <script src="/home.js"></script>
 </body>
 </html>

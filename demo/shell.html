@@ -291,7 +291,7 @@ window.addEventListener('message', async (e) => {
   } else if (d.kind === 'nav' && from === 'web') {
     const url = new URL(d.url, 'https://demo.local');
     if (url.pathname.startsWith('/track')) load('web', 'track', url.search);
-    else if (url.pathname === '/') load('web', 'web');
+    else if (url.pathname === '/' || url.pathname.startsWith('/order')) load('web', 'web');
   }
 });
 

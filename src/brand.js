@@ -24,6 +24,9 @@ const DEFAULTS = {
   region: { name: 'the city', state: '', bounds: null },
   upiExample: 'yourbrand.outlet@okaxis',
   demo: { domain: 'order.example.com', address: '', outside: null, tryOrders: [] },
+  // Homepage words: the big headline and the line under it.
+  home: { tagline: null, intro: null },
+  whatsappNumber: null, // customer WhatsApp number, digits with country code; shows "Order on WhatsApp"
 };
 
 let profile = null;
@@ -44,6 +47,7 @@ function withDefaults(b = {}) {
     colors: { ...DEFAULTS.colors, ...b.colors },
     region: { ...DEFAULTS.region, ...b.region },
     demo: { ...DEFAULTS.demo, ...b.demo },
+    home: { ...DEFAULTS.home, ...b.home },
   };
 }
 
@@ -73,7 +77,7 @@ const fullName = (short) => (shortName(short) !== short ? short : brand().outlet
 /** What the browser pages get (window.BRAND). */
 const publicBrand = () => {
   const b = brand();
-  return { id: b.id, name: b.name, logo: b.logo, outletPrefix: b.outletPrefix, emoji: b.emoji, region: { name: b.region.name }, upiExample: b.upiExample, demo: b.demo };
+  return { id: b.id, name: b.name, logo: b.logo, outletPrefix: b.outletPrefix, emoji: b.emoji, region: { name: b.region.name }, upiExample: b.upiExample, demo: b.demo, home: b.home, whatsappNumber: b.whatsappNumber };
 };
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

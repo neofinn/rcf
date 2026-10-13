@@ -29,7 +29,8 @@ if (sync) sync.startTicker(5000);
 
 const server = app.listen(config.port, () => {
   console.log(`${brand().name} ordering ${version} running on http://localhost:${config.port}`);
-  console.log(`  Customer app:       ${config.publicBaseUrl}/`);
+  console.log(`  Homepage:           ${config.publicBaseUrl}/`);
+  console.log(`  Order online:       ${config.publicBaseUrl}/order`);
   console.log(`  Outlet panel:       ${config.publicBaseUrl}/outlet/`);
   console.log(`  Head office panel:  ${config.publicBaseUrl}/admin/`);
   if (sync) console.log(`  Supabase copy:      ${config.supabase.url}`);

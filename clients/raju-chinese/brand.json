@@ -41,5 +41,9 @@
   },
   "orderExample": "2 half kurkure veg momo less spicy and 1 full veg hakka noodles no onion",
   "menuExample": "2 half veg steam momo, 1 full chilli potato less spicy",
-  "codePrefix": "RC"
+  "codePrefix": "RC",
+  "home": {
+    "tagline": "Hot momos, saucy noodles, Chinese the tricity loves",
+    "intro": "Fresh off the wok at 7 Raju Chinese outlets across Chandigarh, Mohali and Zirakpur. Order online for delivery from your nearest outlet, or pick it up on your way."
+  }
 }

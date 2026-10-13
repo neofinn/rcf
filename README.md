@@ -197,7 +197,7 @@ Requires Node.js 22.5+ (uses the built-in `node:sqlite`, so there is no separate
 ```bash
 npm install
 cp .env.example .env   # edit values
-npm start              # http://localhost:3000
+npm start              # http://localhost:3000 (homepage; ordering at /order)
 npm test
 ```
 

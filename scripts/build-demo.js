@@ -91,7 +91,7 @@ const STANDALONE_SHIM = `<script>
 (() => {
   window.RC_DEMO = true;
   window.RC_STANDALONE = true;
-  const PAGES = { '/': 'order.html', '/index.html': 'order.html', '/track.html': 'track.html', '/outlet/': 'outlet.html', '/admin/': 'admin.html', '/whatsapp-sim.html': 'whatsapp.html' };
+  const PAGES = { '/': 'home.html', '/index.html': 'home.html', '/order': 'order.html', '/order.html': 'order.html', '/track.html': 'track.html', '/outlet/': 'outlet.html', '/admin/': 'admin.html', '/whatsapp-sim.html': 'whatsapp.html' };
   const pageUrl = (u) => { const x = new URL(u, 'https://demo.local'); return (PAGES[x.pathname] || x.pathname.slice(1)) + x.search; };
   window.RC_NAVIGATE = (u) => { location.href = pageUrl(u); };
   document.addEventListener('click', (e) => {
@@ -179,7 +179,7 @@ async function main() {
   const backend = bundle.outputFiles[0].text;
 
   const pages = {
-    web: inlinePage('public/index.html'),
+    web: inlinePage('public/order.html'),
     track: inlinePage('public/track.html'),
     admin: inlinePage('public/admin/index.html'),
     outlet: inlinePage('public/outlet/index.html'),
@@ -199,7 +199,8 @@ async function main() {
   if (pagesDir) {
     fs.mkdirSync(pagesDir, { recursive: true });
     const files = {
-      'order.html': inlinePage('public/index.html', STANDALONE_SHIM),
+      'home.html': inlinePage('public/index.html', STANDALONE_SHIM),
+      'order.html': inlinePage('public/order.html', STANDALONE_SHIM),
       'track.html': inlinePage('public/track.html', STANDALONE_SHIM),
       'outlet.html': inlinePage('public/outlet/index.html', STANDALONE_SHIM),
       'admin.html': inlinePage('public/admin/index.html', STANDALONE_SHIM),

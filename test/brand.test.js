@@ -45,7 +45,7 @@ test('the server sends branded pages and no client name is left in them', async 
   await new Promise((r) => server.once('listening', r));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
-    for (const p of ['/', '/track.html', '/admin/', '/outlet/', '/whatsapp-sim.html']) {
+    for (const p of ['/', '/order', '/track.html', '/admin/', '/outlet/', '/whatsapp-sim.html']) {
       const res = await fetch(base + p);
       assert.equal(res.status, 200, p);
       const html = await res.text();
@@ -54,6 +54,10 @@ test('the server sends branded pages and no client name is left in them', async 
     }
     assert.equal((await fetch(`${base}/admin`, { redirect: 'manual' })).status, 301);
     assert.match(await (await fetch(`${base}/styles.css`)).text(), /--brand/);
+    // "/" is the homepage, "/order" the ordering app; the homepage reads the outlets and menu from the API.
+    assert.match(await (await fetch(`${base}/`)).text(), /src="\/home\.js"/);
+    assert.match(await (await fetch(`${base}/order`)).text(), /src="\/app\.js"/);
+    assert.match(await (await fetch(`${base}/home.js`)).text(), /api\('\/outlets'\)/);
   } finally {
     server.close();
   }
