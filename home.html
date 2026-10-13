@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+<head>
+<script>
+(() => {
+  window.RC_DEMO = true;
+  window.RC_STANDALONE = true;
+  const PAGES = { '/': 'home.html', '/index.html': 'home.html', '/order': 'order.html', '/order.html': 'order.html', '/track.html': 'track.html', '/outlet/': 'outlet.html', '/admin/': 'admin.html', '/whatsapp-sim.html': 'whatsapp.html' };
+  const pageUrl = (u) => { const x = new URL(u, 'https://demo.local'); return (PAGES[x.pathname] || x.pathname.slice(1)) + x.search; };
+  window.RC_NAVIGATE = (u) => { location.href = pageUrl(u); };
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a[href^="/"]');
+    if (a) { e.preventDefault(); location.href = pageUrl(a.getAttribute('href')); }
+  }, true);
+
+  let send;
+  const ready = new Promise((resolve) => {
+    if (window.SharedWorker) {
+      try {
+        const pending = new Map();
+        let seq = 0;
+        const w = new SharedWorker('demo-worker.js', { name: 'raju-chinese-demo' });
+        w.port.onmessage = (e) => { const p = pending.get(e.data.id); if (p) { pending.delete(e.data.id); p(e.data); } };
+        w.port.start();
+        send = (msg) => new Promise((r) => { const id = ++seq; pending.set(id, r); w.port.postMessage({ ...msg, id }); });
+        return resolve();
+      } catch (e) { /* fall back below */ }
+    }
+    // No SharedWorker (e.g. Chrome on Android): this tab runs the demo backend
+    // itself; it is still saved in the browser, so other pages pick it up.
+    const load = (src) => new Promise((r) => { const s = document.createElement('script'); s.src = src; s.onload = r; document.head.appendChild(s); });
+    load('demo-backend.js').then(() => load('demo-server.js')).then(() => {
+      send = (m) => RCDemoServer.handle(m);
+      resolve();
+    });
+  });
+  // ?reset starts the demo again from scratch.
+  if (new URLSearchParams(location.search).has('reset')) {
+    ready.then(() => send({ kind: 'reset' })).then(() => {
+      try { for (const k of Object.keys(localStorage)) if (/^(rc\.|rca\.|rco\.|sim\.)/.test(k)) localStorage.removeItem(k); } catch (e) { /* storage blocked */ }
+      location.replace(location.pathname);
+    });
+  }
+
+  const realFetch = window.fetch.bind(window);
+  window.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (!/^\/(api|webhooks)\//.test(u)) return realFetch(url, opts);
+    await ready;
+    const auth = (opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || '';
+    const r = await send({ method: (opts.method || 'GET').toUpperCase(), url: u, body: opts.body ? JSON.parse(opts.body) : null, token: auth.replace(/^Bearer\s+/i, ''), ownerToken: (opts.headers && (opts.headers['X-Owner-Unlock'] || opts.headers['x-owner-unlock'])) || '' });
+    const text = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
+    return new Response(text, { status: r.status, headers: { 'Content-Type': 'application/json' } });
+  };
+})();
+</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#d62828">
+  <title>Raju Chinese – Order Online</title>
+  <meta name="description" content="Order Chinese food online from your nearest Raju Chinese outlet in Chandigarh, Mohali, Panchkula, Zirakpur and Kharar.">
+  <style>:root {
+  --brand: #d62828;
+  --brand-dark: #a61e1e;
+  --accent: #f4a300;
+  --bg: #faf7f2;
+  --card: #ffffff;
+  --text: #1f1a17;
+  --muted: #6b625b;
+  --line: #ebe4da;
+  --alt: #f3ede4;
+  --ok: #1a8a3a;
+  --shadow: 0 2px 14px rgba(31, 26, 23, 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161311;
+    --card: #221d1a;
+    --text: #f3ede6;
+    --muted: #b0a59b;
+    --line: #3a322c;
+    --alt: #1c1815;
+    --ok: #4cc472;
+    --shadow: 0 2px 14px rgba(0, 0, 0, 0.4);
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+html, body { margin: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.center { text-align: center; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--brand); color: #fff; text-decoration: none; font-weight: 700;
+  border: 2px solid var(--brand); border-radius: 999px; padding: 10px 20px; min-height: 44px;
+  transition: background .15s, transform .15s;
+}
+.btn:hover { background: var(--brand-dark); border-color: var(--brand-dark); }
+.btn:active { transform: scale(.98); }
+.btn.small { padding: 6px 16px; min-height: 38px; font-size: .95rem; }
+.btn.big { padding: 12px 26px; min-height: 52px; font-size: 1.05rem; }
+.btn.ghost { background: transparent; border-color: rgba(255,255,255,.75); }
+.btn.ghost:hover { background: rgba(255,255,255,.12); border-color: #fff; }
+.btn.light { background: #fff; color: var(--brand); border-color: #fff; }
+.btn.light:hover { background: #fff3e0; border-color: #fff3e0; }
+
+/* Header */
+.top { position: sticky; top: 0; z-index: 10; background: var(--brand); color: #fff; box-shadow: 0 1px 0 rgba(0,0,0,.08); }
+.bar { max-width: 1120px; margin: 0 auto; display: flex; align-items: center; gap: 16px; padding: 10px 16px; }
+.logo { font-weight: 800; font-size: 1.3rem; letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
+.logo span { color: var(--accent); }
+.links { display: flex; gap: 20px; margin-left: auto; }
+.links a { text-decoration: none; font-weight: 600; opacity: .92; }
+.links a:hover { opacity: 1; text-decoration: underline; text-underline-offset: 4px; }
+.top .btn { background: #fff; color: var(--brand); border-color: #fff; }
+.top .btn:hover { background: #fff3e0; border-color: #fff3e0; }
+
+/* Hero */
+.hero {
+  color: #fff;
+  background:
+    radial-gradient(circle at 85% 20%, rgba(255,255,255,.12) 0 120px, transparent 121px),
+    radial-gradient(circle at 10% 110%, rgba(0,0,0,.14) 0 220px, transparent 221px),
+    linear-gradient(160deg, var(--brand) 0%, var(--brand-dark) 100%);
+}
+.hero-in { max-width: 1120px; margin: 0 auto; padding: 56px 16px 64px; display: grid; grid-template-columns: 1.25fr 1fr; gap: 32px; align-items: center; }
+.eyebrow { display: inline-block; margin: 0 0 14px; padding: 4px 12px; border-radius: 999px; background: rgba(0,0,0,.18); font-weight: 600; font-size: .9rem; }
+.hero h1 { font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.08; margin: 0 0 16px; letter-spacing: -.02em; }
+.intro { font-size: 1.12rem; max-width: 36em; margin: 0 0 26px; opacity: .95; }
+.ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+.hero .btn.big:not(.ghost) { background: var(--accent); border-color: var(--accent); color: #1f1a17; }
+.hero .btn.big:not(.ghost):hover { filter: brightness(1.05); }
+.ticks { list-style: none; padding: 0; margin: 26px 0 0; display: flex; flex-wrap: wrap; gap: 8px 22px; font-weight: 600; font-size: .95rem; }
+.ticks li::before { content: "✓"; display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 8px; border-radius: 50%; background: rgba(255,255,255,.2); font-size: .75rem; }
+.hero-art svg { width: 100%; max-width: 380px; display: block; margin: 0 auto; }
+.steam path { animation: rise 2.6s ease-in-out infinite; }
+.steam path:nth-child(2) { animation-delay: .5s; }
+.steam path:nth-child(3) { animation-delay: 1s; }
+@keyframes rise { 0%, 100% { transform: translateY(0); opacity: .5; } 50% { transform: translateY(-6px); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .steam path { animation: none; } html { scroll-behavior: auto; } }
+
+/* Sections */
+.sec { padding: 56px 16px; }
+.sec > * { max-width: 1120px; margin-left: auto; margin-right: auto; }
+.sec.alt { background: var(--alt); }
+.head { margin-bottom: 24px; }
+.head h2 { font-size: clamp(1.5rem, 3vw, 2rem); margin: 0 0 6px; letter-spacing: -.01em; }
+.sub { color: var(--muted); margin: 0; }
+
+/* Menu categories */
+.cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.cat {
+  display: flex; flex-direction: column; gap: 4px; text-decoration: none;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; box-shadow: var(--shadow);
+  transition: border-color .15s, transform .15s;
+}
+.cat:hover { border-color: var(--brand); transform: translateY(-2px); }
+.cat .ic { font-size: 1.8rem; line-height: 1; }
+.cat b { font-size: 1.08rem; }
+.cat small { color: var(--muted); }
+.cat .from { color: var(--brand); font-weight: 700; }
+@media (prefers-color-scheme: dark) { .cat .from { color: var(--accent); } }
+
+/* Features */
+.feats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.feat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px; }
+.feat b { font-size: 1.05rem; }
+.feat b::before { content: ""; display: block; width: 28px; height: 4px; border-radius: 2px; background: var(--accent); margin-bottom: 12px; }
+.feat span { color: var(--muted); }
+
+/* Outlets */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.filters button {
+  font: inherit; font-weight: 600; cursor: pointer; padding: 6px 14px; min-height: 38px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--card); color: var(--text);
+}
+.filters button[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.outlets { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.outlet { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
+.outlet h3 { margin: 0; font-size: 1.12rem; }
+.outlet .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.outlet .city { color: var(--muted); font-size: .9rem; font-weight: 600; }
+.outlet .addr { color: var(--muted); margin: 0; flex: 1; }
+.badge { font-size: .8rem; font-weight: 700; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+.badge.open { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.badge.closed { color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); }
+.hours { font-size: .95rem; }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.acts a {
+  flex: 1; text-align: center; text-decoration: none; font-weight: 600; font-size: .92rem; padding: 8px 10px; min-height: 40px;
+  border: 1px solid var(--line); border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
+}
+.acts a:hover { border-color: var(--brand); }
+.acts a.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.acts a.primary:hover { background: var(--brand-dark); }
+
+/* Steps */
+.steps { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; counter-reset: s; }
+.steps li { counter-increment: s; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 6px; }
+.steps li::before {
+  content: counter(s); display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%;
+  background: var(--brand); color: #fff; font-weight: 800; margin-bottom: 6px;
+}
+.steps span { color: var(--muted); }
+
+/* Closing band */
+.band { background: linear-gradient(160deg, var(--brand), var(--brand-dark)); color: #fff; text-align: center; padding: 48px 16px; }
+.band h2 { margin: 0 0 18px; font-size: clamp(1.4rem, 3vw, 2rem); }
+
+/* Footer */
+.foot { padding: 32px 16px 96px; border-top: 1px solid var(--line); }
+.foot-in { max-width: 1120px; margin: 0 auto; display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.foot .logo span { color: var(--brand); }
+.foot-links { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; }
+.foot-links a { text-decoration: none; font-weight: 600; }
+.foot-links a:hover { text-decoration: underline; }
+.copy { max-width: 1120px; margin: 18px auto 0; font-size: .9rem; }
+
+/* Order button that stays on screen on phones */
+.sticky { display: none; }
+
+@media (max-width: 860px) {
+  .hero-in { grid-template-columns: 1fr; padding: 36px 16px 44px; }
+  .hero-art { order: -1; }
+  .hero-art svg { max-width: 150px; }
+  .feats { grid-template-columns: repeat(2, 1fr); }
+  .steps { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .links { display: none; }
+  .bar { justify-content: space-between; }
+  .feats { grid-template-columns: 1fr; }
+  .cats { grid-template-columns: repeat(2, 1fr); }
+  .outlets { grid-template-columns: 1fr; }
+  .ctas .btn { flex: 1 1 100%; }
+  .sticky {
+    display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--line);
+    transform: translateY(110%); transition: transform .2s;
+  }
+  .sticky.show { transform: none; }
+  .sticky .btn { width: 100%; }
+}
+</style>
+<script>window.BRAND={"id":"raju-chinese","name":"Raju Chinese","logo":["Raju","Chinese"],"outletPrefix":"Raju Chinese - ","emoji":"🥡","region":{"name":"the tricity"},"upiExample":"rajuchinese.sec22@okaxis","demo":{"domain":"order.rajuchinese.example","address":"House 12, Sector 22-B, Chandigarh","outside":{"name":"Ludhiana (outside delivery area)","lat":30.901,"lng":75.8573},"tryOrders":["2 half kurkure veg momo less spicy, ek full veg hakka noodles no onion","bhaiya 3 chilli chicken aur 1 half chilli potato, call before coming"]},"home":{"tagline":"Hot momos, saucy noodles, Chinese the tricity loves","intro":"Fresh off the wok at 7 Raju Chinese outlets across Chandigarh, Mohali and Zirakpur. Order online for delivery from your nearest outlet, or pick it up on your way."},"whatsappNumber":null};BRAND.short=(n)=>{n=String(n||'');return BRAND.outletPrefix&&n.startsWith(BRAND.outletPrefix)?n.slice(BRAND.outletPrefix.length):n;};</script><style>:root{--brand:#d62828;--brand-dark:#a61e1e;--accent:#f4a300}</style>
+</head>
+<body>
+  <header class="top">
+    <div class="bar">
+      <a class="logo" href="/">Raju <span>Chinese</span></a>
+      <nav class="links" aria-label="Sections">
+        <a href="#menu">Menu</a>
+        <a href="#outlets">Outlets</a>
+        <a href="#how">How it works</a>
+      </nav>
+      <a class="btn small" href="/order">Order now</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-in">
+      <div class="hero-copy">
+        <p class="eyebrow" id="eyebrow">Order online · Delivery &amp; pickup</p>
+        <h1 id="tagline">Raju Chinese, hot and fresh near you</h1>
+        <p class="intro" id="intro">Order Chinese food online from your nearest Raju Chinese outlet in Chandigarh, Mohali, Panchkula, Zirakpur and Kharar.</p>
+        <div class="ctas">
+          <a class="btn big" href="/order">Order now</a>
+          <a class="btn big ghost hidden" id="waCta" href="#" target="_blank" rel="noopener">Order on WhatsApp</a>
+          <a class="btn big ghost" id="findCta" href="#outlets">Find your outlet</a>
+        </div>
+        <ul class="ticks">
+          <li>Delivery from your nearest outlet</li>
+          <li>Pay by UPI or cash</li>
+          <li>Half &amp; full portions</li>
+        </ul>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <svg viewBox="0 0 320 300" role="presentation">
+          <ellipse cx="160" cy="270" rx="120" ry="14" fill="rgba(0,0,0,.18)"/>
+          <g class="steam" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".75">
+            <path d="M120 70c-14-18 14-26 0-46"/><path d="M160 60c-14-18 14-26 0-46"/><path d="M200 70c-14-18 14-26 0-46"/>
+          </g>
+          <path d="M70 110h180l-22 150a12 12 0 0 1-12 10H104a12 12 0 0 1-12-10z" fill="#fff"/>
+          <path d="M70 110h180l-4 28H74z" fill="var(--accent)"/>
+          <path d="M98 110l26-30h72l26 30" fill="#fff" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+          <path d="M160 80v30" stroke="var(--accent)" stroke-width="4"/>
+          <circle cx="160" cy="200" r="34" fill="var(--brand)"/>
+          <text x="160" y="212" text-anchor="middle" font-size="34" font-weight="800" fill="#fff" font-family="system-ui,sans-serif" id="artMark">R</text>
+          <g stroke="#7a4a1d" stroke-width="7" stroke-linecap="round"><path d="M232 40 262 152"/><path d="M252 34 274 150"/></g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <main>
+    <section class="sec" id="menu">
+      <div class="head">
+        <h2>What's cooking</h2>
+        <p class="sub" id="menuSub">Our menu, from crispy starters to full platters.</p>
+      </div>
+      <div class="cats" id="cats"><p class="muted">Loading the menu…</p></div>
+      <p class="center"><a class="btn" href="/order">See the full menu and order</a></p>
+    </section>
+
+    <section class="sec alt" id="why">
+      <div class="head"><h2>Why order direct</h2></div>
+      <div class="feats">
+        <div class="feat"><b>Nearest kitchen</b><span>Your order goes to the outlet closest to you, so it reaches you hot.</span></div>
+        <div class="feat"><b>Delivery or pickup</b><span>Get it delivered, or order ahead and collect it on your way.</span></div>
+        <div class="feat"><b>Live tracking</b><span>Follow your order from the kitchen to your door.</span></div>
+        <div class="feat"><b>Earn points</b><span>Collect loyalty points on every order you place with us.</span></div>
+      </div>
+    </section>
+
+    <section class="sec" id="outlets">
+      <div class="head">
+        <h2 id="outletsTitle">Our outlets</h2>
+        <p class="sub">Order for delivery or pickup. Tap to call or get directions.</p>
+      </div>
+      <div class="filters" id="filters" role="tablist" aria-label="Filter by city"></div>
+      <div class="outlets" id="outletList"><p class="muted">Loading outlets…</p></div>
+    </section>
+
+    <section class="sec alt" id="how">
+      <div class="head"><h2>How it works</h2></div>
+      <ol class="steps">
+        <li><b>Set your location</b><span>Choose delivery or pickup. We find your nearest outlet.</span></li>
+        <li><b>Pick your dishes</b><span>Half or full, veg or non-veg, add notes like "less spicy".</span></li>
+        <li><b>Pay and track</b><span>Pay by UPI or cash and follow your order live.</span></li>
+      </ol>
+    </section>
+
+    <section class="band">
+      <h2>Hungry? Your order is a few taps away.</h2>
+      <a class="btn big light" href="/order">Order now</a>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="foot-in">
+      <div>
+        <div class="logo">Raju <span>Chinese</span></div>
+        <p class="muted" id="footAreas"></p>
+      </div>
+      <div class="foot-links">
+        <a href="/order">Order online</a>
+        <a href="#outlets">Outlets</a>
+        <a href="#menu">Menu</a>
+      </div>
+    </div>
+    <p class="muted copy">© <span id="year"></span> Raju Chinese</p>
+  </footer>
+
+  <div class="sticky"><a class="btn big" href="/order">Order now</a></div>
+
+  <script>'use strict';
+
+// Homepage: brand words, menu categories and outlets come from the server,
+// so the page stays right when the head office changes the menu or outlets.
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const api = (path) => fetch('/api' + path).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))));
+const B = window.BRAND || {};
+const shortName = (n) => (B.short ? B.short(n) : n);
+
+// "23:00" -> "11 pm", "11:30" -> "11:30 am"
+function clock(hhmm) {
+  const [h, m] = String(hhmm || '').split(':').map(Number);
+  if (!Number.isFinite(h)) return '';
+  const ap = h >= 12 && h < 24 ? 'pm' : 'am';
+  const h12 = h % 12 || 12;
+  return `${h12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${ap}`;
+}
+
+const listWords = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
+// ---- Brand words ------------------------------------------------------------
+if (B.home?.tagline) $('tagline').textContent = B.home.tagline;
+if (B.home?.intro) $('intro').textContent = B.home.intro;
+if (B.name) $('artMark').textContent = B.name.trim()[0].toUpperCase();
+$('year').textContent = new Date().getFullYear();
+if (B.whatsappNumber) {
+  const wa = $('waCta');
+  wa.href = `https://wa.me/${String(B.whatsappNumber).replace(/\D/g, '')}?text=${encodeURIComponent('Hi')}`;
+  wa.classList.remove('hidden');
+  $('findCta').classList.add('hidden');
+}
+
+// Phones: the bottom "Order now" bar appears once the hero's buttons scroll away.
+if ('IntersectionObserver' in window) {
+  new IntersectionObserver(([e]) => document.querySelector('.sticky').classList.toggle('show', !e.isIntersecting))
+    .observe(document.querySelector('.ctas'));
+}
+
+// ---- Menu -------------------------------------------------------------------
+const ICONS = [
+  [/momo|dumpling/i, '🥟'], [/noodle|chowmein|hakka/i, '🍜'], [/rice|biryani/i, '🍚'], [/soup|thukpa/i, '🍲'],
+  [/chicken|fish|prawn|mutton/i, '🍗'], [/roll|wrap/i, '🌯'], [/pasta/i, '🍝'], [/platter|combo|meal/i, '🍱'],
+  [/chopsuey/i, '🥡'], [/starter|veg/i, '🥢'], [/drink|beverage|shake/i, '🥤'], [/dessert|sweet/i, '🍨'],
+];
+const iconFor = (name) => (ICONS.find(([re]) => re.test(name)) || [null, '🍽️'])[1];
+
+function renderMenu(categories) {
+  const cats = categories.filter((c) => c.items.length);
+  if (!cats.length) { $('cats').innerHTML = '<p class="muted">The menu is being updated. Please check back soon.</p>'; return; }
+  // A dish sold in two portions is two items; count it once.
+  const dishes = new Set();
+  $('cats').innerHTML = cats.map((c) => {
+    const names = new Set(c.items.map((i) => i.name.replace(/\s*\((Half|Full)\)\s*$/i, '')));
+    names.forEach((n) => dishes.add(n));
+    const from = Math.min(...c.items.map((i) => i.price));
+    return `<a class="cat" href="/order"><span class="ic" aria-hidden="true">${iconFor(c.name)}</span>`
+      + `<b>${esc(c.name)}</b><small>${names.size} dish${names.size === 1 ? '' : 'es'}</small>`
+      + `<span class="from">from ₹${Math.round(from / 100)}</span></a>`;
+  }).join('');
+  $('menuSub').textContent = `${dishes.size}+ dishes across ${cats.length} categories, from crispy starters to full platters.`;
+}
+
+// ---- Outlets ----------------------------------------------------------------
+let outlets = [];
+let city = 'All';
+
+function outletCard(o) {
+  const name = shortName(o.name);
+  const maps = `https://www.google.com/maps/dir/?api=1&destination=${o.lat},${o.lng}`;
+  const tel = String(o.phone || '').replace(/[^\d+]/g, '');
+  return `<article class="outlet">
+    <div class="row"><span class="city">${esc(o.city)}</span>
+      <span class="badge ${o.open ? 'open' : 'closed'}">${o.open ? 'Open now' : `Opens ${esc(clock(o.opens))}`}</span></div>
+    <h3>${esc(name)}</h3>
+    <p class="addr">${esc(o.address)}</p>
+    <div class="hours">🕒 ${esc(clock(o.opens))} – ${esc(clock(o.closes))}</div>
+    <div class="acts">
+      ${tel ? `<a href="tel:${esc(tel)}">Call</a>` : ''}
+      <a href="${esc(maps)}" target="_blank" rel="noopener">Directions</a>
+      <a class="primary" href="/order">Order</a>
+    </div>
+  </article>`;
+}
+
+function renderOutlets() {
+  const shown = city === 'All' ? outlets : outlets.filter((o) => o.city === city);
+  $('outletList').innerHTML = shown.map(outletCard).join('');
+  for (const b of $('filters').children) b.setAttribute('aria-selected', String(b.dataset.city === city));
+}
+
+function setupOutlets(list) {
+  outlets = list.slice().sort((a, b) => a.city.localeCompare(b.city) || a.name.localeCompare(b.name));
+  if (!outlets.length) { $('outletList').innerHTML = '<p class="muted">Outlets coming soon.</p>'; return; }
+  const cities = [...new Set(outlets.map((o) => o.city))];
+  const n = outlets.length;
+  $('outletsTitle').textContent = `Our ${n} outlet${n === 1 ? '' : 's'}`;
+  $('eyebrow').textContent = `${n} outlet${n === 1 ? '' : 's'} across ${listWords(cities)}`;
+  $('footAreas').textContent = `Serving ${listWords(cities)}.`;
+  if (cities.length > 1) {
+    $('filters').innerHTML = ['All', ...cities].map((c) => `<button type="button" role="tab" data-city="${esc(c)}">${esc(c)}</button>`).join('');
+    $('filters').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (b) { city = b.dataset.city; renderOutlets(); }
+    });
+  }
+  renderOutlets();
+}
+
+api('/menu').then(renderMenu).catch(() => { $('cats').innerHTML = '<p class="muted">Could not load the menu. <a href="/order">Open the order page</a>.</p>'; });
+api('/outlets').then(setupOutlets).catch(() => { $('outletList').innerHTML = '<p class="muted">Could not load outlets. Please refresh.</p>'; });
+</script>
+</body>
+</html>

@@ -5,7 +5,7 @@
 (() => {
   window.RC_DEMO = true;
   window.RC_STANDALONE = true;
-  const PAGES = { '/': 'order.html', '/index.html': 'order.html', '/track.html': 'track.html', '/outlet/': 'outlet.html', '/admin/': 'admin.html', '/whatsapp-sim.html': 'whatsapp.html' };
+  const PAGES = { '/': 'home.html', '/index.html': 'home.html', '/order': 'order.html', '/order.html': 'order.html', '/track.html': 'track.html', '/outlet/': 'outlet.html', '/admin/': 'admin.html', '/whatsapp-sim.html': 'whatsapp.html' };
   const pageUrl = (u) => { const x = new URL(u, 'https://demo.local'); return (PAGES[x.pathname] || x.pathname.slice(1)) + x.search; };
   window.RC_NAVIGATE = (u) => { location.href = pageUrl(u); };
   document.addEventListener('click', (e) => {
@@ -272,7 +272,7 @@ textarea { resize: vertical; min-height: 64px; }
 .steps li.done::before { background: var(--ok); border-color: var(--ok); }
 .steps li.current { font-weight: 700; }
 </style>
-<script>window.BRAND={"id":"raju-chinese","name":"Raju Chinese","logo":["Raju","Chinese"],"outletPrefix":"Raju Chinese - ","emoji":"🥡","region":{"name":"the tricity"},"upiExample":"rajuchinese.sec22@okaxis","demo":{"domain":"order.rajuchinese.example","address":"House 12, Sector 22-B, Chandigarh","outside":{"name":"Ludhiana (outside delivery area)","lat":30.901,"lng":75.8573},"tryOrders":["2 half kurkure veg momo less spicy, ek full veg hakka noodles no onion","bhaiya 3 chilli chicken aur 1 half chilli potato, call before coming"]}};BRAND.short=(n)=>{n=String(n||'');return BRAND.outletPrefix&&n.startsWith(BRAND.outletPrefix)?n.slice(BRAND.outletPrefix.length):n;};</script><style>:root{--brand:#d62828;--brand-dark:#a61e1e;--accent:#f4a300}</style>
+<script>window.BRAND={"id":"raju-chinese","name":"Raju Chinese","logo":["Raju","Chinese"],"outletPrefix":"Raju Chinese - ","emoji":"🥡","region":{"name":"the tricity"},"upiExample":"rajuchinese.sec22@okaxis","demo":{"domain":"order.rajuchinese.example","address":"House 12, Sector 22-B, Chandigarh","outside":{"name":"Ludhiana (outside delivery area)","lat":30.901,"lng":75.8573},"tryOrders":["2 half kurkure veg momo less spicy, ek full veg hakka noodles no onion","bhaiya 3 chilli chicken aur 1 half chilli potato, call before coming"]},"home":{"tagline":"Hot momos, saucy noodles, Chinese the tricity loves","intro":"Fresh off the wok at 7 Raju Chinese outlets across Chandigarh, Mohali and Zirakpur. Order online for delivery from your nearest outlet, or pick it up on your way."},"whatsappNumber":null};BRAND.short=(n)=>{n=String(n||'');return BRAND.outletPrefix&&n.startsWith(BRAND.outletPrefix)?n.slice(BRAND.outletPrefix.length):n;};</script><style>:root{--brand:#d62828;--brand-dark:#a61e1e;--accent:#f4a300}</style>
 </head>
 <body>
   <header class="topbar">
@@ -280,7 +280,7 @@ textarea { resize: vertical; min-height: 64px; }
   </header>
   <main class="wrap">
     <div class="track-card" id="card"><p class="muted">Loading your order…</p></div>
-    <a class="btn secondary" href="/" style="text-align:center;text-decoration:none">Order more</a>
+    <a class="btn secondary" href="/order" style="text-align:center;text-decoration:none">Order more</a>
   </main>
   <script>
   'use strict';
