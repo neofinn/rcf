@@ -194,6 +194,12 @@ test('head office opens a new outlet: it gets orders, stock and a tablet login',
   assert.deepEqual([moved.body.lat, moved.body.closes], [30.815, '22:30']);
   assert.equal(moved.body.name, 'Test Kitchen - New Chandigarh', 'fields not sent stay as they were');
   assert.equal((await s.call('PATCH', `/api/admin/outlets/${o.id}`, { closes: '25:00' }, admin)).status, 400);
+
+  // GSTIN and FSSAI number, printed on bills.
+  const tax = await s.call('PATCH', `/api/admin/outlets/${o.id}`, { gstin: '04abcde1234f1z5', fssai: '12345678901234' }, admin);
+  assert.deepEqual([tax.body.gstin, tax.body.fssai], ['04ABCDE1234F1Z5', '12345678901234']);
+  assert.equal((await s.call('PATCH', `/api/admin/outlets/${o.id}`, { gstin: '04ABCDE1234F1Z' }, admin)).status, 400);
+  assert.equal((await s.call('PATCH', `/api/admin/outlets/${o.id}`, { fssai: '1234' }, admin)).status, 400);
 });
 
 test('WhatsApp webhook: verification, signature, dedupe and status notifications', async (t) => {

@@ -14,8 +14,8 @@ function createSqliteStore(db) {
     setAccepting: db.prepare('UPDATE outlets SET accepting_orders = ? WHERE id = ?'),
     allOutlets: db.prepare('SELECT * FROM outlets ORDER BY id'),
     insertOutlet: db.prepare(`INSERT INTO outlets
-      (slug, name, city, address, lat, lng, phone, delivery_radius_km, opens, closes, upi_id, upi_name, sfx_store_code, wa_payment_config, accepting_orders, active)
-      VALUES (@slug, @name, @city, @address, @lat, @lng, @phone, @delivery_radius_km, @opens, @closes, @upi_id, @upi_name, @sfx_store_code, @wa_payment_config, @accepting_orders, @active)`),
+      (slug, name, city, address, lat, lng, phone, delivery_radius_km, opens, closes, upi_id, upi_name, sfx_store_code, wa_payment_config, gstin, fssai, accepting_orders, active)
+      VALUES (@slug, @name, @city, @address, @lat, @lng, @phone, @delivery_radius_km, @opens, @closes, @upi_id, @upi_name, @sfx_store_code, @wa_payment_config, @gstin, @fssai, @accepting_orders, @active)`),
     items: db.prepare('SELECT * FROM menu_items WHERE active = 1 ORDER BY sort'),
     unavailable: db.prepare('SELECT item_id FROM outlet_unavailable_items WHERE outlet_id = ?'),
     stock: db.prepare('SELECT item_id, remaining, updated_at FROM outlet_stock WHERE outlet_id = ?'),

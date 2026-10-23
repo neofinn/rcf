@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS outlets (
   upi_name TEXT,
   sfx_store_code TEXT, -- Shadowfax store code, assigned at Shadowfax onboarding
   wa_payment_config TEXT, -- WhatsApp payment configuration name (Meta Business Suite)
+  gstin TEXT, -- printed on bills
+  fssai TEXT, -- FSSAI licence number, printed on bills
   opens TEXT NOT NULL DEFAULT '11:00',
   closes TEXT NOT NULL DEFAULT '23:00',
   accepting_orders INTEGER NOT NULL DEFAULT 1,
@@ -311,6 +313,9 @@ function migrate(db, seed) {
     db.exec('ALTER TABLE outlets ADD COLUMN wa_payment_config TEXT');
     const set = db.prepare('UPDATE outlets SET wa_payment_config = ? WHERE slug = ?');
     for (const o of seed.outlets) set.run(o.waPaymentConfig || null, o.slug);
+  }
+  for (const col of ['gstin', 'fssai']) {
+    if (!db.prepare('PRAGMA table_info(outlets)').all().some((c) => c.name === col)) db.exec(`ALTER TABLE outlets ADD COLUMN ${col} TEXT`);
   }
   const deliveryCols = db.prepare('PRAGMA table_info(deliveries)').all().map((c) => c.name);
   for (const [col, type] of [['price', 'INTEGER'], ['booked_at', 'TEXT'], ['allotted_at', 'TEXT'], ['tried', 'TEXT'], ['quotes', 'TEXT']]) {

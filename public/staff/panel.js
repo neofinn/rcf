@@ -133,6 +133,102 @@ function payActions(o) {
   return '';
 }
 
+// ---- Printing: KOT and bill (print.js) ----------------------------------------
+// Settings belong to this device (the printer is attached to it).
+const printing = {
+  settings: () => ({ auto: false, what: 'both', paper: 80, kotCopies: 1, ...store.get('print', {}) }),
+  save(s) { store.set('print', s); },
+  // Orders already printed on this device, so auto print never repeats one.
+  printed: new Set(store.get('printed', [])),
+  mark(codes) {
+    codes.forEach((c) => this.printed.add(c));
+    store.set('printed', [...this.printed].slice(-300));
+  },
+};
+const ordersByCode = new Map();
+const NO_KOT = ['awaiting_payment', 'unpaid', 'cancelled'];
+
+function printButtons(o) {
+  ordersByCode.set(o.code, o);
+  return `<div class="actions print-actions">
+    ${NO_KOT.includes(o.status) ? '' : `<button type="button" data-print="${o.code}" data-what="kot">🖨 KOT</button>`}
+    <button type="button" data-print="${o.code}" data-what="bill">🧾 Bill</button>
+  </div>`;
+}
+
+function printOrders(orders, what) {
+  // A KOT printed by hand counts: auto print won't send that order to the kitchen again.
+  if (what !== 'bill') printing.mark(orders.map((o) => o.code));
+  return window.RCPrint.print(orders, what, printing.settings());
+}
+
+// New orders sent to the kitchen print by themselves when Auto print is on.
+// A pay-first order prints once it is paid (it turns "placed" then).
+function autoPrint(orders) {
+  const s = printing.settings();
+  if (!s.auto) return;
+  // Re-read: another tab on this device may have printed them already.
+  printing.printed = new Set(store.get('printed', []));
+  const fresh = orders.filter((o) => o.status === 'placed' && !printing.printed.has(o.code));
+  if (!fresh.length) return;
+  printing.mark(fresh.map((o) => o.code));
+  window.RCPrint.print(fresh, s.what, s);
+}
+
+function setupPrinting() {
+  if ($('autoPrint')) return;
+  const s = printing.settings();
+  $('sound').parentElement.insertAdjacentHTML('afterend', `
+    <label class="vegtoggle" style="margin:0"><input type="checkbox" id="autoPrint" style="width:auto"${s.auto ? ' checked' : ''}> Auto print</label>
+    <button type="button" class="linkbtn" id="printerBtn">🖨 Printer settings</button>`);
+  document.body.insertAdjacentHTML('beforeend', `
+    <dialog id="printerDlg" class="printer-dlg" aria-labelledby="printerTitle">
+      <form method="dialog">
+        <h3 id="printerTitle">Printer settings</h3>
+        <p class="small muted">For this device only (the printer connected to it).</p>
+        <label class="vegtoggle"><input type="checkbox" name="auto" style="width:auto"> Auto print new orders</label>
+        <label>Auto print<select name="what">
+          <option value="both">KOT and bill</option><option value="kot">KOT only</option><option value="bill">Bill only</option></select></label>
+        <label>Paper width<select name="paper"><option value="80">80 mm</option><option value="58">58 mm</option></select></label>
+        <label>KOT copies<select name="kotCopies"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+        <p class="small muted">To print without the print window every time, run Chrome with <code>--kiosk-printing</code> and set the receipt printer as the default printer (see DEPLOY.md).</p>
+        <div class="row"><button type="button" class="btn secondary" id="testPrint" style="width:auto">Test print</button><button class="btn" style="width:auto">Done</button></div>
+      </form>
+    </dialog>`);
+  const dlg = $('printerDlg');
+  const form = dlg.querySelector('form');
+  const read = () => ({ auto: form.auto.checked, what: form.what.value, paper: Number(form.paper.value), kotCopies: Number(form.kotCopies.value) });
+  const turnOn = async (on) => {
+    printing.save({ ...printing.settings(), auto: on });
+    $('autoPrint').checked = on;
+    form.auto.checked = on;
+    // Print the new orders already waiting (not every old one).
+    if (on) autoPrint(await api('/orders' + (state.outletId ? `?outletId=${state.outletId}` : '')).catch(() => []));
+  };
+  $('autoPrint').addEventListener('change', (e) => turnOn(e.target.checked));
+  $('printerBtn').addEventListener('click', () => {
+    const cur = printing.settings();
+    form.auto.checked = cur.auto; form.what.value = cur.what; form.paper.value = String(cur.paper); form.kotCopies.value = String(cur.kotCopies);
+    dlg.showModal();
+  });
+  form.addEventListener('change', (e) => {
+    const next = read();
+    printing.save(next);
+    if (e.target.name === 'auto') turnOn(next.auto);
+  });
+  $('testPrint').addEventListener('click', () => {
+    const now = new Date().toISOString();
+    const outlet = state.outlets.find((x) => String(x.id) === String(state.outletId)) || state.outlets[0] || {};
+    const sample = {
+      code: 'TEST', fulfilment: 'delivery', channel: 'web', created_at: now, customer_name: 'Test print', phone: '9876543210',
+      address: 'Printer check', notes: 'Test slip, do not cook', outlet,
+      items: [{ qty: 2, name: 'Sample dish (Half)', price: 15000, note: 'less spicy' }, { qty: 1, name: 'Another dish', price: 9900 }],
+      subtotal: 39900, packing: 1000, gst: 2045, delivery_fee: 3000, total: 45945, paymentLabel: 'Cash on delivery',
+    };
+    window.RCPrint.print([sample], read().what, read());
+  });
+}
+
 function orderCard(o) {
   const waiting = o.status === 'awaiting_payment';
   const hold = waiting ? `<div class="hold">${o.payment_status === 'claimed'
@@ -150,6 +246,7 @@ function orderCard(o) {
     <div style="margin:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${rupees(o.total)}</b>${o.fulfilment === 'delivery' ? ` <span class="small muted">incl. delivery ${rupees(o.delivery_fee)}</span>` : ''} <span class="chip pay-${o.payment_status}">${esc(o.paymentLabel)}</span></div>
     ${payActions(o)}
     ${deliveryBlock(o)}
+    ${printButtons(o)}
     <div class="actions">${o.nextStatuses.map((s) => `<button type="button" class="${s === 'cancelled' ? 'cancel' : ''}" data-code="${o.code}" data-status="${s}">${NEXT_LABEL[s]}</button>`).join('')}</div>
   </div>`;
 }
@@ -167,6 +264,7 @@ async function renderOrders() {
     if (fresh.length && !state.firstLoad) beep();
     orders.forEach((o) => state.seen.add(key(o)));
     state.firstLoad = false;
+    autoPrint(orders);
   }
   const waiting = state.view === 'live' ? orders.filter((o) => o.status === 'awaiting_payment') : [];
   const rest = orders.filter((o) => !waiting.includes(o));
@@ -238,8 +336,13 @@ async function refresh() {
   try {
     const chats = await loadChats();
     const insights = PANEL === 'admin' && window.RCInsights?.[state.view];
+    const live = !insights && !['chats', 'stock', 'history'].includes(state.view);
     const view = insights ? insights() : state.view === 'chats' ? renderChats(chats)
       : state.view === 'stock' ? renderOutletStock() : renderOrders();
+    // Away from Live orders, still check for new orders to auto print.
+    if (!live && printing.settings().auto) {
+      api('/orders' + (state.outletId ? `?outletId=${state.outletId}` : '')).then(autoPrint).catch(() => {});
+    }
     await Promise.all([view, renderStats()]);
   } catch (e) {
     if (e.message !== 'unauthorized') console.error(e);
@@ -270,6 +373,11 @@ document.addEventListener('click', async (e) => {
   if (c) {
     try { await api(`/chats/${c.dataset.closeChat}/close`, { method: 'POST' }); } catch (err) { alert(err.message); }
     refresh();
+  }
+  const pr = e.target.closest('[data-print]');
+  if (pr) {
+    const o = ordersByCode.get(pr.dataset.print);
+    if (o) printOrders([o], pr.dataset.what);
   }
   const v = e.target.closest('[data-view]');
   if (v) setView(v.dataset.view);
@@ -344,10 +452,17 @@ async function start() {
     $('outlet').value = state.outletId;
   }
   syncAccepting();
+  setupPrinting();
   refresh();
   clearInterval(poll);
   // Live views refresh themselves; back-office views refresh when you act.
-  poll = setInterval(() => { if (['live', 'chats', 'history'].includes(state.view) || (PANEL === 'outlet' && state.view === 'stock')) refresh(); else loadChats().catch(() => {}); }, 5000);
+  poll = setInterval(() => {
+    if (['live', 'chats', 'history'].includes(state.view) || (PANEL === 'outlet' && state.view === 'stock')) refresh();
+    else {
+      loadChats().catch(() => {});
+      if (printing.settings().auto) api('/orders' + (state.outletId ? `?outletId=${state.outletId}` : '')).then(autoPrint).catch(() => {});
+    }
+  }, 5000);
 }
 
 start();

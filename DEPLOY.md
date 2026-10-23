@@ -354,6 +354,18 @@ Fees: Razorpay's standard rate is 2% + GST per payment, and you can negotiate it
 
 ---
 
+## 5. Receipt printer: KOT and bill
+
+Every order card in the outlet panel (and head office) has **🖨 KOT** and **🧾 Bill** buttons. **Auto print** in the panel's top bar prints new orders by themselves as they reach the kitchen (a pay-first UPI order prints once it is paid). **Printer settings** chooses what auto print prints (KOT and bill, KOT only, bill only), paper width (80 mm or 58 mm) and KOT copies, and has a **Test print**. These settings are kept on that device, because the printer is attached to it.
+
+- **Printer:** any 80 mm (or 58 mm) thermal receipt printer installed as a normal printer on the counter PC or tablet, USB, network or Bluetooth.
+- **No print window every time (Windows PC or laptop):** make the receipt printer the default printer, then start Chrome for the panel with kiosk printing. Shortcut target:
+  `"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk-printing https://<your-domain>/outlet/`
+  Slips then print straight away, without any dialog.
+- **Android tablet:** Chrome on Android always shows the print window (one tap on Print). For silent printing use a counter PC as above.
+- **Bill details:** add each outlet's **GSTIN** and **FSSAI licence number** in Head office → Outlets → Edit. With a GSTIN the bill prints as a *Tax invoice* with CGST and SGST shown separately. Outlets in Mohali and Zirakpur (Punjab) use a Punjab GSTIN; Chandigarh outlets a Chandigarh one.
+- **Supabase copy:** if you created the Supabase tables before this version, run `supabase/schema.sql` again (it adds the two new outlet columns).
+
 ## Monthly cost at a glance (indicative)
 
 | Item | Cost |

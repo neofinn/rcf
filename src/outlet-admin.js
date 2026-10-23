@@ -12,6 +12,8 @@ const { brand, fullName, shortName } = require('./brand');
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const UPI = /^[a-z0-9._-]{2,}@[a-z][a-z0-9.-]{1,}$/i;
+// 2-digit state code, PAN, entity number, Z, check character.
+const GSTIN = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
 /** Pull coordinates out of a Google Maps link: ".../@30.7,76.7,17z", "?q=30.7,76.7", "!3d30.7!4d76.7". */
 function coordsFromMapsLink(link) {
@@ -88,6 +90,17 @@ function createOutletAdmin({ store }) {
     if (sfx !== undefined) out.sfx_store_code = sfx;
     const wa = opt('waPaymentConfig', 60);
     if (wa !== undefined) out.wa_payment_config = wa;
+    // Printed on bills.
+    const gstin = opt('gstin', 20);
+    if (gstin !== undefined) {
+      if (gstin && !GSTIN.test(gstin.toUpperCase())) throw new ValidationError('GSTIN must be 15 characters, like 04ABCDE1234F1Z5.');
+      out.gstin = gstin.toUpperCase();
+    }
+    const fssai = opt('fssai', 20);
+    if (fssai !== undefined) {
+      if (fssai && !/^\d{14}$/.test(fssai)) throw new ValidationError('FSSAI licence number must be 14 digits.');
+      out.fssai = fssai;
+    }
     return out;
   }
 
@@ -111,7 +124,7 @@ function createOutletAdmin({ store }) {
       throw new ValidationError(`There is already an outlet called "${o.name}".`);
     }
     const id = store.insertOutlet({
-      slug, upi_id: null, sfx_store_code: null, wa_payment_config: null, ...o,
+      slug, upi_id: null, sfx_store_code: null, wa_payment_config: null, gstin: null, fssai: null, ...o,
       delivery_radius_km: config.delivery.rangeKm, upi_name: brand().name,
       accepting_orders: body.acceptingOrders === false ? 0 : 1, active: 1,
     });

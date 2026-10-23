@@ -92,6 +92,7 @@
       <div class="row">${f('opens', 'Opens', `<input name="opens" type="time" required value="${o ? v('opens') : '11:00'}">`)}${f('closes', 'Closes', `<input name="closes" type="time" required value="${o ? v('closes') : '23:00'}">`, 'Same time = open 24 hours')}</div>
       ${f('upiId', 'UPI ID for online payments', `<input name="upiId" value="${v('upi_id')}" placeholder="${esc(BRAND.upiExample)}">`, 'Optional. Without it, customers pay cash/UPI on delivery.')}
       ${f('sfxStoreCode', 'Shadowfax store code', `<input name="sfxStoreCode" value="${v('sfx_store_code')}">`, 'Optional, from Shadowfax onboarding.')}
+      <div class="row">${f('gstin', 'GSTIN', `<input name="gstin" value="${v('gstin')}" maxlength="15" style="text-transform:uppercase">`, 'Printed on bills.')}${f('fssai', 'FSSAI licence no.', `<input name="fssai" value="${v('fssai')}" inputmode="numeric" maxlength="14">`, 'Printed on bills.')}</div>
       ${f('waPaymentConfig', 'WhatsApp payment configuration', `<input name="waPaymentConfig" value="${v('wa_payment_config')}">`, 'Optional, from WhatsApp Manager → Payments.')}
       ${o ? '' : f('pin', 'Outlet panel PIN', '<input name="pin" type="password" inputmode="numeric" pattern="\\d{4,8}" placeholder="4–8 digits">', 'Optional now; you can set it later.')}
       <datalist id="cityList">${cities().map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
@@ -199,7 +200,7 @@
       e.preventDefault();
       const data = Object.fromEntries(new FormData(form));
       const body = { name: data.name, city: data.city, address: data.address, phone: data.phone, opens: data.opens, closes: data.closes,
-        upiId: data.upiId, sfxStoreCode: data.sfxStoreCode, waPaymentConfig: data.waPaymentConfig };
+        upiId: data.upiId, sfxStoreCode: data.sfxStoreCode, waPaymentConfig: data.waPaymentConfig, gstin: data.gstin, fssai: data.fssai };
       if (data.mapsLink.trim()) body.mapsLink = data.mapsLink.trim(); else { body.lat = data.lat; body.lng = data.lng; }
       const id = form.dataset.id;
       try {

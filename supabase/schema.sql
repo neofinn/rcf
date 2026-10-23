@@ -22,11 +22,17 @@ create table if not exists outlets (
   upi_name text,
   sfx_store_code text,
   wa_payment_config text,
+  gstin text,
+  fssai text,
   opens text not null,
   closes text not null,
   accepting_orders boolean not null default true,
   active boolean not null default true
 );
+
+-- Columns added after the first release (safe to re-run).
+alter table outlets add column if not exists gstin text;
+alter table outlets add column if not exists fssai text;
 
 create table if not exists menu_items (
   id integer primary key,

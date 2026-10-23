@@ -120,13 +120,14 @@ Supported partners: **Shadowfax** (`shadowfax.js`), **Porter** (`porter.js`; two
 - It shows **only that outlet's** live orders (accept, cooking, ready, rider, payment), its WhatsApp chats, history and today's total, with a beep on new orders.
 - **Stock is read-only** here: what head office switched off, and the counts left. Counts go down by themselves as orders come in.
 - Staff can still pause new orders when the kitchen is overloaded (the next nearest outlet takes them).
+- **KOT and bill printing** on every order (80 mm or 58 mm thermal printer), and **Auto print** for new orders, set per device in **Printer settings** (`public/staff/print.js`; set-up in DEPLOY.md). Bills carry the outlet's GSTIN and FSSAI number when set.
 - Sessions last 30 days. Five wrong PINs lock that outlet's login for 5 minutes. A new PIN (or **Sign out all**) logs the outlet's tablets out.
 - Every outlet API is checked on the server (`/api/outlet/*`): an order or chat of another outlet answers "not found".
 
 **Head office panel (`/admin/`)**, for the owner, logs in with `ADMIN_TOKEN` and sees every outlet:
 - Live orders, chats and history for all outlets (or filter to one).
 - **Stock** (`src/stock.js`): every dish × every outlet. Tick to sell it there; type a count to sell only that many (orders take from it, a cancellation puts it back, at 0 the dish shows as sold out on web and WhatsApp, and customers can't order more than what's left). Empty count = no limit. Per dish: *All on*, *All off*, *No limits* across outlets. Tiles show what's off, sold out and running low.
-- **Outlets:** **add a new outlet** or edit one (name, address, phone, location from a pasted Google Maps link or coordinates, opening hours, UPI ID, Shadowfax store code, WhatsApp payment configuration; `src/outlet-admin.js`). A new outlet takes orders straight away: routing sends nearby customers to it, the whole menu is in stock, and its tablet logs in once it has a PIN. Also pause or resume an outlet, set each outlet's panel PIN, see how many tablets are signed in, sign them out.
+- **Outlets:** **add a new outlet** or edit one (name, address, phone, location from a pasted Google Maps link or coordinates, opening hours, UPI ID, GSTIN and FSSAI number (printed on bills), Shadowfax store code, WhatsApp payment configuration; `src/outlet-admin.js`). A new outlet takes orders straight away: routing sends nearby customers to it, the whole menu is in stock, and its tablet logs in once it has a PIN. Also pause or resume an outlet, set each outlet's panel PIN, see how many tablets are signed in, sign them out.
 - Customers, Menu and Analytics below.
 
 ## Back office (head office panel `/admin/`)

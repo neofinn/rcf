@@ -265,7 +265,7 @@ function createOrderService(store) {
       statusLabel: STATUS_LABELS[row.status],
       nextStatuses: (TRANSITIONS[row.fulfilment][row.status] || []),
       etaMinutes: etaMinutes(row.fulfilment, row.distance_km || 0),
-      outlet: outlet && { id: outlet.id, name: outlet.name, phone: outlet.phone, address: outlet.address, lat: outlet.lat, lng: outlet.lng },
+      outlet: outlet && { id: outlet.id, name: outlet.name, phone: outlet.phone, address: outlet.address, lat: outlet.lat, lng: outlet.lng, gstin: outlet.gstin || null, fssai: outlet.fssai || null },
       // A cancelled order still showing paid is waiting for its refund (retried automatically).
       paymentLabel: row.status === 'cancelled' && row.payment_status === 'paid' ? 'Paid, refund pending' : PAYMENT_LABELS[row.payment_status],
       delivery: presentDelivery(row),
