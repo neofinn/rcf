@@ -292,6 +292,14 @@ h3.section { margin: 4px 0 8px; font-size: 0.95rem; color: var(--muted); font-we
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .actions button { flex: 1; border: 0; border-radius: 8px; padding: 8px; font-weight: 700; background: var(--brand); color: #fff; }
 .actions button.paid { background: var(--ok); }
+.print-actions { margin-bottom: 6px; }
+.print-actions button { background: var(--card); color: var(--text); border: 1px solid var(--line); font-weight: 600; }
+.linkbtn { background: none; border: 0; padding: 4px 2px; color: var(--brand); font-weight: 600; cursor: pointer; }
+.printer-dlg { border: 0; border-radius: var(--radius); padding: 18px; width: min(420px, calc(100vw - 32px)); background: var(--card); color: var(--text); box-shadow: var(--shadow); }
+.printer-dlg::backdrop { background: rgba(0, 0, 0, 0.4); }
+.printer-dlg h3 { margin: 0 0 4px; }
+.printer-dlg label { display: block; margin: 10px 0 0; }
+.printer-dlg .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 .actions button.cancel { background: var(--card); color: var(--nonveg); border: 1px solid var(--line); flex: 0 0 auto; }
 .stats { display: flex; gap: 10px; flex-wrap: wrap; }
 .stat { background: var(--card); border-radius: 10px; padding: 8px 12px; box-shadow: var(--shadow); font-size: 0.9rem; }
@@ -480,6 +488,137 @@ td, th { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: le
 
   <script>'use strict';
 
+// KOT (kitchen order ticket) and customer bill, laid out for 80 mm or 58 mm
+// thermal receipt printers. Several slips print as one job, so the browser
+// asks once (or not at all when Chrome runs with --kiosk-printing).
+
+(() => {
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const money = (p) => (p / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const when = (iso) => new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const short = (n) => (window.BRAND?.short ? BRAND.short(n) : n);
+  const brandName = () => window.BRAND?.name || '';
+
+  // GST rate for the CGST/SGST split; from the server once.
+  let gstPercent = null;
+  const loadGst = () => (gstPercent != null ? Promise.resolve() : fetch('/api/config').then((r) => r.json())
+    .then((c) => { gstPercent = Number(c.gstPercent) || 0; }).catch(() => {}));
+
+  const kind = (o) => `${o.fulfilment === 'delivery' ? 'DELIVERY' : 'PICKUP'} · ${o.channel === 'whatsapp' ? 'WhatsApp' : 'Web'}`;
+
+  function kot(o, copy = '') {
+    const qty = o.items.reduce((n, i) => n + i.qty, 0);
+    return `<section class="slip kot">
+      <div class="c big">KOT${copy ? ` <small>${esc(copy)}</small>` : ''}</div>
+      <div class="c">${esc(short(o.outlet?.name || ''))}</div>
+      <div class="row"><b>#${esc(o.code)}</b><span>${esc(when(o.created_at))}</span></div>
+      <div class="c b">${kind(o)}</div>
+      <hr>
+      <table class="items">${o.items.map((i) => `<tr><td class="q">${i.qty}</td><td>${esc(i.name)}${i.note ? `<div class="note">» ${esc(i.note)}</div>` : ''}</td></tr>`).join('')}</table>
+      <hr>
+      ${o.notes ? `<div class="note">Note: ${esc(o.notes)}</div><hr>` : ''}
+      <div class="row"><span>${o.items.length} dish${o.items.length === 1 ? '' : 'es'}</span><span>${qty} item${qty === 1 ? '' : 's'}</span></div>
+    </section>`;
+  }
+
+  function bill(o) {
+    const out = o.outlet || {};
+    const cgst = Math.floor(o.gst / 2);
+    const half = gstPercent ? ` ${gstPercent / 2}%` : '';
+    const line = (label, p, cls = '') => `<tr class="${cls}"><td colspan="3">${label}</td><td class="r">${money(p)}</td></tr>`;
+    return `<section class="slip bill">
+      <div class="c big">${esc(brandName())}</div>
+      <div class="c">${esc(short(out.name || ''))}</div>
+      ${out.address ? `<div class="c small">${esc(out.address)}</div>` : ''}
+      ${out.phone ? `<div class="c small">Ph: ${esc(out.phone)}</div>` : ''}
+      ${out.gstin ? `<div class="c small">GSTIN: ${esc(out.gstin)}</div>` : ''}
+      ${out.fssai ? `<div class="c small">FSSAI: ${esc(out.fssai)}</div>` : ''}
+      <hr>
+      <div class="c b">${out.gstin ? 'TAX INVOICE' : 'BILL'}</div>
+      <div class="row"><span>Bill no: <b>${esc(o.code)}</b></span></div>
+      <div class="row"><span>${esc(when(o.created_at))}</span><span>${o.fulfilment === 'delivery' ? 'Delivery' : 'Pickup'}</span></div>
+      <div>${esc(o.customer_name)} · ${esc(o.phone)}</div>
+      ${o.address ? `<div class="small">${esc(o.address)}</div>` : ''}
+      <hr>
+      <table class="items">
+        <tr class="th"><td>Item</td><td class="r">Qty</td><td class="r">Rate</td><td class="r">Amt</td></tr>
+        ${o.items.map((i) => `<tr><td>${esc(i.name)}</td><td class="r">${i.qty}</td><td class="r">${money(i.price)}</td><td class="r">${money(i.price * i.qty)}</td></tr>`).join('')}
+      </table>
+      <hr>
+      <table class="items">
+        ${line('Subtotal', o.subtotal)}
+        ${o.packing ? line('Packing', o.packing) : ''}
+        ${o.gst ? line(`CGST${half}`, cgst) + line(`SGST${half}`, o.gst - cgst) : ''}
+        ${o.delivery_fee ? line('Delivery', o.delivery_fee) : ''}
+        ${line('<b>TOTAL</b>', o.total, 'total')}
+      </table>
+      <hr>
+      <div class="row"><span>Payment</span><b>${esc(o.paymentLabel || '')}</b></div>
+      <div class="c small" style="margin-top:6px">Thank you! Order again at ${esc(location.host)}</div>
+    </section>`;
+  }
+
+  function page(slips, paper) {
+    const w = paper === 58 ? 48 : 72; // printable width in mm
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Print</title><style>
+      @page { size: ${paper}mm auto; margin: 0; }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #000; background: #fff; font: ${paper === 58 ? 11 : 12}px/1.35 Arial, Helvetica, sans-serif; }
+      .slip { width: ${w}mm; margin: 0 auto; padding: 3mm 0 6mm; break-after: page; page-break-after: always; }
+      .slip:last-child { break-after: auto; page-break-after: auto; }
+      .c { text-align: center; } .r { text-align: right; white-space: nowrap; } .b { font-weight: 700; }
+      .big { font-size: 1.45em; font-weight: 800; } .big small { font-size: .6em; font-weight: 600; }
+      .small { font-size: .9em; }
+      .row { display: flex; justify-content: space-between; gap: 6px; }
+      hr { border: 0; border-top: 1px dashed #000; margin: 5px 0; }
+      table.items { width: 100%; border-collapse: collapse; }
+      table.items td { padding: 1px 0; vertical-align: top; }
+      table.items td + td { padding-left: 6px; }
+      .th td { font-weight: 700; border-bottom: 1px solid #000; }
+      .total td { font-size: 1.2em; font-weight: 800; border-top: 1px solid #000; padding-top: 3px; }
+      .kot table.items td { font-size: 1.25em; font-weight: 700; padding: 2px 0; }
+      .kot td.q { width: 2.2em; }
+      .note { font-weight: 700; font-style: italic; font-size: .85em; }
+      .kot .note { font-size: .8em; }
+    </style></head><body>${slips.join('')}</body></html>`;
+  }
+
+  /**
+   * Print slips for orders. what: 'kot' | 'bill' | 'both'.
+   * opts: { paper: 80 | 58, kotCopies: 1 | 2 }
+   */
+  async function printNow(orders, what = 'both', opts = {}) {
+    if (!orders.length) return;
+    await loadGst();
+    const copies = Math.max(1, Math.min(3, Number(opts.kotCopies) || 1));
+    const slips = [];
+    for (const o of orders) {
+      if (what !== 'bill') for (let n = 1; n <= copies; n++) slips.push(kot(o, copies > 1 ? `copy ${n}` : ''));
+      if (what !== 'kot') slips.push(bill(o));
+    }
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    frame.srcdoc = page(slips, Number(opts.paper) === 58 ? 58 : 80);
+    await new Promise((resolve) => {
+      frame.onload = () => {
+        try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) { console.error(e); }
+        // print() returns once the dialog closes (or at once when printing silently).
+        setTimeout(() => { frame.remove(); resolve(); }, 1000);
+      };
+      document.body.appendChild(frame);
+    });
+  }
+
+  // One print job at a time: a second one waits for the first dialog to close.
+  let queue = Promise.resolve();
+  const print = (...args) => (queue = queue.then(() => printNow(...args)).catch((e) => console.error(e)));
+
+  window.RCPrint = { print, kot, bill, page };
+})();
+</script>
+  <script>'use strict';
+
 // Staff panels. One script, two panels:
 //  - head office (/admin/, data-panel="admin"): every outlet, plus Customers,
 //    Menu, Stock, Outlets and Analytics (insights.js, control.js).
@@ -613,6 +752,102 @@ function payActions(o) {
   return '';
 }
 
+// ---- Printing: KOT and bill (print.js) ----------------------------------------
+// Settings belong to this device (the printer is attached to it).
+const printing = {
+  settings: () => ({ auto: false, what: 'both', paper: 80, kotCopies: 1, ...store.get('print', {}) }),
+  save(s) { store.set('print', s); },
+  // Orders already printed on this device, so auto print never repeats one.
+  printed: new Set(store.get('printed', [])),
+  mark(codes) {
+    codes.forEach((c) => this.printed.add(c));
+    store.set('printed', [...this.printed].slice(-300));
+  },
+};
+const ordersByCode = new Map();
+const NO_KOT = ['awaiting_payment', 'unpaid', 'cancelled'];
+
+function printButtons(o) {
+  ordersByCode.set(o.code, o);
+  return `<div class="actions print-actions">
+    ${NO_KOT.includes(o.status) ? '' : `<button type="button" data-print="${o.code}" data-what="kot">🖨 KOT</button>`}
+    <button type="button" data-print="${o.code}" data-what="bill">🧾 Bill</button>
+  </div>`;
+}
+
+function printOrders(orders, what) {
+  // A KOT printed by hand counts: auto print won't send that order to the kitchen again.
+  if (what !== 'bill') printing.mark(orders.map((o) => o.code));
+  return window.RCPrint.print(orders, what, printing.settings());
+}
+
+// New orders sent to the kitchen print by themselves when Auto print is on.
+// A pay-first order prints once it is paid (it turns "placed" then).
+function autoPrint(orders) {
+  const s = printing.settings();
+  if (!s.auto) return;
+  // Re-read: another tab on this device may have printed them already.
+  printing.printed = new Set(store.get('printed', []));
+  const fresh = orders.filter((o) => o.status === 'placed' && !printing.printed.has(o.code));
+  if (!fresh.length) return;
+  printing.mark(fresh.map((o) => o.code));
+  window.RCPrint.print(fresh, s.what, s);
+}
+
+function setupPrinting() {
+  if ($('autoPrint')) return;
+  const s = printing.settings();
+  $('sound').parentElement.insertAdjacentHTML('afterend', `
+    <label class="vegtoggle" style="margin:0"><input type="checkbox" id="autoPrint" style="width:auto"${s.auto ? ' checked' : ''}> Auto print</label>
+    <button type="button" class="linkbtn" id="printerBtn">🖨 Printer settings</button>`);
+  document.body.insertAdjacentHTML('beforeend', `
+    <dialog id="printerDlg" class="printer-dlg" aria-labelledby="printerTitle">
+      <form method="dialog">
+        <h3 id="printerTitle">Printer settings</h3>
+        <p class="small muted">For this device only (the printer connected to it).</p>
+        <label class="vegtoggle"><input type="checkbox" name="auto" style="width:auto"> Auto print new orders</label>
+        <label>Auto print<select name="what">
+          <option value="both">KOT and bill</option><option value="kot">KOT only</option><option value="bill">Bill only</option></select></label>
+        <label>Paper width<select name="paper"><option value="80">80 mm</option><option value="58">58 mm</option></select></label>
+        <label>KOT copies<select name="kotCopies"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+        <p class="small muted">To print without the print window every time, run Chrome with <code>--kiosk-printing</code> and set the receipt printer as the default printer (see DEPLOY.md).</p>
+        <div class="row"><button type="button" class="btn secondary" id="testPrint" style="width:auto">Test print</button><button class="btn" style="width:auto">Done</button></div>
+      </form>
+    </dialog>`);
+  const dlg = $('printerDlg');
+  const form = dlg.querySelector('form');
+  const read = () => ({ auto: form.auto.checked, what: form.what.value, paper: Number(form.paper.value), kotCopies: Number(form.kotCopies.value) });
+  const turnOn = async (on) => {
+    printing.save({ ...printing.settings(), auto: on });
+    $('autoPrint').checked = on;
+    form.auto.checked = on;
+    // Print the new orders already waiting (not every old one).
+    if (on) autoPrint(await api('/orders' + (state.outletId ? `?outletId=${state.outletId}` : '')).catch(() => []));
+  };
+  $('autoPrint').addEventListener('change', (e) => turnOn(e.target.checked));
+  $('printerBtn').addEventListener('click', () => {
+    const cur = printing.settings();
+    form.auto.checked = cur.auto; form.what.value = cur.what; form.paper.value = String(cur.paper); form.kotCopies.value = String(cur.kotCopies);
+    dlg.showModal();
+  });
+  form.addEventListener('change', (e) => {
+    const next = read();
+    printing.save(next);
+    if (e.target.name === 'auto') turnOn(next.auto);
+  });
+  $('testPrint').addEventListener('click', () => {
+    const now = new Date().toISOString();
+    const outlet = state.outlets.find((x) => String(x.id) === String(state.outletId)) || state.outlets[0] || {};
+    const sample = {
+      code: 'TEST', fulfilment: 'delivery', channel: 'web', created_at: now, customer_name: 'Test print', phone: '9876543210',
+      address: 'Printer check', notes: 'Test slip, do not cook', outlet,
+      items: [{ qty: 2, name: 'Sample dish (Half)', price: 15000, note: 'less spicy' }, { qty: 1, name: 'Another dish', price: 9900 }],
+      subtotal: 39900, packing: 1000, gst: 2045, delivery_fee: 3000, total: 45945, paymentLabel: 'Cash on delivery',
+    };
+    window.RCPrint.print([sample], read().what, read());
+  });
+}
+
 function orderCard(o) {
   const waiting = o.status === 'awaiting_payment';
   const hold = waiting ? `<div class="hold">${o.payment_status === 'claimed'
@@ -630,6 +865,7 @@ function orderCard(o) {
     <div style="margin:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${rupees(o.total)}</b>${o.fulfilment === 'delivery' ? ` <span class="small muted">incl. delivery ${rupees(o.delivery_fee)}</span>` : ''} <span class="chip pay-${o.payment_status}">${esc(o.paymentLabel)}</span></div>
     ${payActions(o)}
     ${deliveryBlock(o)}
+    ${printButtons(o)}
     <div class="actions">${o.nextStatuses.map((s) => `<button type="button" class="${s === 'cancelled' ? 'cancel' : ''}" data-code="${o.code}" data-status="${s}">${NEXT_LABEL[s]}</button>`).join('')}</div>
   </div>`;
 }
@@ -647,6 +883,7 @@ async function renderOrders() {
     if (fresh.length && !state.firstLoad) beep();
     orders.forEach((o) => state.seen.add(key(o)));
     state.firstLoad = false;
+    autoPrint(orders);
   }
   const waiting = state.view === 'live' ? orders.filter((o) => o.status === 'awaiting_payment') : [];
   const rest = orders.filter((o) => !waiting.includes(o));
@@ -718,8 +955,13 @@ async function refresh() {
   try {
     const chats = await loadChats();
     const insights = PANEL === 'admin' && window.RCInsights?.[state.view];
+    const live = !insights && !['chats', 'stock', 'history'].includes(state.view);
     const view = insights ? insights() : state.view === 'chats' ? renderChats(chats)
       : state.view === 'stock' ? renderOutletStock() : renderOrders();
+    // Away from Live orders, still check for new orders to auto print.
+    if (!live && printing.settings().auto) {
+      api('/orders' + (state.outletId ? `?outletId=${state.outletId}` : '')).then(autoPrint).catch(() => {});
+    }
     await Promise.all([view, renderStats()]);
   } catch (e) {
     if (e.message !== 'unauthorized') console.error(e);
@@ -750,6 +992,11 @@ document.addEventListener('click', async (e) => {
   if (c) {
     try { await api(`/chats/${c.dataset.closeChat}/close`, { method: 'POST' }); } catch (err) { alert(err.message); }
     refresh();
+  }
+  const pr = e.target.closest('[data-print]');
+  if (pr) {
+    const o = ordersByCode.get(pr.dataset.print);
+    if (o) printOrders([o], pr.dataset.what);
   }
   const v = e.target.closest('[data-view]');
   if (v) setView(v.dataset.view);
@@ -824,10 +1071,17 @@ async function start() {
     $('outlet').value = state.outletId;
   }
   syncAccepting();
+  setupPrinting();
   refresh();
   clearInterval(poll);
   // Live views refresh themselves; back-office views refresh when you act.
-  poll = setInterval(() => { if (['live', 'chats', 'history'].includes(state.view) || (PANEL === 'outlet' && state.view === 'stock')) refresh(); else loadChats().catch(() => {}); }, 5000);
+  poll = setInterval(() => {
+    if (['live', 'chats', 'history'].includes(state.view) || (PANEL === 'outlet' && state.view === 'stock')) refresh();
+    else {
+      loadChats().catch(() => {});
+      if (printing.settings().auto) api('/orders' + (state.outletId ? `?outletId=${state.outletId}` : '')).then(autoPrint).catch(() => {});
+    }
+  }, 5000);
 }
 
 start();
